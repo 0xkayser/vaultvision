@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vault Vision — Perp DEX Aggregator</title>
+<meta name="description" content="Compare on-chain vaults across perp DEX protocols. Track TVL, APR, and performance for Hyperliquid, Drift, Lighter, and Nado vaults.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Vault Vision — Perp DEX Aggregator">
+<meta name="twitter:description" content="Compare on-chain vaults across perp DEX protocols. Track TVL, APR, and performance for Hyperliquid, Drift, Lighter, and Nado vaults.">
+<meta property="og:title" content="Vault Vision — Perp DEX Aggregator">
+<meta property="og:description" content="Compare on-chain vaults across perp DEX protocols. Track TVL, APR, and performance for Hyperliquid, Drift, Lighter, and Nado vaults.">
+<meta property="og:type" content="website">
 <style>
 :root{--sky-50:#f0f9ff;--sky-100:#e0f2fe;--sky-200:#bae6fd;--sky-300:#7dd3fc;--sky-400:#38bdf8;--sky-500:#0ea5e9;--sky-600:#0284c7;--slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-800:#1e293b;--emerald-400:#34d399;--emerald-500:#10b981;--rose-400:#fb7185;--rose-500:#f43f5e;--amber-400:#fbbf24;--bg-card:rgba(255,255,255,0.75);--border-light:rgba(148,163,184,0.25);--proto-hyperliquid:#0B6B3A;--proto-drift:#FFB020;--proto-lighter:#A78BFA;--proto-nado:#0B0B0B}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -40,6 +47,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text"
 .badge{font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;background:var(--sky-100);color:var(--sky-600);margin-left:8px}
 .badge.real{background:var(--emerald-500);color:#fff}
 .badge.est{background:var(--amber-400);color:var(--slate-800)}
+.badge.beta{background:linear-gradient(135deg,#f59e0b,#f97316);color:#fff;animation:pulse-beta 2s ease-in-out infinite;box-shadow:0 2px 8px rgba(245,158,11,0.3)}
+@keyframes pulse-beta{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.9;transform:scale(1.05)}}
 .pills{display:flex;gap:8px;flex-wrap:wrap}
 .pill{padding:8px 16px;background:#fff;border:1px solid var(--border-light);border-radius:999px;font-size:13px;font-weight:500;color:var(--slate-500);cursor:pointer}
 .pill:hover{border-color:var(--sky-300)}
@@ -269,7 +278,7 @@ tbody tr:last-child td{border-bottom:none}
 <body>
 <div class="bg"></div>
 <header class="header"><div class="header-inner">
-<div class="logo" onclick="nav('dashboard')"><div class="logo-icon">VV</div><div class="logo-text">Vault<span>Vision</span></div></div>
+<div class="logo" onclick="nav('dashboard')"><div class="logo-icon">VV</div><div class="logo-text">Vault<span>Vision</span><span class="badge beta">BETA</span></div></div>
 <div class="header-tagline">Compare on-chain vaults across perp protocols</div>
 <nav class="nav" id="mainNav"><button class="nav-btn active" data-p="dashboard">Dashboard</button><button class="nav-btn" data-p="analytics">Analytics</button><button class="nav-btn" data-p="compare">Compare</button></nav>
 </div></header>
