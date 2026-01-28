@@ -1,1 +1,1 @@
-web: python back.py
+web: playwright install chromium && python back.py

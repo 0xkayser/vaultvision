@@ -1,8 +1,12 @@
 [phases.setup]
-nixPkgs = ["chromium", "chromium-chromedriver"]
+nixPkgs = ["chromium"]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt", "playwright install chromium"]
 
+[start]
+cmd = "python back.py"
+
 [variables]
 PLAYWRIGHT_BROWSERS_PATH = "/app/.cache/ms-playwright"
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "0"
