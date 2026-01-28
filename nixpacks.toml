@@ -1,6 +1,31 @@
-# Nixpacks config for Railway with Playwright support
+# Nixpacks config for Railway with Playwright Chromium support
 [phases.setup]
-nixPkgs = ["chromium"]
+nixPkgs = [
+  "chromium",
+  "nssTools",
+  "xorg.libX11",
+  "xorg.libXcomposite", 
+  "xorg.libXdamage",
+  "xorg.libXext",
+  "xorg.libXfixes",
+  "xorg.libXrandr",
+  "xorg.libxcb",
+  "libxkbcommon",
+  "alsa-lib",
+  "at-spi2-atk",
+  "cairo",
+  "cups",
+  "dbus",
+  "expat",
+  "glib",
+  "gtk3",
+  "libdrm",
+  "mesa",
+  "nspr",
+  "nss",
+  "pango"
+]
 
 [variables]
 PLAYWRIGHT_BROWSERS_PATH = "/app/.playwright"
+DISPLAY = ":99"

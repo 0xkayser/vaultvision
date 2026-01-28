@@ -1,1 +1,1 @@
-web: playwright install chromium 2>/dev/null || true; python back.py
+web: echo "Installing Chromium..." && playwright install chromium && echo "Chromium installed!" && python back.py
