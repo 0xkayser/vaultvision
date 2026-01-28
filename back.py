@@ -1521,33 +1521,40 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                 filter_reasons["banned"] += 1
                 continue
             
-            # Get APY - prefer temporaryApy (Target APY) from config if available
-            # This is more reliable for new vaults where historical APY can be extreme
-            temporary_apy = cfg.get("temporary_apy")
+            # Get APY - use REAL historical APY first, temporaryApy only as fallback
+            # temporaryApy is just a target and often the same for many vaults (50%, 30%, etc.)
+            apy_info = apy_data.get(pubkey, {})
+            apys = apy_info.get("apys", {})
             
-            if temporary_apy and temporary_apy > 0:
-                # Use Target APY from config (most reliable)
-                apy_value = float(temporary_apy)
-            else:
-                # Fallback: use historical APY from API
-                apy_info = apy_data.get(pubkey, {})
-                apys = apy_info.get("apys", {})
-                
-                # First pass: find longest period with reasonable value (<=200%)
-                apy_value = 0
-                for period in ["365d", "180d", "90d", "30d", "7d"]:
+            # First pass: find longest period with reasonable value (<=200%)
+            apy_value = 0
+            for period in ["365d", "180d", "90d", "30d", "7d"]:
+                val = apys.get(period, 0)
+                if val > 0 and val <= 200:
+                    apy_value = val
+                    break
+            
+            # If no reasonable period found, try shortest period (may be extreme)
+            if apy_value == 0:
+                for period in ["7d", "30d", "90d", "180d", "365d"]:
                     val = apys.get(period, 0)
-                    if val > 0 and val <= 200:
-                        apy_value = val
+                    if val > 0:
+                        # If extreme (>200%), use temporaryApy if available, else cap
+                        if val > 200:
+                            temporary_apy = cfg.get("temporary_apy")
+                            if temporary_apy and temporary_apy > 0:
+                                apy_value = float(temporary_apy)
+                            else:
+                                apy_value = 200  # Cap extreme values
+                        else:
+                            apy_value = val
                         break
-                
-                # If no reasonable period found, use shortest available period capped at 200%
-                if apy_value == 0:
-                    for period in ["7d", "30d", "90d", "180d", "365d"]:
-                        val = apys.get(period, 0)
-                        if val > 0:
-                            apy_value = min(val, 200)  # Cap extreme values
-                            break
+            
+            # Last resort: use temporaryApy if no historical data
+            if apy_value == 0:
+                temporary_apy = cfg.get("temporary_apy")
+                if temporary_apy and temporary_apy > 0:
+                    apy_value = float(temporary_apy)
             
             count_before += 1
             
