@@ -1437,6 +1437,7 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                 "verified": cfg.get("vaultManager", {}).get("isVerified", False),
                 "is_usdc": is_usdc,
                 "is_hidden": is_hidden,
+                "temporary_apy": cfg.get("temporaryApy"),  # Target APY from config (more reliable for new vaults)
             }
             
             if is_usdc and not is_hidden:
@@ -1520,26 +1521,33 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                 filter_reasons["banned"] += 1
                 continue
             
-            # Get APY - use most stable reasonable period
-            # For new vaults, longer periods can be extreme (>200%), so prefer reasonable values
-            apy_info = apy_data.get(pubkey, {})
-            apys = apy_info.get("apys", {})
+            # Get APY - prefer temporaryApy (Target APY) from config if available
+            # This is more reliable for new vaults where historical APY can be extreme
+            temporary_apy = cfg.get("temporary_apy")
             
-            # First pass: find longest period with reasonable value (<=200%)
-            apy_value = 0
-            for period in ["365d", "180d", "90d", "30d", "7d"]:
-                val = apys.get(period, 0)
-                if val > 0 and val <= 200:
-                    apy_value = val
-                    break
-            
-            # If no reasonable period found, use shortest available period capped at 200%
-            if apy_value == 0:
-                for period in ["7d", "30d", "90d", "180d", "365d"]:
+            if temporary_apy and temporary_apy > 0:
+                # Use Target APY from config (most reliable)
+                apy_value = float(temporary_apy)
+            else:
+                # Fallback: use historical APY from API
+                apy_info = apy_data.get(pubkey, {})
+                apys = apy_info.get("apys", {})
+                
+                # First pass: find longest period with reasonable value (<=200%)
+                apy_value = 0
+                for period in ["365d", "180d", "90d", "30d", "7d"]:
                     val = apys.get(period, 0)
-                    if val > 0:
-                        apy_value = min(val, 200)  # Cap extreme values
+                    if val > 0 and val <= 200:
+                        apy_value = val
                         break
+                
+                # If no reasonable period found, use shortest available period capped at 200%
+                if apy_value == 0:
+                    for period in ["7d", "30d", "90d", "180d", "365d"]:
+                        val = apys.get(period, 0)
+                        if val > 0:
+                            apy_value = min(val, 200)  # Cap extreme values
+                            break
             
             count_before += 1
             
