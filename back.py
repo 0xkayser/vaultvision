@@ -1522,39 +1522,47 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                 continue
             
             # Get APY - use REAL historical APY first, temporaryApy only as fallback
+            # Drift UI shows "APY (90 days)", so we use 90d as standard (not longest period)
             # temporaryApy is just a target and often the same for many vaults (50%, 30%, etc.)
             apy_info = apy_data.get(pubkey, {})
             apys = apy_info.get("apys", {})
             
-            # First pass: find longest period with reasonable value (<=200%)
+            # Use 90d APY as standard (matches Drift UI)
+            # If 90d is extreme (>200%), try shorter periods or use temporaryApy
             apy_value = 0
-            for period in ["365d", "180d", "90d", "30d", "7d"]:
-                val = apys.get(period, 0)
-                if val > 0 and val <= 200:
-                    apy_value = val
-                    break
+            apy_90d = apys.get("90d", 0)
             
-            # If no reasonable period found, try shortest period (may be extreme)
-            if apy_value == 0:
-                for period in ["7d", "30d", "90d", "180d", "365d"]:
-                    val = apys.get(period, 0)
-                    if val > 0:
-                        # If extreme (>200%), use temporaryApy if available, else cap
-                        if val > 200:
-                            temporary_apy = cfg.get("temporary_apy")
-                            if temporary_apy and temporary_apy > 0:
-                                apy_value = float(temporary_apy)
-                            else:
-                                apy_value = 200  # Cap extreme values
-                        else:
+            if apy_90d > 0:
+                if apy_90d <= 200:
+                    # Use 90d if reasonable
+                    apy_value = apy_90d
+                else:
+                    # 90d is extreme, try shorter periods
+                    for period in ["30d", "7d"]:
+                        val = apys.get(period, 0)
+                        if val > 0 and val <= 200:
                             apy_value = val
+                            break
+                    # If still extreme, use temporaryApy or cap
+                    if apy_value == 0:
+                        temporary_apy = cfg.get("temporary_apy")
+                        if temporary_apy and temporary_apy > 0:
+                            apy_value = float(temporary_apy)
+                        else:
+                            apy_value = 200  # Cap extreme values
+            else:
+                # No 90d data, try other periods
+                for period in ["30d", "7d", "180d", "365d"]:
+                    val = apys.get(period, 0)
+                    if val > 0 and val <= 200:
+                        apy_value = val
                         break
-            
-            # Last resort: use temporaryApy if no historical data
-            if apy_value == 0:
-                temporary_apy = cfg.get("temporary_apy")
-                if temporary_apy and temporary_apy > 0:
-                    apy_value = float(temporary_apy)
+                
+                # Last resort: use temporaryApy if no historical data
+                if apy_value == 0:
+                    temporary_apy = cfg.get("temporary_apy")
+                    if temporary_apy and temporary_apy > 0:
+                        apy_value = float(temporary_apy)
             
             count_before += 1
             
