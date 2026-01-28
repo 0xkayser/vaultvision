@@ -1,29 +1,6 @@
 # Nixpacks config for Railway with Playwright support
 [phases.setup]
-nixPkgs = [
-  "chromium",
-  "nss",
-  "freetype",
-  "harfbuzz",
-  "fontconfig",
-  "pango",
-  "cairo",
-  "glib",
-  "gtk3",
-  "dbus",
-  "atk",
-  "cups",
-  "libdrm",
-  "libxkbcommon",
-  "mesa"
-]
-
-[phases.install]
-cmds = [
-  "pip install -r requirements.txt",
-  "playwright install chromium"
-]
+nixPkgs = ["chromium"]
 
 [variables]
 PLAYWRIGHT_BROWSERS_PATH = "/app/.playwright"
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "0"
