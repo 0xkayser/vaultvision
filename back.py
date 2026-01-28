@@ -1394,6 +1394,7 @@ def _refresh_drift_tvl_cache_background() -> None:
         import os
         import re
         import shutil
+        import glob
         
         from playwright.sync_api import sync_playwright
         
@@ -1403,40 +1404,58 @@ def _refresh_drift_tvl_cache_background() -> None:
         print("[DRIFT-TVL] Background refresh starting...")
         start = time.time()
         
-        with sync_playwright() as p:
-            # Try to find a working browser
-            browser = None
+        # Find browser executable
+        def find_chromium():
+            candidates = [
+                shutil.which('chromium'),
+                shutil.which('chromium-browser'),
+                shutil.which('google-chrome'),
+                '/usr/bin/chromium',
+                '/usr/bin/chromium-browser',
+            ]
+            # Check nix store
+            nix_paths = glob.glob('/nix/store/*/bin/chromium')
+            candidates.extend(nix_paths)
             
-            # Option 1: Try Playwright's bundled browser
-            try:
-                browser = p.chromium.launch(headless=True)
-                print("[DRIFT-TVL] Using Playwright bundled Chromium")
-            except Exception as e1:
-                print(f"[DRIFT-TVL] Bundled browser failed: {e1}")
-                
-                # Option 2: Try system Chromium
-                system_chromium = shutil.which('chromium') or shutil.which('chromium-browser') or '/usr/bin/chromium'
-                if os.path.exists(system_chromium):
-                    try:
-                        browser = p.chromium.launch(headless=True, executable_path=system_chromium)
-                        print(f"[DRIFT-TVL] Using system Chromium: {system_chromium}")
-                    except Exception as e2:
-                        print(f"[DRIFT-TVL] System Chromium failed: {e2}")
-                
-                # Option 3: Try chromium from nix store
-                if browser is None:
-                    nix_chromium = "/nix/store/*/bin/chromium"
-                    import glob
-                    nix_paths = glob.glob(nix_chromium)
-                    if nix_paths:
-                        try:
-                            browser = p.chromium.launch(headless=True, executable_path=nix_paths[0])
-                            print(f"[DRIFT-TVL] Using Nix Chromium: {nix_paths[0]}")
-                        except Exception as e3:
-                            print(f"[DRIFT-TVL] Nix Chromium failed: {e3}")
+            for path in candidates:
+                if path and os.path.exists(path):
+                    return path
+            return None
+        
+        chromium_path = find_chromium()
+        print(f"[DRIFT-TVL] Found system chromium: {chromium_path}")
+        
+        with sync_playwright() as p:
+            browser = None
+            last_error = None
+            
+            # Option 1: Try system Chromium first (most reliable on Railway)
+            if chromium_path:
+                try:
+                    browser = p.chromium.launch(
+                        headless=True,
+                        executable_path=chromium_path,
+                        args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                    )
+                    print(f"[DRIFT-TVL] Using system Chromium: {chromium_path}")
+                except Exception as e:
+                    last_error = e
+                    print(f"[DRIFT-TVL] System Chromium failed: {e}")
+            
+            # Option 2: Try Playwright's bundled browser
+            if browser is None:
+                try:
+                    browser = p.chromium.launch(
+                        headless=True,
+                        args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                    )
+                    print("[DRIFT-TVL] Using Playwright bundled Chromium")
+                except Exception as e:
+                    last_error = e
+                    print(f"[DRIFT-TVL] Bundled browser failed: {e}")
             
             if browser is None:
-                raise RuntimeError("No working Chromium browser found")
+                raise RuntimeError(f"No working Chromium browser found. Last error: {last_error}")
             page = browser.new_page()
             page.goto(page_url, wait_until='networkidle', timeout=60000)
             time.sleep(5)
