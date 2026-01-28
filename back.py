@@ -1391,14 +1391,14 @@ def _get_drift_tvl_cached() -> Dict[str, float]:
 
 
 def discover_drift_usdc_strategy_vaults() -> List[dict]:
-    """Discover Drift strategy vaults (USDC deposit only, APR>0).
+    """Discover Drift strategy vaults (USDC deposit only, APR>0, TVL>$500K).
     
-    Discovery method: API-based
+    Discovery method: API-based (NO Playwright needed!)
     1. GET configs from https://app.drift.trade/api/vaults/configs
-    2. GET APY data from https://app.drift.trade/api/vaults
-    3. TVL estimated based on APR tier (no Playwright needed)
+    2. GET APY data from https://app.drift.trade/api/vaults  
+    3. GET TVL from https://data.api.drift.trade/stats/vaults (REAL TVL!)
     
-    Performance: API calls take ~1-2s.
+    Performance: API calls take ~2-3s total.
     """
     global PROTOCOL_STATUS
     import time as _time
@@ -1407,6 +1407,7 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
     
     configs_url = "https://app.drift.trade/api/vaults/configs"
     apy_url = "https://app.drift.trade/api/vaults"
+    tvl_url = "https://data.api.drift.trade/stats/vaults"
     
     try:
         # Step 1: Fetch vault configs (fast, ~500ms)
@@ -1451,24 +1452,36 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
         
         print(f"[DRIFT] Fetched APY data for {len(apy_data)} vaults")
         
-        # Step 3: Get TVL from cache
-        cache_age = time.time() - _DRIFT_TVL_CACHE_TS
-        tvl_by_name = _get_drift_tvl_cached()
+        # Step 3: Fetch REAL TVL from Drift Data API
+        urls_tried.append(tvl_url)
+        tvl_by_pubkey = {}
+        try:
+            req = urllib.request.Request(tvl_url, headers={"Accept": "application/json", "User-Agent": "VaultVision/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                tvl_response = json.loads(resp.read().decode())
+            
+            # Parse TVL data - netDeposits is the TVL
+            if tvl_response.get("success") and "vaults" in tvl_response:
+                for v in tvl_response["vaults"]:
+                    pubkey = v.get("pubkey", "")
+                    # spotMarketIndex 0 = USDC
+                    if v.get("spotMarketIndex") == 0:
+                        net_deposits = v.get("netDeposits", "0")
+                        try:
+                            tvl = float(net_deposits)
+                            if tvl > 0:
+                                tvl_by_pubkey[pubkey] = tvl
+                        except (ValueError, TypeError):
+                            pass
+            
+            print(f"[DRIFT] Fetched REAL TVL for {len(tvl_by_pubkey)} USDC vaults from Data API")
+            tvl_method = "drift_data_api"
+        except Exception as e:
+            print(f"[DRIFT] TVL API error: {e}, falling back to DB cache")
+            tvl_method = "db_cache"
         
-        # Trigger background refresh if cache is missing or stale (NON-BLOCKING)
-        if not tvl_by_name or cache_age > _DRIFT_TVL_CACHE_TTL:
-            if not _DRIFT_TVL_IS_REFRESHING:
-                print("[DRIFT] TVL cache missing/stale, triggering background refresh...")
-                thread = threading.Thread(target=_refresh_drift_tvl_cache_background, daemon=True)
-                thread.start()
-        
-        tvl_method = "cached" if tvl_by_name else "estimated"
-        
-        print(f"[DRIFT] TVL cache: {len(tvl_by_name)} values, age={int(cache_age)}s")
-        
-        # Step 4: Merge and filter (STRICT: exclude vaults without TVL or TVL < $500K)
+        # Step 4: Merge and filter (STRICT: TVL >= $500K, APR > 0)
         count_before = 0
-        count_after = 0
         vaults = []
         
         # Load previous TVL from DB as fallback
@@ -1507,32 +1520,22 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                 filter_reasons["low_apr"] += 1
                 continue
             
-            # Get TVL: from cache (by name), or previous DB value (by pk)
-            tvl = tvl_by_name.get(name, 0)
+            # Get TVL: from Drift Data API (by pubkey), or fallback to DB cache
+            tvl = tvl_by_pubkey.get(pubkey, 0)
             if tvl == 0:
-                # Try to get from previous DB value
-                old_pk = f"drift_{pubkey[:16]}"  # Legacy pk format
-                tvl = prev_tvl_by_pk.get(pk) or prev_tvl_by_pk.get(old_pk, 0)
+                # Fallback to previous DB value
+                tvl = prev_tvl_by_pk.get(pk, 0)
             
             # Normalize TVL to float
             if tvl and tvl > 0:
                 tvl = float(tvl)
-                tvl_source = "cached"
             else:
-                # No TVL from cache - estimate based on APR tier
-                # Higher APR vaults tend to have lower TVL (more risky)
-                if apy_90d >= 50:
-                    tvl = 800000  # High APR = smaller vault
-                elif apy_90d >= 20:
-                    tvl = 1500000
-                elif apy_90d >= 10:
-                    tvl = 3000000
-                else:
-                    tvl = 5000000
-                tvl_source = "estimated"
+                # No TVL available - skip this vault
+                filter_reasons["no_tvl"] += 1
+                continue
             
-            # Only filter if TVL is known and < $500K
-            if tvl_source == "cached" and tvl < 500000:
+            # STRICT: TVL must be >= $500K
+            if tvl < 500000:
                 _BANNED_VAULTS[ban_key] = {"reason": "low_tvl", "ts": int(time.time())}
                 filter_reasons["low_tvl"] += 1
                 continue
@@ -1558,11 +1561,11 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                 "apr": apy_90d / 100,
                 "first_seen_ts": deterministic_first_seen,  # Stable age based on pubkey hash
                 "source_kind": "api",
-                "data_quality": "full" if tvl_source == "cached" else "partial",
+                "data_quality": "full",  # Real TVL from Drift Data API
                 "verified": True,  # Real API data
                 "deposit_asset": "USDC",
-                "discovery_source": "drift_api",
-                "tvl_source": tvl_source,
+                "discovery_source": "drift_data_api",
+                "tvl_source": tvl_method,
             }
             
             vaults.append(vault)
@@ -1574,10 +1577,10 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
         
         PROTOCOL_STATUS["drift"] = {
             "ok": len(vaults) > 0,
-            "msg": f"Found {len(vaults)} vaults (APR>0)" if vaults else "No vaults matched filters",
-            "discovery_method": "api_with_estimated_tvl",
-            "tvl_method": tvl_method if tvl_by_name else "estimated",
-            "tvl_cache_size": len(tvl_by_name),
+            "msg": f"Found {len(vaults)} vaults (APR>0, TVL>=$500K)" if vaults else "No vaults matched filters",
+            "discovery_method": "drift_data_api",
+            "tvl_method": tvl_method,
+            "tvl_source_count": len(tvl_by_pubkey),
             "last_urls_tried": urls_tried,
             "count_before_filter": count_before,
             "count_after_filter": len(vaults),
@@ -1585,7 +1588,7 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
             "elapsed_ms": elapsed_ms,
         }
         
-        print(f"[DRIFT] Discovered {len(vaults)} vaults (APR>0) in {elapsed_ms}ms")
+        print(f"[DRIFT] Discovered {len(vaults)} vaults (APR>0, TVL>=$500K) in {elapsed_ms}ms")
         return vaults
         
     except urllib.error.HTTPError as e:
