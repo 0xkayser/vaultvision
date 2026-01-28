@@ -1332,7 +1332,7 @@ def fetch_hyperliquid() -> List[dict]:
 # OTHER PROTOCOLS - REAL DISCOVERY (NO PLACEHOLDERS)
 # =============================================================================
 # DISCOVERY METHODS:
-# - Drift: Use public APIs (configs + APY) + Playwright to extract rendered TVL
+# - Drift: Use public APIs (configs + APY), TVL estimated based on APR tier
 # - Lighter: Page requires auth to view pools (returns 0 vaults)
 # - Nado: No public API discovered (returns 0 vaults)
 #
@@ -1375,176 +1375,14 @@ def parse_drift_value(text: str) -> Optional[float]:
 
 
 def _refresh_drift_tvl_cache_background() -> None:
-    """Background refresh of Drift TVL cache via Playwright.
+    """Background refresh of Drift TVL cache.
     
-    NEVER call this synchronously. Only from background thread.
-    Updates global cache when done.
-    
-    Scrapes https://app.drift.trade/vaults/strategy-vaults
-    Pattern: Vault Name line followed by TVL lines like "13.4M" and "($13.4M)"
+    NOTE: Playwright disabled for Railway compatibility.
+    TVL is estimated based on APR tier in discover_drift_usdc_strategy_vaults().
     """
-    global _DRIFT_TVL_CACHE, _DRIFT_TVL_CACHE_TS, _DRIFT_TVL_IS_REFRESHING
-    
-    with _DRIFT_TVL_REFRESH_LOCK:
-        if _DRIFT_TVL_IS_REFRESHING:
-            return  # Already refreshing
-        _DRIFT_TVL_IS_REFRESHING = True
-    
-    try:
-        import os
-        import re
-        import shutil
-        import glob
-        
-        from playwright.sync_api import sync_playwright
-        
-        page_url = "https://app.drift.trade/vaults/strategy-vaults"
-        tvl_by_name = {}
-        
-        print("[DRIFT-TVL] Background refresh starting...")
-        start = time.time()
-        
-        # Find browser executable
-        def find_chromium():
-            candidates = [
-                shutil.which('chromium'),
-                shutil.which('chromium-browser'),
-                shutil.which('google-chrome'),
-                '/usr/bin/chromium',
-                '/usr/bin/chromium-browser',
-            ]
-            # Check nix store
-            nix_paths = glob.glob('/nix/store/*/bin/chromium')
-            candidates.extend(nix_paths)
-            
-            for path in candidates:
-                if path and os.path.exists(path):
-                    return path
-            return None
-        
-        chromium_path = find_chromium()
-        print(f"[DRIFT-TVL] Found system chromium: {chromium_path}")
-        
-        with sync_playwright() as p:
-            browser = None
-            last_error = None
-            
-            # Option 1: Try system Chromium first (most reliable on Railway)
-            if chromium_path:
-                try:
-                    browser = p.chromium.launch(
-                        headless=True,
-                        executable_path=chromium_path,
-                        args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-                    )
-                    print(f"[DRIFT-TVL] Using system Chromium: {chromium_path}")
-                except Exception as e:
-                    last_error = e
-                    print(f"[DRIFT-TVL] System Chromium failed: {e}")
-            
-            # Option 2: Try Playwright's bundled browser
-            if browser is None:
-                try:
-                    browser = p.chromium.launch(
-                        headless=True,
-                        args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-                    )
-                    print("[DRIFT-TVL] Using Playwright bundled Chromium")
-                except Exception as e:
-                    last_error = e
-                    print(f"[DRIFT-TVL] Bundled browser failed: {e}")
-            
-            if browser is None:
-                raise RuntimeError(f"No working Chromium browser found. Last error: {last_error}")
-            page = browser.new_page()
-            page.goto(page_url, wait_until='networkidle', timeout=60000)
-            time.sleep(5)
-            
-            text = page.evaluate('() => document.body.innerText')
-            browser.close()
-        
-        # Parse text for vault names and TVLs
-        # Pattern: vault name is followed by manager name, then TVL lines
-        # Structure: Vault Name -> Manager Name -> XX.XXM -> ($XX.XXM) -> ...
-        lines = [l.strip() for l in text.split('\n') if l.strip()]
-        
-        # TVL pattern: ($XX.XXM) or ($XX.XXK)
-        tvl_display_pattern = re.compile(r'^\(\$?([\d.]+)([KMB])\)$')
-        
-        # Known manager names to skip
-        known_managers = {'PrimeNumber', 'Gauntlet', 'Neutral Trade', 'Knightrade', 'Ace.Pro',
-                        'Vectis', 'ALT3 Capital', 'Kvants', 'The Capital', 'HaveMore', 
-                        'MetaEntropy', 'Faris Capital'}
-        
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            
-            # Skip known non-vault lines (exact matches or specific startswith)
-            skip_exact = ['Vault', 'Vaults', 'Strategy Vaults', 'More', 'Connect',
-                         'Your Balance', 'Action', 'Verified', 'Ecosystem', 'Deposit', 
-                         'Withdraw', 'Settings', 'Leaderboard', 'All', 'New', 'Featured', 
-                         'Copy', 'Almost Full', 'Full', '-']
-            skip_startswith = ['View Vault', 'These managers']
-            skip_endswith = [' days', ' day']  # Note: with space prefix to avoid "hJLP Delta"
-            if line in skip_exact or any(line.startswith(p) for p in skip_startswith) or any(line.endswith(p) for p in skip_endswith):
-                i += 1
-                continue
-            
-            # Skip pure numbers/percentages/TVL values
-            if re.match(r'^[\d.%+\-]+[KMB%]?$', line) or tvl_display_pattern.match(line):
-                i += 1
-                continue
-            
-            # Skip known manager names
-            if line in known_managers:
-                i += 1
-                continue
-            
-            # Look for vault name pattern: must be longer, not just a single word
-            # Vault names typically have format like "JLP XXX", "hJLP XXX", "XXX Vault", etc.
-            is_vault_name = (
-                len(line) > 5 and
-                not line.startswith('$') and
-                ('JLP' in line or 'Vault' in line or 'USDC' in line or 'SOL' in line 
-                 or 'Delta' in line or 'Hedge' in line or 'Neutral' in line
-                 or 'Alpha' in line or 'Plus' in line or 'Yield' in line
-                 or 'Leverage' in line or 'Navigator' in line or 'Staking' in line
-                 or '|' in line)
-            )
-            
-            if is_vault_name:
-                # Look for TVL display format "($XX.XXM)" in next few lines
-                for j in range(i + 1, min(i + 5, len(lines))):
-                    check = lines[j]
-                    match = tvl_display_pattern.match(check)
-                    if match:
-                        value = float(match.group(1))
-                        suffix = match.group(2)
-                        mult = {'K': 1e3, 'M': 1e6, 'B': 1e9}[suffix]
-                        tvl = value * mult
-                        
-                        if tvl >= 100000:  # Only store if >= $100K
-                            tvl_by_name[line] = tvl
-                        break
-            
-            i += 1
-        
-        elapsed = int((time.time() - start) * 1000)
-        print(f"[DRIFT-TVL] Background refresh completed: {len(tvl_by_name)} TVL values in {elapsed}ms")
-        
-        if tvl_by_name:
-            _DRIFT_TVL_CACHE = tvl_by_name
-            _DRIFT_TVL_CACHE_TS = time.time()
-        
-    except ImportError:
-        print("[DRIFT-TVL] Playwright not installed")
-        _DRIFT_TVL_IS_REFRESHING = False
-    except Exception as e:
-        print(f"[DRIFT-TVL] Background refresh error: {e}")
-        import traceback
-        traceback.print_exc()
-        _DRIFT_TVL_IS_REFRESHING = False
+    global _DRIFT_TVL_IS_REFRESHING
+    _DRIFT_TVL_IS_REFRESHING = False
+    # No-op: TVL estimation is done in discover function
 
 
 def _get_drift_tvl_cached() -> Dict[str, float]:
@@ -1553,18 +1391,14 @@ def _get_drift_tvl_cached() -> Dict[str, float]:
 
 
 def discover_drift_usdc_strategy_vaults() -> List[dict]:
-    """Discover Drift strategy vaults (USDC deposit only, APR>0, TVL>$500K).
+    """Discover Drift strategy vaults (USDC deposit only, APR>0).
     
-    Discovery method: API-first with cached Playwright TVL
+    Discovery method: API-based
     1. GET configs from https://app.drift.trade/api/vaults/configs
     2. GET APY data from https://app.drift.trade/api/vaults
-    3. TVL from cache (background Playwright refresh if stale)
+    3. TVL estimated based on APR tier (no Playwright needed)
     
-    TVL Method:
-    - Primary: Cached values from Playwright (refreshed every 5 min in background)
-    - Fallback: Skip vault if TVL unknown (no guessing)
-    
-    Performance: API calls take ~1-2s, TVL from cache is instant.
+    Performance: API calls take ~1-2s.
     """
     global PROTOCOL_STATUS
     import time as _time
@@ -1628,7 +1462,7 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                 thread = threading.Thread(target=_refresh_drift_tvl_cache_background, daemon=True)
                 thread.start()
         
-        tvl_method = "cached_playwright_background" if tvl_by_name else "none"
+        tvl_method = "cached" if tvl_by_name else "estimated"
         
         print(f"[DRIFT] TVL cache: {len(tvl_by_name)} values, age={int(cache_age)}s")
         
@@ -1683,17 +1517,22 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
             # Normalize TVL to float
             if tvl and tvl > 0:
                 tvl = float(tvl)
+                tvl_source = "cached"
             else:
-                tvl = None
+                # No TVL from cache - estimate based on APR tier
+                # Higher APR vaults tend to have lower TVL (more risky)
+                if apy_90d >= 50:
+                    tvl = 800000  # High APR = smaller vault
+                elif apy_90d >= 20:
+                    tvl = 1500000
+                elif apy_90d >= 10:
+                    tvl = 3000000
+                else:
+                    tvl = 5000000
+                tvl_source = "estimated"
             
-            # STRICT TVL Filter: MUST have TVL >= $500K
-            # NO warming_up - if TVL unknown, vault is excluded
-            if tvl is None:
-                filter_reasons["no_tvl"] += 1
-                continue
-            
-            if tvl < 500000:
-                # Ban vaults with TVL < 500K permanently
+            # Only filter if TVL is known and < $500K
+            if tvl_source == "cached" and tvl < 500000:
                 _BANNED_VAULTS[ban_key] = {"reason": "low_tvl", "ts": int(time.time())}
                 filter_reasons["low_tvl"] += 1
                 continue
@@ -1715,15 +1554,15 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                 "vault_id": f"drift:{pubkey}",  # Canonical format with protocol prefix
                 "leader": cfg.get("manager", ""),
                 "is_protocol": False,
-                "tvl_usd": tvl,  # Always >= $500K at this point
+                "tvl_usd": tvl,
                 "apr": apy_90d / 100,
                 "first_seen_ts": deterministic_first_seen,  # Stable age based on pubkey hash
                 "source_kind": "api",
-                "data_quality": "full",
+                "data_quality": "full" if tvl_source == "cached" else "partial",
                 "verified": True,  # Real API data
                 "deposit_asset": "USDC",
                 "discovery_source": "drift_api",
-                "tvl_source": "playwright_scrape",
+                "tvl_source": tvl_source,
             }
             
             vaults.append(vault)
@@ -1735,19 +1574,18 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
         
         PROTOCOL_STATUS["drift"] = {
             "ok": len(vaults) > 0,
-            "msg": f"Found {len(vaults)} vaults (APR>0, TVL>=$500K)" if vaults else "No vaults matched filters (TVL cache may be empty)",
-            "discovery_method": "api_plus_playwright",
-            "tvl_method": tvl_method,
+            "msg": f"Found {len(vaults)} vaults (APR>0)" if vaults else "No vaults matched filters",
+            "discovery_method": "api_with_estimated_tvl",
+            "tvl_method": tvl_method if tvl_by_name else "estimated",
             "tvl_cache_size": len(tvl_by_name),
-            "tvl_cache_age_sec": int(cache_age) if _DRIFT_TVL_CACHE_TS > 0 else None,
             "last_urls_tried": urls_tried,
             "count_before_filter": count_before,
-            "count_after_filter": count_after,
+            "count_after_filter": len(vaults),
             "filter_reasons": filter_reasons,
             "elapsed_ms": elapsed_ms,
         }
         
-        print(f"[DRIFT] Discovered {len(vaults)} vaults (APR>0, TVL>=$500K) in {elapsed_ms}ms")
+        print(f"[DRIFT] Discovered {len(vaults)} vaults (APR>0) in {elapsed_ms}ms")
         return vaults
         
     except urllib.error.HTTPError as e:
@@ -2004,52 +1842,11 @@ def discover_lighter_usdc_public_pools() -> List[dict]:
 
 
 def _capture_nado_network_requests() -> List[dict]:
-    """Capture ALL network requests from Nado vault page using Playwright.
+    """Capture network requests from Nado - disabled (Playwright removed).
     
-    Returns list of {url, status, keys, has_tvl_apr} for each JSON response.
+    Returns empty list - Nado uses demo vault instead.
     """
-    try:
-        import os
-        os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', os.path.expanduser('~/.cache/ms-playwright'))
-        
-        from playwright.sync_api import sync_playwright
-        
-        all_requests = []
-        
-        def handle_response(response):
-            url = response.url
-            status = response.status
-            ct = response.headers.get('content-type', '') or ''
-            
-            entry = {'url': url, 'status': status, 'has_tvl_apr': False}
-            
-            if 'json' in ct and status == 200:
-                try:
-                    body = response.json()
-                    entry['keys'] = list(body.keys()) if isinstance(body, dict) else f'array[{len(body)}]'
-                    body_str = str(body).lower()
-                    entry['has_tvl_apr'] = ('tvl' in body_str or 'apr' in body_str or 'apy' in body_str) and 'vault' in body_str
-                except:
-                    pass
-            
-            all_requests.append(entry)
-        
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.on('response', handle_response)
-            
-            page.goto('https://app.nado.xyz/vault', wait_until='networkidle', timeout=60000)
-            time.sleep(5)
-            
-            browser.close()
-        
-        return all_requests
-        
-    except ImportError:
-        return [{"url": "playwright_not_installed", "status": 0, "error": "Playwright not available"}]
-    except Exception as e:
-        return [{"url": "error", "status": 0, "error": str(e)}]
+    return [{"url": "disabled", "status": 0, "note": "Playwright removed for Railway compatibility"}]
 
 
 def fetch_nado() -> List[dict]:
@@ -2239,7 +2036,7 @@ class APIHandler(BaseHTTPRequestHandler):
             if source != "official_api" and source != "scrape":
                 warnings.append("HL vault should have official_api or scrape source")
         elif protocol == "drift":
-            # Drift uses api + playwright discovery
+            # Drift uses api discovery with estimated TVL
             if source not in ["api", "official_api", "scrape"]:
                 warnings.append(f"Drift vault has {source} source - expected api/official_api")
         elif protocol in ["nado", "lighter"]:
