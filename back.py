@@ -1460,19 +1460,30 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 tvl_response = json.loads(resp.read().decode())
             
-            # Parse TVL data - netDeposits is the TVL
+            # Parse TVL data - calculate REAL TVL using share ratio
+            # Real TVL = netDeposits * (totalShares / userShares)
+            # This accounts for unrealized PnL because shares grow with profits
+            # netDeposits = user deposits, but shares reflect current vault value
             if tvl_response.get("success") and "vaults" in tvl_response:
                 for v in tvl_response["vaults"]:
                     pubkey = v.get("pubkey", "")
                     # spotMarketIndex 0 = USDC
                     if v.get("spotMarketIndex") == 0:
-                        net_deposits = v.get("netDeposits", "0")
-                        try:
-                            tvl = float(net_deposits)
+                        net_deposits = float(v.get("netDeposits", "0") or 0)
+                        user_shares = float(v.get("userShares", "0") or 0)
+                        total_shares = float(v.get("totalShares", "0") or 0)
+                        
+                        if net_deposits > 0 and user_shares > 0 and total_shares > 0:
+                            # Calculate real TVL: netDeposits is user portion, shares reflect total value
+                            # Ratio tells us how much the vault has grown (includes PnL)
+                            share_ratio = total_shares / user_shares
+                            tvl = net_deposits * share_ratio
+                            
                             if tvl > 0:
                                 tvl_by_pubkey[pubkey] = tvl
-                        except (ValueError, TypeError):
-                            pass
+                        elif net_deposits > 0:
+                            # Fallback: use netDeposits if shares data missing
+                            tvl_by_pubkey[pubkey] = net_deposits
             
             print(f"[DRIFT] Fetched REAL TVL for {len(tvl_by_pubkey)} USDC vaults from Data API")
             tvl_method = "drift_data_api"
