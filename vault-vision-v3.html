@@ -9,9 +9,12 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,sans-serif;background:#fafcff;color:var(--slate-800);min-height:100vh}
 .bg{position:fixed;inset:0;z-index:-1;background:radial-gradient(ellipse 80% 50% at 20% -20%,var(--sky-100),transparent 50%),radial-gradient(ellipse 60% 40% at 80% 0%,var(--sky-200),transparent 40%),linear-gradient(180deg,#fafcff,#f0f7ff);overflow:hidden}
-.floating-apr{position:absolute;top:100%;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;font-weight:600;font-size:16px;color:var(--emerald-500);pointer-events:none;animation:floatUp linear forwards;white-space:nowrap;z-index:1}
-.floating-apr.negative{color:var(--rose-400)}
-@keyframes floatUp{0%{opacity:0;transform:translateY(0)}8%{opacity:.18}30%{opacity:.14}70%{opacity:.08}100%{opacity:0;transform:translateY(calc(-100vh - 100px))}}
+.floating-apr{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;font-weight:600;font-size:16px;color:var(--emerald-500);pointer-events:none;white-space:nowrap;z-index:1;text-shadow:0 2px 8px rgba(16,185,129,0.2);will-change:transform,opacity;transform-origin:center;display:inline-block}
+.floating-apr.negative{color:var(--rose-400);text-shadow:0 2px 8px rgba(244,63,94,0.2)}
+.floating-apr.high{color:#f59e0b;text-shadow:0 2px 8px rgba(245,158,11,0.2)}
+.floating-apr.medium{color:#8b5cf6;text-shadow:0 2px 8px rgba(139,92,246,0.2)}
+@keyframes floatUp{0%{opacity:0;transform:translateY(0) translateX(var(--drift-x,0px))}5%{opacity:.25}15%{opacity:.2}50%{opacity:.15}85%{opacity:.1}100%{opacity:0;transform:translateY(calc(-100vh - 150px)) translateX(var(--drift-x,0px))}}
+@keyframes floatWobblePulse{0%{transform:translateX(0) rotate(0deg) scale(1)}12.5%{transform:translateX(6px) rotate(0.8deg) scale(1.08)}25%{transform:translateX(8px) rotate(1deg) scale(1.12)}37.5%{transform:translateX(6px) rotate(0.8deg) scale(1.15)}50%{transform:translateX(0) rotate(0deg) scale(1.15)}62.5%{transform:translateX(-6px) rotate(-0.8deg) scale(1.12)}75%{transform:translateX(-8px) rotate(-1deg) scale(1.08)}87.5%{transform:translateX(-6px) rotate(-0.8deg) scale(1.05)}100%{transform:translateX(0) rotate(0deg) scale(1)}}
 @media(prefers-reduced-motion:reduce){.floating-apr{animation:none!important;display:none}}
 .header{position:sticky;top:0;z-index:100;padding:16px 32px;background:rgba(255,255,255,0.6);backdrop-filter:blur(20px);border-bottom:1px solid var(--border-light)}
 .header-inner{max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}
@@ -1127,45 +1130,67 @@ function initFloatingAprs() {
   if (!bg || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   
   function createFloatingApr() {
+    // Create wrapper for combining transforms
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'absolute';
+    wrapper.style.top = '100%';
+    wrapper.style.left = (Math.random() * 75 + 12.5) + '%';
+    wrapper.style.pointerEvents = 'none';
+    wrapper.style.willChange = 'transform, opacity';
+    
     const el = document.createElement('div');
     el.className = 'floating-apr';
     
-    // Random APR between -40% and +120%
-    const apr = (Math.random() * 160 - 40).toFixed(1);
-    const isNeg = parseFloat(apr) < 0;
+    // Random APR between -40% and +160% (more variety)
+    const apr = (Math.random() * 200 - 40).toFixed(1);
+    const aprNum = parseFloat(apr);
+    const isNeg = aprNum < 0;
+    
     el.textContent = (isNeg ? '' : '+') + apr + '% APR';
-    if (isNeg) el.classList.add('negative');
     
-    // Random horizontal position (avoid edges)
-    el.style.left = (Math.random() * 80 + 10) + '%';
+    // Color classes based on APR value
+    if (isNeg) {
+      el.classList.add('negative');
+    } else if (aprNum > 80) {
+      el.classList.add('high'); // High APR = amber
+    } else if (aprNum > 40) {
+      el.classList.add('medium'); // Medium APR = purple
+    }
+    // Default green for moderate APR
     
-    // Random animation duration (12-20s for smooth floating)
-    const duration = 12 + Math.random() * 8;
-    el.style.animationDuration = duration + 's';
+    // Random diagonal drift (left or right)
+    const driftAmount = (Math.random() * 100 - 50); // -50px to +50px
+    wrapper.style.setProperty('--drift-x', driftAmount + 'px');
     
-    // Random font size (14-20px)
-    el.style.fontSize = (14 + Math.random() * 6) + 'px';
+    // Random animation duration (10-25s for more variety)
+    const duration = 10 + Math.random() * 15;
+    wrapper.style.animation = `floatUp ${duration}s linear forwards`;
+    el.style.animation = `floatWobblePulse ${2 + Math.random() * 2}s ease-in-out infinite`;
     
-    // Slight random rotation
-    el.style.setProperty('--rot', (Math.random() * 6 - 3) + 'deg');
+    // Random font size (12-24px for more variety)
+    el.style.fontSize = (12 + Math.random() * 12) + 'px';
     
-    bg.appendChild(el);
+    // Random font weight (500-700)
+    el.style.fontWeight = 500 + Math.random() * 200;
+    
+    wrapper.appendChild(el);
+    bg.appendChild(wrapper);
     
     // Remove after animation
-    setTimeout(() => { if(el.parentNode) el.remove(); }, duration * 1000 + 100);
+    setTimeout(() => { if(wrapper.parentNode) wrapper.remove(); }, duration * 1000 + 100);
   }
   
-  // Create initial batch
-  for (let i = 0; i < 6; i++) {
-    setTimeout(createFloatingApr, i * 500);
+  // Create initial batch (more elements)
+  for (let i = 0; i < 10; i++) {
+    setTimeout(createFloatingApr, i * 300);
   }
   
-  // Continue creating
+  // Continue creating (more frequent, more elements)
   setInterval(() => {
-    if (document.visibilityState === 'visible' && bg.querySelectorAll('.floating-apr').length < 12) {
+    if (document.visibilityState === 'visible' && bg.querySelectorAll('.floating-apr').length < 20) {
       createFloatingApr();
     }
-  }, 1800);
+  }, 1200);
 }
 
 // Init: load data then navigate
