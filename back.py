@@ -1482,6 +1482,7 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
         
         # Step 4: Merge and filter (STRICT: TVL >= $500K, APR > 0)
         count_before = 0
+        count_after = 0
         vaults = []
         
         # Load previous TVL from DB as fallback
