@@ -1528,16 +1528,16 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
             apys = apy_info.get("apys", {})
             
             # Use 90d APY as standard (matches Drift UI)
-            # If 90d is extreme (>200%), try shorter periods or use temporaryApy
+            # Only show vaults with positive APR (filter negative)
             apy_value = 0
             apy_90d = apys.get("90d", 0)
             
-            if apy_90d > 0:
+            if apy_90d > 0:  # Only use if positive
                 if apy_90d <= 200:
                     # Use 90d if reasonable
                     apy_value = apy_90d
                 else:
-                    # 90d is extreme, try shorter periods
+                    # 90d is extreme (>200%), try shorter periods
                     for period in ["30d", "7d"]:
                         val = apys.get(period, 0)
                         if val > 0 and val <= 200:
@@ -1550,8 +1550,8 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                             apy_value = float(temporary_apy)
                         else:
                             apy_value = 200  # Cap extreme values
-            else:
-                # No 90d data, try other periods
+            elif apy_90d == 0:
+                # No 90d data, try other periods (only positive)
                 for period in ["30d", "7d", "180d", "365d"]:
                     val = apys.get(period, 0)
                     if val > 0 and val <= 200:
@@ -1563,10 +1563,11 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                     temporary_apy = cfg.get("temporary_apy")
                     if temporary_apy and temporary_apy > 0:
                         apy_value = float(temporary_apy)
+            # If apy_90d < 0, apy_value stays 0 and vault will be filtered out
             
             count_before += 1
             
-            # Filter: APR > 0
+            # Filter: APR must be positive
             if apy_value <= 0:
                 filter_reasons["low_apr"] += 1
                 continue
