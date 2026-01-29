@@ -959,14 +959,17 @@ def get_all_vaults() -> List[dict]:
         if pnl_90d is None:
             pnl_90d = compute_pnl_from_snapshots(row["pk"], 90)
         
-        # If still None, estimate from APR (approximate)
+        # If still None or 0 (snapshots insufficient), estimate from APR (approximate)
         apr = row["apr"]
-        if apr is not None and apr > 0:
-            if pnl_30d is None:
+        # APR is stored as decimal (0.15 = 15%), so check if > 0.001 (0.1%)
+        if apr is not None and apr > 0.001:
+            # Always use APR fallback if snapshots didn't provide a value
+            # This ensures vaults with insufficient snapshot history still show estimated returns
+            if pnl_30d is None or pnl_30d == 0:
                 # r30 ≈ (1 + apr)^(30/365) - 1
                 pnl_30d = (1 + apr) ** (30 / 365) - 1
                 vault["r30_estimated"] = True
-            if pnl_90d is None:
+            if pnl_90d is None or pnl_90d == 0:
                 # r90 ≈ (1 + apr)^(90/365) - 1
                 pnl_90d = (1 + apr) ** (90 / 365) - 1
                 vault["r90_estimated"] = True
