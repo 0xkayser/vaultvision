@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
+<meta name="theme-color" content="#0ea5e9">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Vault Vision">
 <title>Vault Vision — Perp DEX Aggregator</title>
 <meta name="description" content="Compare on-chain vaults across perp DEX protocols. Track TVL, APR, and performance for Hyperliquid, Drift, Lighter, and Nado vaults.">
 <meta name="twitter:card" content="summary_large_image">
@@ -44,7 +48,8 @@
   --slate-800:#f1f5f9;
 }
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,sans-serif;background:var(--bg-body);color:var(--text-primary);min-height:100vh;transition:background .3s,color .3s}
+button,a,.card,.pill,.nav-btn,.back-btn,.ext-link,.card-ext-link,.theme-toggle,.compare-item{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,sans-serif;background:var(--bg-body);color:var(--text-primary);min-height:100vh;transition:background .3s,color .3s;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
 .bg{position:fixed;inset:0;z-index:-1;background:var(--gradient-bg);overflow:hidden;transition:background .5s}
 .floating-apr{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;font-weight:600;font-size:16px;color:var(--emerald-500);pointer-events:none;white-space:nowrap;z-index:1;text-shadow:0 2px 8px rgba(16,185,129,0.2);will-change:transform,opacity;transform-origin:center;display:inline-block}
 .floating-apr.negative{color:var(--rose-400);text-shadow:0 2px 8px rgba(244,63,94,0.2)}
@@ -61,7 +66,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text"
 .logo:hover .logo-icon{transform:scale(1.05);box-shadow:0 0 25px rgba(0,212,255,0.4),0 0 50px rgba(0,255,136,0.2)}
 .logo-text{font-weight:600;font-size:18px}.logo-text span:not(.badge){background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .nav{display:flex;gap:4px;background:var(--nav-bg);padding:4px;border-radius:999px;transition:background .3s}
-.nav-btn{padding:8px 16px;border:none;background:0;color:var(--text-secondary);font-size:14px;font-weight:500;border-radius:999px;cursor:pointer;transition:all .2s}
+.nav-btn{padding:8px 16px;border:none;background:0;color:var(--text-secondary);font-size:14px;font-weight:500;border-radius:999px;cursor:pointer;transition:all .2s;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .nav-btn:hover{color:var(--text-primary)}
 .nav-btn.active{background:var(--nav-active-bg);color:var(--text-primary);box-shadow:0 2px 8px rgba(0,0,0,.06)}
 /* Theme toggle */
@@ -99,7 +104,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text"
 .pill:hover{border-color:var(--sky-400);transform:translateY(-1px)}
 .pill.active{background:var(--gradient-accent);border-color:transparent;color:#fff;box-shadow:var(--glow-accent)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px}
-.card{background:var(--bg-card);border:1px solid var(--border-light);border-radius:20px;padding:24px;cursor:pointer;transition:all .3s;backdrop-filter:blur(10px);animation:fadeInUp .5s ease-out backwards;position:relative;overflow:hidden}
+.card{background:var(--bg-card);border:1px solid var(--border-light);border-radius:20px;padding:24px;cursor:pointer;transition:all .3s;backdrop-filter:blur(10px);animation:fadeInUp .5s ease-out backwards;position:relative;overflow:hidden;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(0,212,255,0.05),rgba(0,255,136,0.02));opacity:0;transition:opacity .3s}
 .card:hover{transform:translateY(-6px) scale(1.01);box-shadow:0 12px 40px rgba(0,212,255,.15)}
 .card:hover::before{opacity:1}
@@ -335,8 +340,96 @@ tbody tr:last-child td{border-bottom:none}
   .risk-breakdown-fill{transition:none!important}
   @keyframes pulse-glow{0%,100%{opacity:.6;transform:scale(1)}}
 }
-@media(max-width:1024px){.hero-stats,.detail-metrics,.charts-grid,.calc-results{grid-template-columns:repeat(2,1fr)}.vault-hero-inner{flex-direction:column}.header-tagline{display:none}}
-@media(max-width:768px){.header-inner{flex-direction:column}.nav{width:100%;justify-content:center}.hero-stats,.grid,.detail-metrics,.charts-grid,.calc-results{grid-template-columns:1fr}.vault-hero-stats{justify-content:center}.header-tagline{display:none}}
+@media(max-width:1024px){
+  .hero-stats,.detail-metrics,.charts-grid,.calc-results{grid-template-columns:repeat(2,1fr)}
+  .vault-hero-inner{flex-direction:column}
+  .header-tagline{display:none}
+  .main{padding:24px}
+}
+@media(max-width:768px){
+  .header{padding:12px 16px}
+  .header-inner{flex-direction:column;gap:12px}
+  .nav{width:100%;justify-content:center;gap:2px}
+  .nav-btn{padding:10px 14px;font-size:13px;min-height:44px}
+  .hero-stats,.grid,.detail-metrics,.charts-grid,.calc-results{grid-template-columns:1fr;gap:12px}
+  .vault-hero-stats{justify-content:center}
+  .header-tagline{display:none}
+  .main{padding:16px}
+  .section{margin-bottom:32px}
+  .section-header{margin-bottom:16px}
+  .stat-card{padding:20px}
+  .stat-value{font-size:24px}
+  .card{padding:20px}
+  .card-name{font-size:16px}
+  .card-apy-val{font-size:20px}
+  .card-stats{gap:8px;padding-top:12px;margin-top:12px}
+  .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{min-width:600px;font-size:13px}
+  th,td{padding:10px 12px}
+  .pill{padding:10px 14px;min-height:44px}
+  .back-btn{padding:12px 16px;min-height:44px;font-size:14px}
+  .calc-input{padding:14px;font-size:16px;min-height:44px}
+  .calc-res{padding:14px}
+  .calc-res-val{font-size:20px}
+  .chart-card{padding:16px}
+  .chart-wrap{height:180px}
+  .vault-hero{padding:20px}
+  .detail-metric{padding:16px}
+  .detail-metric-val{font-size:20px}
+  .footer{padding:24px 16px;font-size:12px}
+  .logo-text{font-size:16px}
+  .logo-icon{width:32px;height:32px;font-size:12px}
+  .theme-toggle{width:44px;height:44px}
+  .compare-item{padding:12px;min-height:44px}
+  .ext-link{padding:10px 14px;min-height:44px}
+  .card-ext-link{padding:8px 12px;font-size:12px;min-height:36px}
+}
+@media(max-width:480px){
+  .header{padding:10px 12px;padding-top:max(10px,env(safe-area-inset-top))}
+  .main{padding:12px}
+  .hero-stats{gap:10px}
+  .stat-card{padding:16px}
+  .stat-value{font-size:22px}
+  .stat-label{font-size:12px}
+  .card{padding:16px;border-radius:16px}
+  .card-name{font-size:15px}
+  .card-apy-val{font-size:18px}
+  .card-apy{padding-top:24px}
+  .section-title{font-size:18px}
+  .badge{font-size:10px;padding:3px 8px}
+  .nav-btn{padding:8px 12px;font-size:12px}
+  .pill{font-size:12px;padding:8px 12px}
+  .table-wrap{border-radius:12px}
+  th{font-size:11px;padding:8px 10px}
+  td{font-size:12px;padding:8px 10px}
+  .vault-hero{padding:16px;border-radius:20px}
+  .detail-metric{padding:12px}
+  .detail-metric-val{font-size:18px}
+  .chart-card{padding:12px;border-radius:16px}
+  .chart-wrap{height:160px}
+  .calc-card{padding:20px;border-radius:16px}
+  .calc-group label{font-size:11px}
+  .calc-input{padding:12px;font-size:15px}
+  .calc-res{padding:12px;border-radius:10px}
+  .calc-res-label{font-size:10px}
+  .calc-res-val{font-size:18px}
+}
+@media(max-width:768px) and (orientation:landscape){
+  .header{padding:8px 16px}
+  .main{padding:16px}
+  .hero-stats{grid-template-columns:repeat(2,1fr);gap:12px}
+  .vault-hero-stats{flex-wrap:wrap}
+  .chart-wrap{height:200px}
+}
+@media(max-width:480px) and (orientation:landscape){
+  .header{padding:6px 12px}
+  .main{padding:12px}
+  .hero-stats{grid-template-columns:repeat(4,1fr);gap:8px}
+  .stat-card{padding:12px}
+  .stat-value{font-size:18px}
+  .stat-label{font-size:11px}
+  .chart-wrap{height:150px}
+}
 </style>
 </head>
 <body>
