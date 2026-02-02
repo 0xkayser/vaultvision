@@ -193,8 +193,10 @@ def validate_vault_url(url: str, protocol: str) -> Optional[str]:
 # =============================================================================
 def init_db():
     """Initialize SQLite database with canonical normalized schema."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)  # 30 second timeout for locks
     conn.row_factory = sqlite3.Row
+    # Enable WAL mode for better concurrent access
+    conn.execute("PRAGMA journal_mode=WAL")
     c = conn.cursor()
     
     # =============================================================================
@@ -381,8 +383,11 @@ def init_db():
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    """Get database connection with WAL mode and timeout."""
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)  # 30 second timeout for locks
     conn.row_factory = sqlite3.Row
+    # Enable WAL mode for better concurrent access
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -468,8 +473,6 @@ def upsert_vault(vault: dict):
     # Normalize to canonical format
     canonical = normalize_vault(vault)
     
-    conn = get_db()
-    c = conn.cursor()
     now = int(time.time())
     pk = canonical["pk"]
     
@@ -486,63 +489,88 @@ def upsert_vault(vault: dict):
     # Compute age_days
     age_days = max(0, (now - first_seen) // 86400)
     
-    c.execute("""
-        INSERT INTO vaults (
-            pk, protocol, vault_id, vault_name, vault_type, deposit_asset, external_url,
-            leader, created_ts, first_seen_ts, updated_ts, status, ban_reason,
-            source_kind, data_quality, verified,
-            name, is_protocol, age_days, tvl_usd, apr, pnl_30d, pnl_90d
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(pk) DO UPDATE SET
-            vault_name=excluded.vault_name,
-            vault_id=excluded.vault_id,
-            vault_type=excluded.vault_type,
-            deposit_asset=excluded.deposit_asset,
-            external_url=excluded.external_url,
-            leader=excluded.leader,
-            created_ts=excluded.created_ts,
-            first_seen_ts=COALESCE(vaults.first_seen_ts, excluded.first_seen_ts),
-            updated_ts=excluded.updated_ts,
-            status=excluded.status,
-            ban_reason=excluded.ban_reason,
-            source_kind=excluded.source_kind,
-            data_quality=excluded.data_quality,
-            verified=excluded.verified,
-            name=excluded.vault_name,
-            is_protocol=excluded.is_protocol,
-            age_days=excluded.age_days,
-            tvl_usd=excluded.tvl_usd,
-            apr=excluded.apr,
-            pnl_30d=excluded.pnl_30d,
-            pnl_90d=excluded.pnl_90d
-    """, (
-        pk,
-        canonical["protocol"],
-        canonical["vault_id"],
-        canonical["vault_name"],
-        canonical["vault_type"],
-        canonical["deposit_asset"],
-        canonical["external_url"],
-        canonical["leader"],
-        canonical["created_ts"],
-        first_seen,
-        now,
-        canonical["status"],
-        canonical["ban_reason"],
-        canonical["source_kind"],
-        canonical["data_quality"],
-        canonical["verified"],
-        canonical["name"],
-        canonical["is_protocol"],
-        age_days,
-        canonical["tvl_usd"],
-        canonical["apr"],
-        canonical["pnl_30d"],
-        canonical["pnl_90d"],
-    ))
-    conn.commit()
-    conn.close()
+    # Retry logic for database locked errors
+    max_retries = 5
+    retry_delay = 0.1  # 100ms
+    
+    for attempt in range(max_retries):
+        conn = None
+        try:
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("""
+                INSERT INTO vaults (
+                    pk, protocol, vault_id, vault_name, vault_type, deposit_asset, external_url,
+                    leader, created_ts, first_seen_ts, updated_ts, status, ban_reason,
+                    source_kind, data_quality, verified,
+                    name, is_protocol, age_days, tvl_usd, apr, pnl_30d, pnl_90d
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(pk) DO UPDATE SET
+                    vault_name=excluded.vault_name,
+                    vault_id=excluded.vault_id,
+                    vault_type=excluded.vault_type,
+                    deposit_asset=excluded.deposit_asset,
+                    external_url=excluded.external_url,
+                    leader=excluded.leader,
+                    created_ts=excluded.created_ts,
+                    first_seen_ts=COALESCE(vaults.first_seen_ts, excluded.first_seen_ts),
+                    updated_ts=excluded.updated_ts,
+                    status=excluded.status,
+                    ban_reason=excluded.ban_reason,
+                    source_kind=excluded.source_kind,
+                    data_quality=excluded.data_quality,
+                    verified=excluded.verified,
+                    name=excluded.vault_name,
+                    is_protocol=excluded.is_protocol,
+                    age_days=excluded.age_days,
+                    tvl_usd=excluded.tvl_usd,
+                    apr=excluded.apr,
+                    pnl_30d=excluded.pnl_30d,
+                    pnl_90d=excluded.pnl_90d
+            """, (
+                pk,
+                canonical["protocol"],
+                canonical["vault_id"],
+                canonical["vault_name"],
+                canonical["vault_type"],
+                canonical["deposit_asset"],
+                canonical["external_url"],
+                canonical["leader"],
+                canonical["created_ts"],
+                first_seen,
+                now,
+                canonical["status"],
+                canonical["ban_reason"],
+                canonical["source_kind"],
+                canonical["data_quality"],
+                canonical["verified"],
+                canonical["name"],
+                canonical["is_protocol"],
+                age_days,
+                canonical["tvl_usd"],
+                canonical["apr"],
+                canonical["pnl_30d"],
+                canonical["pnl_90d"],
+            ))
+            conn.commit()
+            if conn:
+                conn.close()
+            return  # Success
+        except sqlite3.OperationalError as e:
+            if conn:
+                conn.close()
+            if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                continue
+            else:
+                print(f"[VAULT] Error upserting vault {pk[:16]}... (attempt {attempt + 1}/{max_retries}): {e}")
+                return
+        except Exception as e:
+            if conn:
+                conn.close()
+            print(f"[VAULT] Error upserting vault {pk[:16]}...: {e}")
+            return
 
 
 # =============================================================================
@@ -742,51 +770,70 @@ def add_snapshot(pk: str, tvl: float, apr: float, source: str = "api",
     
     snapshot = normalize_snapshot(pk, raw_data, data_freshness_sec)
     
-    conn = get_db()
-    c = conn.cursor()
-    try:
-        c.execute("""
-            INSERT INTO snapshots (
-                vault_pk, ts, tvl_usd, apr,
-                return_7d, return_30d, return_90d,
-                pnl_7d, pnl_30d, pnl_90d,
-                data_freshness_sec, confidence, quality_label, source
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(vault_pk, ts) DO UPDATE SET
-                tvl_usd=excluded.tvl_usd,
-                apr=excluded.apr,
-                return_7d=excluded.return_7d,
-                return_30d=excluded.return_30d,
-                return_90d=excluded.return_90d,
-                pnl_7d=excluded.pnl_7d,
-                pnl_30d=excluded.pnl_30d,
-                pnl_90d=excluded.pnl_90d,
-                data_freshness_sec=excluded.data_freshness_sec,
-                confidence=excluded.confidence,
-                quality_label=excluded.quality_label,
-                source=excluded.source
-        """, (
-            snapshot["vault_pk"],
-            snapshot["ts"],
-            snapshot["tvl_usd"],
-            snapshot["apr"],
-            snapshot["return_7d"],
-            snapshot["return_30d"],
-            snapshot["return_90d"],
-            snapshot["pnl_7d"],
-            snapshot["pnl_30d"],
-            snapshot["pnl_90d"],
-            snapshot["data_freshness_sec"],
-            snapshot["confidence"],
-            snapshot["quality_label"],
-            snapshot["source"],
-        ))
-        conn.commit()
-    except Exception as e:
-        print(f"[SNAPSHOT] Error storing snapshot for {pk[:16]}...: {e}")
-    finally:
-        conn.close()
+    # Retry logic for database locked errors
+    max_retries = 5
+    retry_delay = 0.1  # 100ms
+    
+    for attempt in range(max_retries):
+        conn = None
+        try:
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("""
+                INSERT INTO snapshots (
+                    vault_pk, ts, tvl_usd, apr,
+                    return_7d, return_30d, return_90d,
+                    pnl_7d, pnl_30d, pnl_90d,
+                    data_freshness_sec, confidence, quality_label, source
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(vault_pk, ts) DO UPDATE SET
+                    tvl_usd=excluded.tvl_usd,
+                    apr=excluded.apr,
+                    return_7d=excluded.return_7d,
+                    return_30d=excluded.return_30d,
+                    return_90d=excluded.return_90d,
+                    pnl_7d=excluded.pnl_7d,
+                    pnl_30d=excluded.pnl_30d,
+                    pnl_90d=excluded.pnl_90d,
+                    data_freshness_sec=excluded.data_freshness_sec,
+                    confidence=excluded.confidence,
+                    quality_label=excluded.quality_label,
+                    source=excluded.source
+            """, (
+                snapshot["vault_pk"],
+                snapshot["ts"],
+                snapshot["tvl_usd"],
+                snapshot["apr"],
+                snapshot["return_7d"],
+                snapshot["return_30d"],
+                snapshot["return_90d"],
+                snapshot["pnl_7d"],
+                snapshot["pnl_30d"],
+                snapshot["pnl_90d"],
+                snapshot["data_freshness_sec"],
+                snapshot["confidence"],
+                snapshot["quality_label"],
+                snapshot["source"],
+            ))
+            conn.commit()
+            if conn:
+                conn.close()
+            return  # Success
+        except sqlite3.OperationalError as e:
+            if conn:
+                conn.close()
+            if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                continue
+            else:
+                print(f"[SNAPSHOT] Error storing snapshot for {pk[:16]}... (attempt {attempt + 1}/{max_retries}): {e}")
+                return
+        except Exception as e:
+            if conn:
+                conn.close()
+            print(f"[SNAPSHOT] Error storing snapshot for {pk[:16]}...: {e}")
+            return
 
 
 def add_pnl_point(pk: str, ts: int, pnl_usd: float, account_value: float = None):
@@ -1654,11 +1701,37 @@ def get_all_vaults() -> List[dict]:
     - Hyperliquid: exclude vaults with null TVL or TVL < $500K
     - Nado (demo): always include (exclude_from_rankings=true)
     """
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT * FROM vaults ORDER BY tvl_usd DESC")
-    rows = c.fetchall()
-    conn.close()
+    # Retry logic for database locked errors
+    max_retries = 5
+    retry_delay = 0.1  # 100ms
+    
+    for attempt in range(max_retries):
+        conn = None
+        try:
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("SELECT * FROM vaults ORDER BY tvl_usd DESC")
+            rows = c.fetchall()
+            conn.close()
+            break  # Success
+        except sqlite3.OperationalError as e:
+            if conn:
+                conn.close()
+            if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                continue
+            else:
+                print(f"[VAULTS] Error reading vaults (attempt {attempt + 1}/{max_retries}): {e}")
+                return []  # Return empty list on failure
+        except Exception as e:
+            if conn:
+                conn.close()
+            print(f"[VAULTS] Error reading vaults: {e}")
+            return []  # Return empty list on failure
+    else:
+        # All retries failed
+        print(f"[VAULTS] Failed to read vaults after {max_retries} attempts")
+        return []
     
     vaults = []
     now = int(time.time())
