@@ -3105,7 +3105,7 @@ def update_system_status(protocol: str, status: str, discovered: int, active: in
 def fix_hyperliquid_apr_in_db():
     """Fix incorrectly normalized APR for Hyperliquid vaults in DB.
     
-    Re-fetches APR from API and updates vaults with correct values.
+    Re-fetches APR from API and updates vaults with correct values using normalize_vault().
     This fixes vaults that were saved with incorrect APR before normalization fix.
     """
     print("[FIX] Checking and fixing Hyperliquid APR values in DB...")
@@ -3121,19 +3121,24 @@ def fix_hyperliquid_apr_in_db():
         return
     
     # Fetch fresh data from API
-    fresh_vaults = fetch_hl_vaults_from_scraper()
+    fresh_vaults_raw = fetch_hl_vaults_from_scraper()
     fresh_apr_by_pk = {}
-    for v in fresh_vaults:
-        pk = v["pk"]
-        # Normalize APR using correct logic
-        apr_raw = v.get("apr")
-        if apr_raw is not None:
-            apr_raw = float(apr_raw)
-            if apr_raw >= 1.0:
-                apr_normalized = apr_raw / 100
-            else:
-                apr_normalized = apr_raw
-            fresh_apr_by_pk[pk] = apr_normalized
+    
+    # Normalize each vault using normalize_vault() to ensure consistency
+    for v_raw in fresh_vaults_raw:
+        try:
+            # Create a raw vault dict matching the format expected by normalize_vault()
+            raw_vault = {
+                "protocol": "hyperliquid",
+                "vault_name": v_raw.get("name", ""),
+                "apr": v_raw.get("apr"),
+            }
+            normalized = normalize_vault(raw_vault)
+            if normalized and normalized.get("apr") is not None:
+                fresh_apr_by_pk[v_raw["pk"]] = normalized["apr"]
+        except Exception as e:
+            print(f"[FIX] Error normalizing vault {v_raw.get('pk', 'unknown')}: {e}")
+            continue
     
     # Update vaults with correct APR
     fixed_count = 0
