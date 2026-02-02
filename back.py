@@ -932,8 +932,8 @@ def get_snapshots_for_analytics(vault_pk: str, days: int = 120) -> List[dict]:
             "ts": row["ts"],
             "tvl_usd": row["tvl_usd"],
             "apr": row["apr"],
-            "quality_label": row.get("quality_label", "derived"),
-            "source": row.get("source", "derived"),
+            "quality_label": safe_get_row(row, "quality_label", "derived"),
+            "source": safe_get_row(row, "source", "derived"),
         }
         for row in rows
     ]
@@ -1624,6 +1624,22 @@ def compute_pnl_from_snapshots(pk: str, days: int) -> Optional[float]:
     return None
 
 
+def safe_get_row(row, key, default=None):
+    """Safely get value from sqlite3.Row object.
+    
+    Returns:
+        - Value if column exists and is not None
+        - default if column doesn't exist (KeyError)
+        - None if column exists but value is NULL (to allow 'or' fallback)
+    """
+    try:
+        value = row[key]
+        # If value is None, return None (not default) to allow 'or' fallback patterns
+        return value
+    except (KeyError, IndexError):
+        return default
+
+
 def get_all_vaults() -> List[dict]:
     """Get all vaults from DB, compute risk, return sorted by TVL.
     
@@ -1696,31 +1712,31 @@ def get_all_vaults() -> List[dict]:
             tvl_usd = float(tvl_usd)  # Normalize to float
         
         # Use canonical fields, fallback to legacy fields for backward compatibility
-        vault_name = row.get("vault_name") or row.get("name", "")
-        vault_type = row.get("vault_type") or ("protocol" if row.get("is_protocol") else "user")
-        deposit_asset = row.get("deposit_asset") or "USDC"
-        external_url = row.get("external_url")
-        status = row.get("status", "active")
+        vault_name = safe_get_row(row, "vault_name") or safe_get_row(row, "name", "")
+        vault_type = safe_get_row(row, "vault_type") or ("protocol" if safe_get_row(row, "is_protocol") else "user")
+        deposit_asset = safe_get_row(row, "deposit_asset") or "USDC"
+        external_url = safe_get_row(row, "external_url")
+        status = safe_get_row(row, "status", "active")
         
         vault = {
             "id": row["pk"],
             "protocol": row["protocol"],
             "vault_name": vault_name,
-            "vault_id": row.get("vault_id") or "",
+            "vault_id": safe_get_row(row, "vault_id") or "",
             "vault_type": vault_type,
             "deposit_asset": deposit_asset,
             "external_url": external_url,
-            "leader": row.get("leader") or "",
-            "is_protocol": bool(row.get("is_protocol", 0)),  # Legacy compatibility
+            "leader": safe_get_row(row, "leader") or "",
+            "is_protocol": bool(safe_get_row(row, "is_protocol", 0)),  # Legacy compatibility
             "status": status,
             "tvl_usd": tvl_usd,
             "age_days": age_days,
             "age_hours": age_hours,
             "age_label": age_label,
             "first_seen_ts": first_seen,
-            "created_ts": row.get("created_ts"),
-            "source_kind": row.get("source_kind") or "simulated",
-            "data_quality": row.get("data_quality") or "mock",
+            "created_ts": safe_get_row(row, "created_ts"),
+            "source_kind": safe_get_row(row, "source_kind") or "simulated",
+            "data_quality": safe_get_row(row, "data_quality") or "mock",
             "verified": verified,
         }
         
@@ -1841,9 +1857,9 @@ def get_all_vaults() -> List[dict]:
         else:
             url_info = build_vault_url(
                 protocol=row["protocol"],
-                vault_id=row.get("vault_id") or "",
+                vault_id=safe_get_row(row, "vault_id") or "",
                 name=vault_name,
-                is_protocol_vault=bool(row.get("is_protocol", 0))
+                is_protocol_vault=bool(safe_get_row(row, "is_protocol", 0))
             )
             vault.update(url_info)
         
