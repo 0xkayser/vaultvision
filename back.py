@@ -437,14 +437,15 @@ def normalize_vault(raw_vault: dict) -> dict:
         protocol = raw_vault.get("protocol", "")
         
         if protocol == "hyperliquid":
-            # Hyperliquid: API returns percentage format
-            # If >= 100, it's percentage * 100 (e.g., 1751 = 1751% = 17.51 decimal) -> divide by 10000
-            # If >= 1.0, it's percentage (e.g., 17.51 = 17.51%) -> divide by 100
-            # If < 1.0, it's already decimal (e.g., 0.1751 = 17.51%) -> keep as is
-            if apr >= 100:
+            # Hyperliquid: API returns percentage format (e.g., 17.51 = 17.51%, 128.25 = 128.25%)
+            # Convert to decimal by dividing by 100
+            # Exception: if value is very large (>= 1000), it might be percentage * 100 (e.g., 1751 = 1751% = 17.51 decimal)
+            if apr >= 1000:
+                # Very large values: likely percentage * 100 format (e.g., 1751 = 1751% = 17.51 decimal)
                 apr = apr / 10000  # 1751 -> 0.1751 (17.51%)
             elif apr >= 1.0:
-                apr = apr / 100  # 17.51 -> 0.1751 (17.51%)
+                # Normal percentage format: divide by 100
+                apr = apr / 100  # 17.51 -> 0.1751 (17.51%), 128.25 -> 1.2825 (128.25%)
             # else: already decimal (0.1751), keep as is
         else:
             # Other protocols: normalize if > 1.0 (likely percentage format)
