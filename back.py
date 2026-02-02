@@ -1861,9 +1861,23 @@ def get_all_vaults() -> List[dict]:
             vault["discovery_source"] = "unknown"
         
         # APR (both fields for frontend compatibility)
-        if row["apr"] is not None:
-            vault["apr"] = row["apr"]
-            vault["apy"] = row["apr"]
+        # Fix: Re-normalize APR for Hyperliquid if it looks wrong (already divided incorrectly)
+        apr_from_db = row["apr"]
+        if apr_from_db is not None and protocol == "hyperliquid":
+            # If APR is suspiciously low (< 0.01) but should be higher, it might be double-divided
+            # Check if raw value from API would be >= 1.0 (percentage format)
+            # If current value * 100 >= 1.0, it was likely already divided once incorrectly
+            if apr_from_db < 0.01 and apr_from_db > 0:
+                # This looks like it was divided twice (e.g., 17.51 / 100 / 100 = 0.001751)
+                # Try to recover: multiply by 100 to get back to one division
+                potential_correct = apr_from_db * 100
+                if 0.01 <= potential_correct < 1.0:
+                    apr_from_db = potential_correct
+                    print(f"[HL APR FIX] Fixed double-divided APR for {pk[:16]}...: {row['apr']} -> {apr_from_db}")
+        
+        if apr_from_db is not None:
+            vault["apr"] = apr_from_db
+            vault["apy"] = apr_from_db
         
         # Returns (compute from snapshots if missing for ALL protocols)
         pnl_30d = row["pnl_30d"]
@@ -2160,6 +2174,7 @@ def fetch_hl_vaults_from_scraper() -> List[dict]:
             if len(leader) > 10:
                 leader = f"{leader[:6]}...{leader[-4:]}"
             
+            # Store APR with source_kind marker for proper normalization
             vaults.append({
                 "pk": addr.lower(),
                 "protocol": "hyperliquid",
@@ -2168,7 +2183,7 @@ def fetch_hl_vaults_from_scraper() -> List[dict]:
                 "leader": leader,
                 "is_protocol": is_hlp,
                 "tvl_usd": tvl,
-                "apr": apr or 0,
+                "apr": apr or 0,  # Raw APR from API - will be normalized in normalize_vault()
                 "first_seen_ts": create_ts,
                 "source_kind": "scrape",
                 "data_quality": "full",
