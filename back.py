@@ -3102,6 +3102,64 @@ def update_system_status(protocol: str, status: str, discovered: int, active: in
     conn.close()
 
 
+def fix_hyperliquid_apr_in_db():
+    """Fix incorrectly normalized APR for Hyperliquid vaults in DB.
+    
+    Re-fetches APR from API and updates vaults with correct values.
+    This fixes vaults that were saved with incorrect APR before normalization fix.
+    """
+    print("[FIX] Checking and fixing Hyperliquid APR values in DB...")
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Get all Hyperliquid vaults
+    c.execute("SELECT pk, vault_name, apr FROM vaults WHERE protocol = 'hyperliquid'")
+    hl_vaults = c.fetchall()
+    conn.close()
+    
+    if not hl_vaults:
+        return
+    
+    # Fetch fresh data from API
+    fresh_vaults = fetch_hl_vaults_from_scraper()
+    fresh_apr_by_pk = {}
+    for v in fresh_vaults:
+        pk = v["pk"]
+        # Normalize APR using correct logic
+        apr_raw = v.get("apr")
+        if apr_raw is not None:
+            apr_raw = float(apr_raw)
+            if apr_raw >= 1.0:
+                apr_normalized = apr_raw / 100
+            else:
+                apr_normalized = apr_raw
+            fresh_apr_by_pk[pk] = apr_normalized
+    
+    # Update vaults with correct APR
+    fixed_count = 0
+    for row in hl_vaults:
+        pk = row["pk"]
+        current_apr = row["apr"]
+        vault_name = row["vault_name"]
+        
+        if pk in fresh_apr_by_pk:
+            correct_apr = fresh_apr_by_pk[pk]
+            # Only update if significantly different (more than 1% relative difference)
+            if current_apr is None or abs(current_apr - correct_apr) > max(0.001, abs(correct_apr) * 0.01):
+                conn2 = get_db()
+                c2 = conn2.cursor()
+                c2.execute("UPDATE vaults SET apr = ? WHERE pk = ?", (correct_apr, pk))
+                conn2.commit()
+                conn2.close()
+                fixed_count += 1
+                print(f"[FIX] Updated APR for {vault_name[:40]}: {current_apr} -> {correct_apr}")
+    
+    if fixed_count > 0:
+        print(f"[FIX] Fixed APR for {fixed_count} Hyperliquid vaults")
+    else:
+        print(f"[FIX] All Hyperliquid APR values are correct")
+
+
 def run_fetch_job():
     """Fetch all protocols using canonical pipeline: fetch → normalize → validate → deduplicate → store."""
     print("[FETCH] Starting canonical pipeline...")
@@ -3110,6 +3168,9 @@ def run_fetch_job():
     
     # Clean up old vault formats
     cleanup_old_vault_formats()
+    
+    # Fix incorrectly normalized APR for Hyperliquid (one-time fix)
+    fix_hyperliquid_apr_in_db()
     
     protocol_results = {}
     
