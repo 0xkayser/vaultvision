@@ -23,6 +23,7 @@ Self-check:
 
 import argparse
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -191,50 +192,124 @@ def validate_vault_url(url: str, protocol: str) -> Optional[str]:
 # DATABASE
 # =============================================================================
 def init_db():
-    """Initialize SQLite database with minimal schema."""
+    """Initialize SQLite database with canonical normalized schema."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     
+    # =============================================================================
+    # CANONICAL VAULT TABLE (static/rarely changes)
+    # =============================================================================
     c.execute("""
         CREATE TABLE IF NOT EXISTS vaults (
             pk TEXT PRIMARY KEY,
+            -- Core identity
             protocol TEXT NOT NULL,
-            name TEXT NOT NULL,
-            vault_id TEXT,
+            vault_id TEXT NOT NULL,
+            vault_name TEXT NOT NULL,
+            vault_type TEXT NOT NULL DEFAULT 'user',  -- protocol/user/strategy
+            deposit_asset TEXT DEFAULT 'USDC',
+            external_url TEXT,
+            -- Metadata
             leader TEXT,
-            is_protocol INTEGER DEFAULT 0,
-            tvl_usd REAL DEFAULT 0,
+            created_ts INTEGER,  -- Real creation time from protocol (if available)
+            first_seen_ts INTEGER,  -- When we first discovered it (sticky)
+            updated_ts INTEGER,
+            -- Status
+            status TEXT DEFAULT 'active',  -- active/hidden/banned
+            ban_reason TEXT,
+            -- Data quality
+            source_kind TEXT DEFAULT 'simulated',  -- real/derived/simulated/demo
+            data_quality TEXT DEFAULT 'mock',
+            verified INTEGER DEFAULT 0,
+            -- Legacy fields (for backward compatibility)
+            name TEXT,  -- Alias for vault_name
+            is_protocol INTEGER DEFAULT 0,  -- Derived from vault_type
+            age_days INTEGER DEFAULT 0,  -- Computed field
+            -- Current values (denormalized for performance)
+            tvl_usd REAL,
             apr REAL,
             pnl_30d REAL,
-            pnl_90d REAL,
-            age_days INTEGER DEFAULT 0,
-            first_seen_ts INTEGER,
-            updated_ts INTEGER,
-            source_kind TEXT DEFAULT 'mock',
-            data_quality TEXT DEFAULT 'mock',
-            verified INTEGER DEFAULT 1
+            pnl_90d REAL
         )
     """)
     
-    # Add verified column if missing (migration)
-    try:
-        c.execute("ALTER TABLE vaults ADD COLUMN verified INTEGER DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
+    # Migrations: Add new columns if missing
+    migrations = [
+        ("vault_id", "TEXT"),
+        ("vault_name", "TEXT"),
+        ("vault_type", "TEXT DEFAULT 'user'"),
+        ("deposit_asset", "TEXT DEFAULT 'USDC'"),
+        ("external_url", "TEXT"),
+        ("created_ts", "INTEGER"),
+        ("status", "TEXT DEFAULT 'active'"),
+        ("ban_reason", "TEXT"),
+        ("verified", "INTEGER DEFAULT 0"),
+    ]
     
+    for col, col_type in migrations:
+        try:
+            c.execute(f"ALTER TABLE vaults ADD COLUMN {col} {col_type}")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+    
+    # Migrate existing data
+    c.execute("UPDATE vaults SET vault_name = name WHERE vault_name IS NULL AND name IS NOT NULL")
+    c.execute("UPDATE vaults SET vault_id = pk WHERE vault_id IS NULL")
+    c.execute("UPDATE vaults SET vault_type = CASE WHEN is_protocol = 1 THEN 'protocol' ELSE 'user' END WHERE vault_type IS NULL")
+    c.execute("UPDATE vaults SET status = 'active' WHERE status IS NULL")
+    
+    # =============================================================================
+    # CANONICAL SNAPSHOT TABLE (daily/hourly time-series)
+    # =============================================================================
     c.execute("""
         CREATE TABLE IF NOT EXISTS snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             vault_pk TEXT NOT NULL,
             ts INTEGER NOT NULL,
+            -- Core metrics
             tvl_usd REAL,
-            apr REAL,
+            apr REAL,  -- Decimal format: 0.15 = 15%
+            -- Returns (computed)
+            return_7d REAL,
+            return_30d REAL,
+            return_90d REAL,
+            -- PnL (computed)
+            pnl_7d REAL,
+            pnl_30d REAL,
+            pnl_90d REAL,
+            -- Data quality
+            data_freshness_sec INTEGER,  -- Seconds since last successful update
+            confidence REAL DEFAULT 1.0,  -- 0.0-1.0
+            quality_label TEXT DEFAULT 'real',  -- real/derived/simulated
+            source TEXT DEFAULT 'api',  -- api/ui_scrape/derived/simulated/demo
             UNIQUE(vault_pk, ts)
         )
     """)
     
-    # REAL PNL history for Hyperliquid vaults
+    # Migrations for snapshots
+    snapshot_migrations = [
+        ("return_7d", "REAL"),
+        ("return_30d", "REAL"),
+        ("return_90d", "REAL"),
+        ("pnl_7d", "REAL"),
+        ("pnl_30d", "REAL"),
+        ("pnl_90d", "REAL"),
+        ("data_freshness_sec", "INTEGER"),
+        ("confidence", "REAL DEFAULT 1.0"),
+        ("quality_label", "TEXT DEFAULT 'real'"),
+        ("source", "TEXT DEFAULT 'api'"),
+    ]
+    
+    for col, col_type in snapshot_migrations:
+        try:
+            c.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {col_type}")
+        except sqlite3.OperationalError:
+            pass
+    
+    # =============================================================================
+    # PNL HISTORY (hourly granularity for Hyperliquid)
+    # =============================================================================
     c.execute("""
         CREATE TABLE IF NOT EXISTS pnl_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -246,9 +321,63 @@ def init_db():
         )
     """)
     
+    # =============================================================================
+    # SYSTEM STATUS (observability)
+    # =============================================================================
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS system_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            protocol TEXT NOT NULL,
+            last_success_fetch INTEGER,
+            last_error TEXT,
+            discovered_count INTEGER DEFAULT 0,
+            active_count INTEGER DEFAULT 0,
+            banned_count INTEGER DEFAULT 0,
+            stale_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'ok',  -- ok/stale/error
+            updated_ts INTEGER,
+            UNIQUE(protocol)
+        )
+    """)
+    
+    # =============================================================================
+    # VAULT ANALYTICS DAILY (performance metrics per day)
+    # =============================================================================
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS vault_analytics_daily (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vault_pk TEXT NOT NULL,
+            date_ts INTEGER NOT NULL,  -- Day bucket timestamp
+            -- Daily returns
+            daily_return REAL,  -- Decimal: 0.012 = +1.2%
+            -- Cumulative returns
+            cum_return_30d REAL,  -- Product of (1 + daily_return) over 30d window
+            cum_return_90d REAL,  -- Product of (1 + daily_return) over 90d window
+            -- Risk metrics
+            volatility_30d REAL,  -- Std dev of daily returns over 30d
+            worst_day_30d REAL,  -- Min daily return over 30d
+            max_drawdown_30d REAL,  -- Max peak-to-trough drop (positive %)
+            -- Stability metrics
+            tvl_volatility_30d REAL,  -- Std dev of log(TVL_t / TVL_t-1)
+            apr_variance_30d REAL,  -- Variance of APR values
+            -- Data quality
+            quality_label TEXT DEFAULT 'derived',  -- real/derived/simulated
+            data_points_30d INTEGER DEFAULT 0,  -- Count of valid points in 30d window
+            data_points_90d INTEGER DEFAULT 0,  -- Count of valid points in 90d window
+            computed_ts INTEGER,  -- When this row was computed
+            UNIQUE(vault_pk, date_ts)
+        )
+    """)
+    
+    # Create index for fast lookups
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_analytics_vault_date ON vault_analytics_daily(vault_pk, date_ts DESC)")
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
     conn.close()
-    print(f"[DB] Initialized {DB_PATH}")
+    print(f"[DB] Initialized {DB_PATH} with canonical schema")
 
 
 def get_db():
@@ -267,89 +396,391 @@ def get_first_seen_ts(pk: str) -> Optional[int]:
     return row["first_seen_ts"] if row and row["first_seen_ts"] else None
 
 
-def upsert_vault(vault: dict):
-    """Insert or update vault. first_seen_ts is STICKY - never overwritten once set.
+def normalize_vault(raw_vault: dict) -> dict:
+    """Normalize raw vault data to canonical Vault model.
     
-    Priority for first_seen_ts:
-    1. Existing DB value (if any) - ALWAYS wins
-    2. API-provided value (e.g., Lighter created_at)
-    3. Current timestamp (fallback for new vaults)
+    Returns canonical vault dict with all required fields.
     """
+    pk = raw_vault.get("pk") or f"{raw_vault.get('protocol', 'unknown')}:{raw_vault.get('vault_id', 'unknown')}"
+    
+    # Determine vault_type
+    vault_type = raw_vault.get("vault_type")
+    if not vault_type:
+        if raw_vault.get("is_protocol"):
+            vault_type = "protocol"
+        elif raw_vault.get("leader"):
+            vault_type = "user"
+        else:
+            vault_type = "strategy"
+    
+    # Normalize source_kind
+    source_kind = raw_vault.get("source_kind", "simulated")
+    if source_kind in ["mock", "demo"]:
+        source_kind = "demo"
+    elif source_kind in ["api", "official_api"]:
+        source_kind = "real"
+    elif source_kind == "scrape":
+        source_kind = "derived"
+    
+    # Normalize APR to decimal (0.15 = 15%)
+    apr = raw_vault.get("apr")
+    if apr is not None:
+        if apr > 10:  # Assume it's in percent format
+            apr = apr / 100
+    
+    canonical = {
+        "pk": pk,
+        "protocol": raw_vault.get("protocol", "unknown"),
+        "vault_id": raw_vault.get("vault_id") or raw_vault.get("vault_id") or "",
+        "vault_name": raw_vault.get("vault_name") or raw_vault.get("name", ""),
+        "vault_type": vault_type,
+        "deposit_asset": raw_vault.get("deposit_asset", "USDC"),
+        "external_url": raw_vault.get("vault_url") or raw_vault.get("external_url"),
+        "leader": raw_vault.get("leader"),
+        "created_ts": raw_vault.get("created_ts") or raw_vault.get("created_at"),
+        "first_seen_ts": raw_vault.get("first_seen_ts"),
+        "status": raw_vault.get("status", "active"),
+        "ban_reason": raw_vault.get("ban_reason"),
+        "source_kind": source_kind,
+        "data_quality": raw_vault.get("data_quality", "mock"),
+        "verified": 1 if raw_vault.get("verified", False) else 0,
+        # Legacy fields for backward compatibility
+        "name": raw_vault.get("vault_name") or raw_vault.get("name", ""),
+        "is_protocol": 1 if vault_type == "protocol" else 0,
+        # Current values (denormalized)
+        "tvl_usd": raw_vault.get("tvl_usd"),
+        "apr": apr,
+        "pnl_30d": raw_vault.get("pnl_30d"),
+        "pnl_90d": raw_vault.get("pnl_90d"),
+    }
+    
+    return canonical
+
+
+def upsert_vault(vault: dict):
+    """Insert or update vault using canonical model. first_seen_ts is STICKY."""
+    # Normalize to canonical format
+    canonical = normalize_vault(vault)
+    
     conn = get_db()
     c = conn.cursor()
     now = int(time.time())
-    pk = vault["pk"]
+    pk = canonical["pk"]
     
     # Get existing first_seen_ts (sticky behavior - DB value always wins)
     existing_first_seen = get_first_seen_ts(pk)
     
     if existing_first_seen:
-        # Existing vault - keep original first_seen_ts (STICKY)
         first_seen = existing_first_seen
-    elif vault.get("first_seen_ts"):
-        # New vault with API-provided timestamp (e.g., Lighter created_at)
-        first_seen = vault["first_seen_ts"]
+    elif canonical.get("first_seen_ts"):
+        first_seen = canonical["first_seen_ts"]
     else:
-        # New vault, no API timestamp - use current time
         first_seen = now
     
     # Compute age_days
     age_days = max(0, (now - first_seen) // 86400)
     
     c.execute("""
-        INSERT INTO vaults (pk, protocol, name, vault_id, leader, is_protocol, tvl_usd, apr,
-                           pnl_30d, pnl_90d, age_days, first_seen_ts, updated_ts, source_kind, data_quality, verified)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO vaults (
+            pk, protocol, vault_id, vault_name, vault_type, deposit_asset, external_url,
+            leader, created_ts, first_seen_ts, updated_ts, status, ban_reason,
+            source_kind, data_quality, verified,
+            name, is_protocol, age_days, tvl_usd, apr, pnl_30d, pnl_90d
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(pk) DO UPDATE SET
-            name=excluded.name,
+            vault_name=excluded.vault_name,
             vault_id=excluded.vault_id,
+            vault_type=excluded.vault_type,
+            deposit_asset=excluded.deposit_asset,
+            external_url=excluded.external_url,
             leader=excluded.leader,
+            created_ts=excluded.created_ts,
+            first_seen_ts=COALESCE(vaults.first_seen_ts, excluded.first_seen_ts),
+            updated_ts=excluded.updated_ts,
+            status=excluded.status,
+            ban_reason=excluded.ban_reason,
+            source_kind=excluded.source_kind,
+            data_quality=excluded.data_quality,
+            verified=excluded.verified,
+            name=excluded.vault_name,
             is_protocol=excluded.is_protocol,
+            age_days=excluded.age_days,
             tvl_usd=excluded.tvl_usd,
             apr=excluded.apr,
             pnl_30d=excluded.pnl_30d,
-            pnl_90d=excluded.pnl_90d,
-            age_days=excluded.age_days,
-            first_seen_ts=COALESCE(vaults.first_seen_ts, excluded.first_seen_ts),
-            updated_ts=excluded.updated_ts,
-            source_kind=excluded.source_kind,
-            data_quality=excluded.data_quality,
-            verified=excluded.verified
+            pnl_90d=excluded.pnl_90d
     """, (
         pk,
-        vault["protocol"],
-        vault["name"],
-        vault.get("vault_id"),
-        vault.get("leader"),
-        1 if vault.get("is_protocol") else 0,
-        vault.get("tvl_usd", 0),
-        vault.get("apr"),
-        vault.get("pnl_30d"),
-        vault.get("pnl_90d"),
-        age_days,
+        canonical["protocol"],
+        canonical["vault_id"],
+        canonical["vault_name"],
+        canonical["vault_type"],
+        canonical["deposit_asset"],
+        canonical["external_url"],
+        canonical["leader"],
+        canonical["created_ts"],
         first_seen,
         now,
-        vault.get("source_kind", "mock"),
-        vault.get("data_quality", "mock"),
-        1 if vault.get("verified", True) else 0
+        canonical["status"],
+        canonical["ban_reason"],
+        canonical["source_kind"],
+        canonical["data_quality"],
+        canonical["verified"],
+        canonical["name"],
+        canonical["is_protocol"],
+        age_days,
+        canonical["tvl_usd"],
+        canonical["apr"],
+        canonical["pnl_30d"],
+        canonical["pnl_90d"],
     ))
     conn.commit()
     conn.close()
 
 
-def add_snapshot(pk: str, tvl: float, apr: float):
-    """Add daily snapshot (deduplicated by day bucket). TASK A."""
+# =============================================================================
+# DATA VALIDATION
+# =============================================================================
+def validate_vault_data(vault: dict) -> tuple[bool, list[str]]:
+    """Validate vault data before storage.
+    
+    Returns:
+        (is_valid, list_of_errors)
+    """
+    errors = []
+    
+    # Required fields
+    if not vault.get("protocol"):
+        errors.append("Missing protocol")
+    if not vault.get("vault_id"):
+        errors.append("Missing vault_id")
+    if not vault.get("vault_name"):
+        errors.append("Missing vault_name")
+    
+    # Type validation
+    tvl = vault.get("tvl_usd")
+    if tvl is not None:
+        try:
+            tvl = float(tvl)
+            if tvl < 0:
+                errors.append("TVL cannot be negative")
+            if tvl > 1e12:  # $1T cap
+                errors.append("TVL suspiciously high (>$1T)")
+        except (ValueError, TypeError):
+            errors.append("TVL must be numeric")
+    
+    apr = vault.get("apr")
+    if apr is not None:
+        try:
+            apr = float(apr)
+            # Normalize if in percent
+            if apr > 10:
+                apr = apr / 100
+            if apr < -1 or apr > 10:  # -100% to 1000%
+                errors.append(f"APR out of reasonable range: {apr}")
+        except (ValueError, TypeError):
+            errors.append("APR must be numeric")
+    
+    # Status validation
+    status = vault.get("status", "active")
+    if status not in ["active", "hidden", "banned"]:
+        errors.append(f"Invalid status: {status}")
+    
+    return len(errors) == 0, errors
+
+
+def validate_snapshot_data(snapshot: dict) -> tuple[bool, list[str]]:
+    """Validate snapshot data before storage.
+    
+    Returns:
+        (is_valid, list_of_errors)
+    """
+    errors = []
+    
+    # Required fields
+    if not snapshot.get("vault_pk"):
+        errors.append("Missing vault_pk")
+    if snapshot.get("ts") is None:
+        errors.append("Missing ts")
+    
+    # Confidence validation
+    confidence = snapshot.get("confidence", 1.0)
+    if not (0.0 <= confidence <= 1.0):
+        errors.append(f"Confidence must be 0.0-1.0, got {confidence}")
+    
+    # Source validation
+    source = snapshot.get("source", "api")
+    if source not in ["api", "ui_scrape", "derived", "simulated", "demo"]:
+        errors.append(f"Invalid source: {source}")
+    
+    return len(errors) == 0, errors
+
+
+def deduplicate_vaults(vaults: List[dict]) -> List[dict]:
+    """Deduplicate vaults by canonical key (protocol:vault_id).
+    
+    If duplicates found, prefer:
+    1. Higher TVL
+    2. Higher confidence (real > derived > simulated)
+    3. More recent updated_ts
+    """
+    seen = {}
+    confidence_order = {"real": 3, "derived": 2, "simulated": 1, "demo": 0}
+    
+    for vault in vaults:
+        pk = vault.get("pk") or f"{vault.get('protocol')}:{vault.get('vault_id')}"
+        
+        if pk not in seen:
+            seen[pk] = vault
+        else:
+            existing = seen[pk]
+            # Prefer higher TVL
+            if (vault.get("tvl_usd") or 0) > (existing.get("tvl_usd") or 0):
+                seen[pk] = vault
+            # Prefer higher confidence
+            elif confidence_order.get(vault.get("source_kind", "simulated"), 0) > \
+                 confidence_order.get(existing.get("source_kind", "simulated"), 0):
+                seen[pk] = vault
+    
+    return list(seen.values())
+
+
+def normalize_snapshot(vault_pk: str, raw_data: dict, data_freshness_sec: int = None) -> dict:
+    """Normalize raw snapshot data to canonical Snapshot model.
+    
+    Args:
+        vault_pk: Vault primary key
+        raw_data: Dict with tvl_usd, apr, returns, pnl, etc.
+        data_freshness_sec: Seconds since last successful update
+    
+    Returns:
+        Canonical snapshot dict
+    """
+    now = int(time.time())
+    
+    # Normalize APR to decimal
+    apr = raw_data.get("apr")
+    if apr is not None and apr > 10:  # Assume percent format
+        apr = apr / 100
+    
+    # Determine source and confidence
+    source = raw_data.get("source", "api")
+    if source not in ["api", "ui_scrape", "derived", "simulated", "demo"]:
+        source = "derived"
+    
+    # Calculate confidence based on source
+    confidence_map = {
+        "api": 1.0,
+        "ui_scrape": 0.8,
+        "derived": 0.6,
+        "simulated": 0.3,
+        "demo": 0.1,
+    }
+    confidence = raw_data.get("confidence", confidence_map.get(source, 0.5))
+    
+    # Quality label
+    quality_label = raw_data.get("quality_label")
+    if not quality_label:
+        if source == "api":
+            quality_label = "real"
+        elif source == "derived":
+            quality_label = "derived"
+        else:
+            quality_label = "simulated"
+    
+    canonical = {
+        "vault_pk": vault_pk,
+        "ts": raw_data.get("ts", now // 86400 * 86400),  # Day bucket
+        "tvl_usd": raw_data.get("tvl_usd"),
+        "apr": apr,
+        "return_7d": raw_data.get("return_7d"),
+        "return_30d": raw_data.get("return_30d"),
+        "return_90d": raw_data.get("return_90d"),
+        "pnl_7d": raw_data.get("pnl_7d"),
+        "pnl_30d": raw_data.get("pnl_30d"),
+        "pnl_90d": raw_data.get("pnl_90d"),
+        "data_freshness_sec": data_freshness_sec or 0,
+        "confidence": confidence,
+        "quality_label": quality_label,
+        "source": source,
+    }
+    
+    return canonical
+
+
+def add_snapshot(pk: str, tvl: float, apr: float, source: str = "api", 
+                 returns: dict = None, pnl: dict = None, data_freshness_sec: int = None):
+    """Add daily snapshot with canonical model (deduplicated by day bucket).
+    
+    Args:
+        pk: Vault primary key
+        tvl: TVL in USD
+        apr: APR (decimal format: 0.15 = 15%)
+        source: Data source (api/ui_scrape/derived/simulated/demo)
+        returns: Dict with return_7d, return_30d, return_90d
+        pnl: Dict with pnl_7d, pnl_30d, pnl_90d
+        data_freshness_sec: Seconds since last successful update
+    """
+    raw_data = {
+        "tvl_usd": tvl,
+        "apr": apr,
+        "source": source,
+        "return_7d": returns.get("7d") if returns else None,
+        "return_30d": returns.get("30d") if returns else None,
+        "return_90d": returns.get("90d") if returns else None,
+        "pnl_7d": pnl.get("7d") if pnl else None,
+        "pnl_30d": pnl.get("30d") if pnl else None,
+        "pnl_90d": pnl.get("90d") if pnl else None,
+    }
+    
+    snapshot = normalize_snapshot(pk, raw_data, data_freshness_sec)
+    
     conn = get_db()
     c = conn.cursor()
-    # TASK A: Use day bucket instead of hour
-    ts = int(time.time()) // 86400 * 86400  # Round to day
     try:
-        c.execute("INSERT OR IGNORE INTO snapshots (vault_pk, ts, tvl_usd, apr) VALUES (?, ?, ?, ?)",
-                  (pk, ts, tvl, apr))
+        c.execute("""
+            INSERT INTO snapshots (
+                vault_pk, ts, tvl_usd, apr,
+                return_7d, return_30d, return_90d,
+                pnl_7d, pnl_30d, pnl_90d,
+                data_freshness_sec, confidence, quality_label, source
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(vault_pk, ts) DO UPDATE SET
+                tvl_usd=excluded.tvl_usd,
+                apr=excluded.apr,
+                return_7d=excluded.return_7d,
+                return_30d=excluded.return_30d,
+                return_90d=excluded.return_90d,
+                pnl_7d=excluded.pnl_7d,
+                pnl_30d=excluded.pnl_30d,
+                pnl_90d=excluded.pnl_90d,
+                data_freshness_sec=excluded.data_freshness_sec,
+                confidence=excluded.confidence,
+                quality_label=excluded.quality_label,
+                source=excluded.source
+        """, (
+            snapshot["vault_pk"],
+            snapshot["ts"],
+            snapshot["tvl_usd"],
+            snapshot["apr"],
+            snapshot["return_7d"],
+            snapshot["return_30d"],
+            snapshot["return_90d"],
+            snapshot["pnl_7d"],
+            snapshot["pnl_30d"],
+            snapshot["pnl_90d"],
+            snapshot["data_freshness_sec"],
+            snapshot["confidence"],
+            snapshot["quality_label"],
+            snapshot["source"],
+        ))
         conn.commit()
-    except:
-        pass
-    conn.close()
+    except Exception as e:
+        print(f"[SNAPSHOT] Error storing snapshot for {pk[:16]}...: {e}")
+    finally:
+        conn.close()
 
 
 def add_pnl_point(pk: str, ts: int, pnl_usd: float, account_value: float = None):
@@ -473,6 +904,365 @@ def get_pnl_history(vault_pk: str, days: int = 90) -> List[dict]:
     conn.close()
     
     return [{"ts": row["ts"], "pnl": row["pnl_usd"], "account_value": row["account_value"]} for row in rows]
+
+
+# =============================================================================
+# ANALYTICS ENGINE: Daily Returns, Cumulative Returns, Volatility, Drawdown
+# =============================================================================
+
+def get_snapshots_for_analytics(vault_pk: str, days: int = 120) -> List[dict]:
+    """Fetch last N days of snapshots ordered by date for analytics calculation."""
+    conn = get_db()
+    c = conn.cursor()
+    now = int(time.time())
+    cutoff_ts = now - (days * 86400)
+    
+    c.execute("""
+        SELECT ts, tvl_usd, apr, quality_label, source
+        FROM snapshots
+        WHERE vault_pk = ? AND ts >= ?
+        ORDER BY ts ASC
+    """, (vault_pk, cutoff_ts))
+    
+    rows = c.fetchall()
+    conn.close()
+    
+    return [
+        {
+            "ts": row["ts"],
+            "tvl_usd": row["tvl_usd"],
+            "apr": row["apr"],
+            "quality_label": row.get("quality_label", "derived"),
+            "source": row.get("source", "derived"),
+        }
+        for row in rows
+    ]
+
+
+def compute_daily_returns(snapshots: List[dict]) -> List[dict]:
+    """Compute daily returns from snapshots.
+    
+    Rules:
+    - Skip day if previous TVL missing or <= 0
+    - daily_return = (TVL_today - TVL_yesterday) / TVL_yesterday
+    - Store as decimal (0.012 = +1.2%)
+    """
+    daily_data = []
+    
+    for i in range(1, len(snapshots)):
+        today = snapshots[i]
+        yesterday = snapshots[i - 1]
+        
+        tvl_today = today.get("tvl_usd")
+        tvl_yesterday = yesterday.get("tvl_usd")
+        
+        # Skip if previous TVL missing or <= 0
+        if tvl_yesterday is None or tvl_yesterday <= 0:
+            continue
+        
+        # Skip if today TVL missing
+        if tvl_today is None:
+            continue
+        
+        # Calculate daily return
+        daily_return = (tvl_today - tvl_yesterday) / tvl_yesterday
+        
+        daily_data.append({
+            "date_ts": today["ts"],
+            "daily_return": daily_return,
+            "tvl_usd": tvl_today,
+            "apr": today.get("apr"),
+            "quality_label": today.get("quality_label", "derived"),
+            "source": today.get("source", "derived"),
+        })
+    
+    return daily_data
+
+
+def compute_cumulative_return(daily_returns: List[float]) -> Optional[float]:
+    """Compute cumulative return as product(1 + daily_return) - 1.
+    
+    Returns None if insufficient data points.
+    """
+    if not daily_returns:
+        return None
+    
+    product = 1.0
+    for dr in daily_returns:
+        product *= (1.0 + dr)
+    
+    return product - 1.0
+
+
+def compute_volatility(daily_returns: List[float]) -> Optional[float]:
+    """Compute volatility as standard deviation of daily returns."""
+    if len(daily_returns) < 2:
+        return None
+    
+    import statistics
+    try:
+        return statistics.stdev(daily_returns)
+    except:
+        return None
+
+
+def compute_max_drawdown(daily_returns: List[float]) -> Optional[float]:
+    """Compute max drawdown from cumulative equity curve.
+    
+    Builds cumulative equity curve, finds max peak-to-trough drop.
+    Returns as positive % (e.g., 0.18 = 18%).
+    """
+    if not daily_returns:
+        return None
+    
+    # Build cumulative equity curve
+    equity = 1.0
+    peak = 1.0
+    max_dd = 0.0
+    
+    for dr in daily_returns:
+        equity *= (1.0 + dr)
+        if equity > peak:
+            peak = equity
+        drawdown = (peak - equity) / peak
+        if drawdown > max_dd:
+            max_dd = drawdown
+    
+    return max_dd
+
+
+def compute_tvl_volatility(snapshots: List[dict]) -> Optional[float]:
+    """Compute TVL volatility as std(log(TVL_t / TVL_t-1))."""
+    if len(snapshots) < 2:
+        return None
+    
+    log_returns = []
+    for i in range(1, len(snapshots)):
+        tvl_today = snapshots[i].get("tvl_usd")
+        tvl_yesterday = snapshots[i - 1].get("tvl_usd")
+        
+        if tvl_today and tvl_yesterday and tvl_yesterday > 0:
+            log_return = math.log(tvl_today / tvl_yesterday)
+            log_returns.append(log_return)
+    
+    if len(log_returns) < 2:
+        return None
+    
+    import statistics
+    try:
+        return statistics.stdev(log_returns)
+    except:
+        return None
+
+
+def compute_apr_variance(snapshots: List[dict]) -> Optional[float]:
+    """Compute variance of APR values."""
+    apr_values = [s.get("apr") for s in snapshots if s.get("apr") is not None]
+    
+    if len(apr_values) < 2:
+        return None
+    
+    import statistics
+    try:
+        return statistics.variance(apr_values)
+    except:
+        return None
+
+
+def determine_quality_label(vault_pk: str, date_ts: int, protocol: str, 
+                            has_real_pnl: bool, daily_return_source: str) -> str:
+    """Determine quality_label per vault per day.
+    
+    Rules:
+    - If protocol == "hyperliquid" AND PnL exists → "real"
+    - Else if daily_return derived from real TVL → "derived"
+    - Else → "simulated"
+    """
+    if protocol == "hyperliquid" and has_real_pnl:
+        return "real"
+    elif daily_return_source == "real":
+        return "derived"
+    else:
+        return "simulated"
+
+
+def compute_vault_analytics(vault_pk: str, protocol: str, force_recompute: bool = False) -> int:
+    """Compute analytics for a single vault.
+    
+    Returns number of new/computed rows.
+    """
+    # Get snapshots (last 120 days)
+    snapshots = get_snapshots_for_analytics(vault_pk, days=120)
+    
+    if len(snapshots) < 2:
+        return 0  # Need at least 2 points
+    
+    # Compute daily returns
+    daily_data = compute_daily_returns(snapshots)
+    
+    if not daily_data:
+        return 0
+    
+    # Check if Hyperliquid has real PnL
+    has_real_pnl = False
+    if protocol == "hyperliquid":
+        pnl_history = get_pnl_history(vault_pk, days=120)
+        has_real_pnl = len(pnl_history) > 0
+    
+    # Get existing analytics to avoid recomputing
+    conn = get_db()
+    c = conn.cursor()
+    
+    if not force_recompute:
+        c.execute("SELECT date_ts FROM vault_analytics_daily WHERE vault_pk = ?", (vault_pk,))
+        existing_dates = {row["date_ts"] for row in c.fetchall()}
+    else:
+        existing_dates = set()
+    
+    computed_count = 0
+    
+    # Process each day
+    for i, day_data in enumerate(daily_data):
+        date_ts = day_data["date_ts"]
+        
+        # Skip if already computed
+        if date_ts in existing_dates:
+            continue
+        
+        # Get 30d and 90d windows
+        window_30d = []
+        window_90d = []
+        
+        # Collect daily returns for windows
+        for j in range(max(0, i - 89), i + 1):
+            if j < len(daily_data):
+                window_90d.append(daily_data[j]["daily_return"])
+                if j >= max(0, i - 29):
+                    window_30d.append(daily_data[j]["daily_return"])
+        
+        # Compute metrics
+        daily_return = day_data["daily_return"]
+        
+        # Cumulative returns
+        cum_return_30d = None
+        cum_return_90d = None
+        data_points_30d = len(window_30d)
+        data_points_90d = len(window_90d)
+        
+        if data_points_30d >= 10:
+            cum_return_30d = compute_cumulative_return(window_30d)
+        if data_points_90d >= 30:
+            cum_return_90d = compute_cumulative_return(window_90d)
+        
+        # Volatility and drawdown (30d window)
+        volatility_30d = None
+        worst_day_30d = None
+        max_drawdown_30d = None
+        
+        if data_points_30d >= 10:
+            volatility_30d = compute_volatility(window_30d)
+            worst_day_30d = min(window_30d) if window_30d else None
+            max_drawdown_30d = compute_max_drawdown(window_30d)
+        
+        # TVL and APR stability (30d window)
+        # Get snapshots for 30d window
+        window_start_ts = date_ts - (30 * 86400)
+        window_snapshots = [s for s in snapshots if window_start_ts <= s["ts"] <= date_ts]
+        
+        tvl_volatility_30d = None
+        apr_variance_30d = None
+        
+        if len(window_snapshots) >= 10:
+            tvl_volatility_30d = compute_tvl_volatility(window_snapshots)
+            apr_variance_30d = compute_apr_variance(window_snapshots)
+        
+        # Determine quality label
+        quality_label = determine_quality_label(
+            vault_pk, date_ts, protocol, has_real_pnl,
+            day_data.get("source", "derived")
+        )
+        
+        # Store analytics
+        try:
+            c.execute("""
+                INSERT INTO vault_analytics_daily (
+                    vault_pk, date_ts, daily_return,
+                    cum_return_30d, cum_return_90d,
+                    volatility_30d, worst_day_30d, max_drawdown_30d,
+                    tvl_volatility_30d, apr_variance_30d,
+                    quality_label, data_points_30d, data_points_90d,
+                    computed_ts
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                vault_pk,
+                date_ts,
+                daily_return,
+                cum_return_30d,
+                cum_return_90d,
+                volatility_30d,
+                worst_day_30d,
+                max_drawdown_30d,
+                tvl_volatility_30d,
+                apr_variance_30d,
+                quality_label,
+                data_points_30d,
+                data_points_90d,
+                int(time.time()),
+            ))
+            computed_count += 1
+        except Exception as e:
+            print(f"[ANALYTICS] Error storing analytics for {vault_pk[:16]}... date {date_ts}: {e}")
+    
+    conn.commit()
+    conn.close()
+    
+    return computed_count
+
+
+def compute_all_vaults_analytics(force_recompute: bool = False) -> dict:
+    """Compute analytics for all vaults.
+    
+    Returns summary dict with counts.
+    """
+    import time as _time
+    start_time = _time.time()
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT pk, protocol FROM vaults WHERE status = 'active'")
+    vaults = c.fetchall()
+    conn.close()
+    
+    total_vaults = len(vaults)
+    total_computed = 0
+    errors = []
+    
+    print(f"[ANALYTICS] Computing analytics for {total_vaults} vaults...")
+    
+    for row in vaults:
+        vault_pk = row["pk"]
+        protocol = row["protocol"]
+        
+        try:
+            count = compute_vault_analytics(vault_pk, protocol, force_recompute)
+            total_computed += count
+        except Exception as e:
+            errors.append(f"{vault_pk[:16]}...: {e}")
+            print(f"[ANALYTICS] Error computing for {vault_pk[:16]}...: {e}")
+    
+    elapsed_sec = _time.time() - start_time
+    
+    result = {
+        "total_vaults": total_vaults,
+        "total_computed": total_computed,
+        "elapsed_sec": elapsed_sec,
+        "errors": errors[:10],  # First 10 errors
+    }
+    
+    print(f"[ANALYTICS] Done. Computed {total_computed} analytics rows in {elapsed_sec:.1f}s")
+    
+    return result
 
 
 def seeded_random(seed: str, index: int) -> float:
@@ -905,23 +1695,33 @@ def get_all_vaults() -> List[dict]:
         else:
             tvl_usd = float(tvl_usd)  # Normalize to float
         
+        # Use canonical fields, fallback to legacy fields for backward compatibility
+        vault_name = row.get("vault_name") or row.get("name", "")
+        vault_type = row.get("vault_type") or ("protocol" if row.get("is_protocol") else "user")
+        deposit_asset = row.get("deposit_asset") or "USDC"
+        external_url = row.get("external_url")
+        status = row.get("status", "active")
+        
         vault = {
             "id": row["pk"],
             "protocol": row["protocol"],
-            "vault_name": row["name"],
-            "vault_id": row["vault_id"],
-            "leader": row["leader"],
-            "is_protocol": bool(row["is_protocol"]),
+            "vault_name": vault_name,
+            "vault_id": row.get("vault_id") or "",
+            "vault_type": vault_type,
+            "deposit_asset": deposit_asset,
+            "external_url": external_url,
+            "leader": row.get("leader") or "",
+            "is_protocol": bool(row.get("is_protocol", 0)),  # Legacy compatibility
+            "status": status,
             "tvl_usd": tvl_usd,
             "age_days": age_days,
             "age_hours": age_hours,
             "age_label": age_label,
             "first_seen_ts": first_seen,
-            "source_kind": row["source_kind"] or "mock",
-            "data_quality": row["data_quality"] or "mock",
+            "created_ts": row.get("created_ts"),
+            "source_kind": row.get("source_kind") or "simulated",
+            "data_quality": row.get("data_quality") or "mock",
             "verified": verified,
-            # Default deposit asset for all protocols (can be overridden)
-            "deposit_asset": "USDC",
         }
         
         # Mark demo vaults for exclusion from rankings
@@ -983,14 +1783,69 @@ def get_all_vaults() -> List[dict]:
         # Compute risk score
         vault["risk_score"] = compute_risk_score(vault)
         
-        # Build official vault URL
-        url_info = build_vault_url(
-            protocol=row["protocol"],
-            vault_id=row["vault_id"],
-            name=row["name"],
-            is_protocol_vault=bool(row["is_protocol"])
-        )
-        vault.update(url_info)
+        # Data Quality Contract: Get latest snapshot for freshness/confidence
+        conn2 = get_db()
+        c2 = conn2.cursor()
+        c2.execute("""
+            SELECT source, confidence, quality_label, data_freshness_sec, ts
+            FROM snapshots
+            WHERE vault_pk = ?
+            ORDER BY ts DESC
+            LIMIT 1
+        """, (pk,))
+        snapshot_row = c2.fetchone()
+        conn2.close()
+        
+        if snapshot_row:
+            vault["data_quality_contract"] = {
+                "source": snapshot_row["source"] or vault["source_kind"],
+                "confidence": float(snapshot_row["confidence"]) if snapshot_row["confidence"] is not None else 0.5,
+                "quality_label": snapshot_row["quality_label"] or "derived",
+                "freshness_sec": snapshot_row["data_freshness_sec"] or 0,
+            }
+            # Calculate freshness age
+            if snapshot_row["ts"]:
+                freshness_age_sec = now - snapshot_row["ts"]
+                vault["data_quality_contract"]["freshness_age_sec"] = freshness_age_sec
+                vault["data_quality_contract"]["freshness_age_min"] = freshness_age_sec // 60
+        else:
+            # No snapshot - use vault-level defaults
+            source_map = {
+                "real": "api",
+                "derived": "derived",
+                "simulated": "simulated",
+                "demo": "demo",
+            }
+            confidence_map = {
+                "real": 1.0,
+                "derived": 0.6,
+                "simulated": 0.3,
+                "demo": 0.1,
+            }
+            vault["data_quality_contract"] = {
+                "source": source_map.get(vault["source_kind"], "derived"),
+                "confidence": confidence_map.get(vault["source_kind"], 0.5),
+                "quality_label": "derived" if vault["source_kind"] != "real" else "real",
+                "freshness_sec": 0,
+                "freshness_age_sec": 0,
+                "freshness_age_min": 0,
+            }
+        
+        # Add confidence flag for filtering (used in rankings)
+        confidence = vault["data_quality_contract"]["confidence"]
+        vault["meets_confidence_threshold"] = confidence >= 0.7
+        
+        # Build official vault URL (use external_url if available)
+        if external_url:
+            vault["vault_url"] = external_url
+        else:
+            url_info = build_vault_url(
+                protocol=row["protocol"],
+                vault_id=row.get("vault_id") or "",
+                name=vault_name,
+                is_protocol_vault=bool(row.get("is_protocol", 0))
+            )
+            vault.update(url_info)
         
         vaults.append(vault)
     
@@ -2014,36 +2869,187 @@ def cleanup_old_vault_formats():
         print(f"[CLEANUP] Removed {len(old_drift_pks)} old Drift format vaults")
 
 
+def update_system_status(protocol: str, status: str, discovered: int, active: int, 
+                         banned: int, stale: int, last_error: str = None):
+    """Update system status for observability."""
+    conn = get_db()
+    c = conn.cursor()
+    now = int(time.time())
+    
+    c.execute("""
+        INSERT INTO system_status (
+            protocol, status, discovered_count, active_count, banned_count, stale_count,
+            last_success_fetch, last_error, updated_ts
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(protocol) DO UPDATE SET
+            status=excluded.status,
+            discovered_count=excluded.discovered_count,
+            active_count=excluded.active_count,
+            banned_count=excluded.banned_count,
+            stale_count=excluded.stale_count,
+            last_success_fetch=excluded.last_success_fetch,
+            last_error=excluded.last_error,
+            updated_ts=excluded.updated_ts
+    """, (protocol, status, discovered, active, banned, stale, now, last_error, now))
+    
+    conn.commit()
+    conn.close()
+
+
 def run_fetch_job():
-    """Fetch all protocols and store to DB."""
-    print("[FETCH] Starting...")
+    """Fetch all protocols using canonical pipeline: fetch → normalize → validate → deduplicate → store."""
+    print("[FETCH] Starting canonical pipeline...")
+    import time as _time
+    start_time = _time.time()
     
     # Clean up old vault formats
     cleanup_old_vault_formats()
     
+    protocol_results = {}
+    
+    # =============================================================================
+    # STEP 1: FETCH (raw data from APIs)
+    # =============================================================================
+    print("[FETCH] Step 1: Fetching raw data...")
+    raw_vaults_by_protocol = {
+        "hyperliquid": fetch_hyperliquid(),
+        "lighter": fetch_lighter(),
+        "drift": fetch_drift(),
+        "nado": fetch_nado(),
+    }
+    
+    # =============================================================================
+    # STEP 2: NORMALIZE → VALIDATE → DEDUPLICATE → FILTER
+    # =============================================================================
+    print("[FETCH] Step 2: Normalizing and validating...")
     all_vaults = []
+    validation_errors = {}
     
-    # Hyperliquid (real data)
-    hl_vaults = fetch_hyperliquid()
-    all_vaults.extend(hl_vaults)
-    print(f"[FETCH] Hyperliquid: {len(hl_vaults)} vaults")
+    for protocol, raw_vaults in raw_vaults_by_protocol.items():
+        discovered = len(raw_vaults)
+        valid_count = 0
+        error_count = 0
+        
+        # Normalize each vault
+        normalized = []
+        for raw in raw_vaults:
+            try:
+                vault = normalize_vault(raw)
+                is_valid, errors = validate_vault_data(vault)
+                
+                if is_valid:
+                    normalized.append(vault)
+                    valid_count += 1
+                else:
+                    error_count += 1
+                    if protocol not in validation_errors:
+                        validation_errors[protocol] = []
+                    validation_errors[protocol].extend([f"{vault.get('vault_name', 'unknown')}: {e}" for e in errors])
+            except Exception as e:
+                error_count += 1
+                if protocol not in validation_errors:
+                    validation_errors[protocol] = []
+                validation_errors[protocol].append(f"Normalization error: {e}")
+        
+        # Deduplicate
+        normalized = deduplicate_vaults(normalized)
+        
+        # Apply filters (TVL >= $500K, APR > 0, etc.)
+        filtered = []
+        banned_count = 0
+        for vault in normalized:
+            # Check banlist
+            if vault.get("status") == "banned":
+                banned_count += 1
+                continue
+            
+            # TVL filter (except demo vaults)
+            if vault.get("source_kind") != "demo":
+                tvl = vault.get("tvl_usd")
+                if tvl is None or tvl < 500000:
+                    continue
+            
+            # APR filter (must be positive)
+            apr = vault.get("apr")
+            if apr is None or apr <= 0:
+                continue
+            
+            filtered.append(vault)
+        
+        active_count = len(filtered)
+        all_vaults.extend(filtered)
+        
+        # Update system status
+        protocol_status = "ok" if error_count == 0 and active_count > 0 else "error" if error_count > discovered * 0.5 else "stale"
+        last_error = "; ".join(validation_errors.get(protocol, [])[:3]) if validation_errors.get(protocol) else None
+        update_system_status(protocol, protocol_status, discovered, active_count, banned_count, 0, last_error)
+        
+        print(f"[FETCH] {protocol}: {discovered} discovered → {valid_count} valid → {active_count} active (errors: {error_count})")
     
-    # Other protocols (real or demo)
-    all_vaults.extend(fetch_nado())
-    all_vaults.extend(fetch_lighter())
-    all_vaults.extend(fetch_drift())
+    # =============================================================================
+    # STEP 3: STORE (Vaults + Snapshots)
+    # =============================================================================
+    print("[FETCH] Step 3: Storing vaults and snapshots...")
+    stored_count = 0
+    snapshot_count = 0
+    now = int(time.time())
     
-    # Store all vaults
     for vault in all_vaults:
-        upsert_vault(vault)
-        # Store snapshots daily for ALL vaults
-        tvl = vault.get("tvl_usd")
-        apr = vault.get("apr")
-        # Store snapshot if we have any data (tvl or apr)
-        if tvl is not None or apr is not None:
-            add_snapshot(vault["pk"], tvl or 0, apr or 0)
+        try:
+            # Store vault
+            upsert_vault(vault)
+            stored_count += 1
+            
+            # Store snapshot with data quality metadata
+            tvl = vault.get("tvl_usd")
+            apr = vault.get("apr")
+            source_kind = vault.get("source_kind", "simulated")
+            
+            if tvl is not None or apr is not None:
+                # Determine source for snapshot
+                source_map = {
+                    "real": "api",
+                    "derived": "derived",
+                    "simulated": "simulated",
+                    "demo": "demo",
+                }
+                snapshot_source = source_map.get(source_kind, "derived")
+                
+                # Calculate returns if available
+                returns = {}
+                pnl = {}
+                if vault.get("pnl_30d") is not None:
+                    pnl["30d"] = vault.get("pnl_30d")
+                if vault.get("pnl_90d") is not None:
+                    pnl["90d"] = vault.get("pnl_90d")
+                
+                add_snapshot(
+                    vault["pk"],
+                    tvl or 0,
+                    apr or 0,
+                    source=snapshot_source,
+                    returns=returns if returns else None,
+                    pnl=pnl if pnl else None,
+                    data_freshness_sec=0  # Fresh data
+                )
+                snapshot_count += 1
+        except Exception as e:
+            print(f"[FETCH] Error storing vault {vault.get('pk', 'unknown')}: {e}")
     
-    print(f"[FETCH] Done. Stored {len(all_vaults)} vaults.")
+    elapsed_sec = _time.time() - start_time
+    print(f"[FETCH] Done. Stored {stored_count} vaults, {snapshot_count} snapshots in {elapsed_sec:.1f}s")
+    
+    # =============================================================================
+    # STEP 4: COMPUTE ANALYTICS (Daily Returns, Cumulative Returns, Volatility, Drawdown)
+    # =============================================================================
+    print("[FETCH] Step 4: Computing analytics...")
+    analytics_result = compute_all_vaults_analytics(force_recompute=False)
+    print(f"[FETCH] Analytics: {analytics_result['total_computed']} new rows computed in {analytics_result['elapsed_sec']:.1f}s")
+    
+    # Summary
+    if validation_errors:
+        print(f"[FETCH] Validation errors: {sum(len(v) for v in validation_errors.values())} total")
 
 
 # =============================================================================
@@ -2272,6 +3278,130 @@ class APIHandler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "version": "beta",
                 "protocols": ["hyperliquid", "nado", "lighter", "drift"],
+            })
+        
+        elif path == "/api/system-status":
+            # Observability endpoint - system health and protocol status
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("SELECT * FROM system_status ORDER BY protocol")
+            rows = c.fetchall()
+            conn.close()
+            
+            protocols = []
+            overall_status = "ok"
+            for row in rows:
+                protocol_data = {
+                    "protocol": row["protocol"],
+                    "status": row["status"],
+                    "last_success_fetch": row["last_success_fetch"],
+                    "discovered_count": row["discovered_count"],
+                    "active_count": row["active_count"],
+                    "banned_count": row["banned_count"],
+                    "stale_count": row["stale_count"],
+                }
+                if row["last_error"]:
+                    protocol_data["last_error"] = row["last_error"]
+                if row["last_success_fetch"]:
+                    age_sec = int(time.time()) - row["last_success_fetch"]
+                    protocol_data["fetch_age_sec"] = age_sec
+                    protocol_data["fetch_age_min"] = age_sec // 60
+                
+                if row["status"] != "ok":
+                    overall_status = "degraded"
+                
+                protocols.append(protocol_data)
+            
+            # Get recent error log (last 20 errors from validation)
+            error_log = []
+            # TODO: Store errors in DB for persistence
+            
+            self.send_json({
+                "overall_status": overall_status,
+                "timestamp": int(time.time()),
+                "protocols": protocols,
+                "error_log": error_log[:20],  # Last 20 errors
+            })
+        
+        elif path == "/api/analytics-debug":
+            # Debug endpoint for analytics validation
+            conn = get_db()
+            c = conn.cursor()
+            
+            # Get random 3 vaults with analytics
+            c.execute("""
+                SELECT DISTINCT vault_pk
+                FROM vault_analytics_daily
+                ORDER BY RANDOM()
+                LIMIT 3
+            """)
+            vault_pks = [row["vault_pk"] for row in c.fetchall()]
+            
+            if not vault_pks:
+                self.send_json({
+                    "status": "no_data",
+                    "message": "No analytics data found. Run fetch job first."
+                })
+                conn.close()
+                return
+            
+            debug_data = []
+            
+            for vault_pk in vault_pks:
+                # Get latest analytics row
+                c.execute("""
+                    SELECT *
+                    FROM vault_analytics_daily
+                    WHERE vault_pk = ?
+                    ORDER BY date_ts DESC
+                    LIMIT 1
+                """, (vault_pk,))
+                row = c.fetchone()
+                
+                if row:
+                    # Get vault info
+                    c.execute("SELECT protocol, vault_name FROM vaults WHERE pk = ?", (vault_pk,))
+                    vault_info = c.fetchone()
+                    
+                    debug_data.append({
+                        "vault_pk": vault_pk,
+                        "protocol": vault_info["protocol"] if vault_info else "unknown",
+                        "vault_name": vault_info["vault_name"] if vault_info else "unknown",
+                        "date_ts": row["date_ts"],
+                        "daily_return": row["daily_return"],
+                        "cum_return_30d": row["cum_return_30d"],
+                        "cum_return_90d": row["cum_return_90d"],
+                        "volatility_30d": row["volatility_30d"],
+                        "worst_day_30d": row["worst_day_30d"],
+                        "max_drawdown_30d": row["max_drawdown_30d"],
+                        "tvl_volatility_30d": row["tvl_volatility_30d"],
+                        "apr_variance_30d": row["apr_variance_30d"],
+                        "quality_label": row["quality_label"],
+                        "data_points_30d": row["data_points_30d"],
+                        "data_points_90d": row["data_points_90d"],
+                    })
+            
+            conn.close()
+            
+            # Validation: Check that values differ across vaults
+            validation = {
+                "all_have_data": len(debug_data) == 3,
+                "values_differ": True,
+                "issues": [],
+            }
+            
+            if len(debug_data) >= 2:
+                # Check if cumulative returns differ
+                cum_returns_30d = [d["cum_return_30d"] for d in debug_data if d["cum_return_30d"] is not None]
+                if len(set(cum_returns_30d)) < len(cum_returns_30d):
+                    validation["values_differ"] = False
+                    validation["issues"].append("Some vaults have identical cum_return_30d")
+            
+            self.send_json({
+                "status": "ok",
+                "sample_vaults": debug_data,
+                "validation": validation,
+                "total_analytics_rows": len(vault_pks),
             })
         
         else:
