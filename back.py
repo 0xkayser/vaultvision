@@ -428,21 +428,23 @@ def normalize_vault(raw_vault: dict) -> dict:
         source_kind = "derived"
     
     # Normalize APR to decimal (0.15 = 15%)
-    # Hyperliquid API can return APR in different formats:
-    # - Decimal: 0.1751 (17.51%) - keep as is
-    # - Percentage: 17.51 (17.51%) - divide by 100
-    # - Percentage * 100: 1751 (1751% = 17.51 decimal) - divide by 10000
+    # Hyperliquid API returns APR in percentage format (e.g., 17.51 = 17.51%, 1751 = 1751%)
+    # We need to convert to decimal: divide by 100
+    # But if value is very large (>= 100), it might be percentage * 100 (e.g., 1751 = 1751% = 17.51 decimal)
     apr = raw_vault.get("apr")
     if apr is not None:
         apr = float(apr)
         protocol = raw_vault.get("protocol", "")
         
         if protocol == "hyperliquid":
-            # Hyperliquid: normalize based on value range
-            if apr >= 100:  # 1751 -> 0.1751 (percentage * 100)
-                apr = apr / 10000
-            elif apr >= 1.0:  # 17.51 -> 0.1751 (percentage)
-                apr = apr / 100
+            # Hyperliquid: API returns percentage format
+            # If >= 100, it's percentage * 100 (e.g., 1751 = 1751% = 17.51 decimal) -> divide by 10000
+            # If >= 1.0, it's percentage (e.g., 17.51 = 17.51%) -> divide by 100
+            # If < 1.0, it's already decimal (e.g., 0.1751 = 17.51%) -> keep as is
+            if apr >= 100:
+                apr = apr / 10000  # 1751 -> 0.1751 (17.51%)
+            elif apr >= 1.0:
+                apr = apr / 100  # 17.51 -> 0.1751 (17.51%)
             # else: already decimal (0.1751), keep as is
         else:
             # Other protocols: normalize if > 1.0 (likely percentage format)
