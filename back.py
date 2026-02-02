@@ -1769,10 +1769,67 @@ def get_all_vaults() -> List[dict]:
         pnl_30d = row["pnl_30d"]
         pnl_90d = row["pnl_90d"]
         
-        # Try snapshots fallback for ALL protocols if missing or None
-        if pnl_30d is None:
+        # For Hyperliquid: prefer real PnL from pnl_history table over snapshots
+        # (snapshots may contain accountValue instead of TVL, causing incorrect returns)
+        is_hyperliquid = row["protocol"] == "hyperliquid"
+        if is_hyperliquid and (pnl_30d is None or pnl_90d is None):
+            # Try to get real PnL from pnl_history
+            conn_pnl = get_db()
+            c_pnl = conn_pnl.cursor()
+            now_pnl = int(time.time())
+            
+            if pnl_30d is None:
+                cutoff_30d = now_pnl - (30 * 86400)
+                c_pnl.execute("""
+                    SELECT pnl_usd, account_value FROM pnl_history
+                    WHERE vault_pk = ? AND ts >= ?
+                    ORDER BY ts ASC
+                    LIMIT 1
+                """, (pk, cutoff_30d))
+                row_30d_start = c_pnl.fetchone()
+                c_pnl.execute("""
+                    SELECT pnl_usd, account_value FROM pnl_history
+                    WHERE vault_pk = ?
+                    ORDER BY ts DESC
+                    LIMIT 1
+                """, (pk,))
+                row_30d_end = c_pnl.fetchone()
+                
+                if row_30d_start and row_30d_end:
+                    start_val = row_30d_start["account_value"] or row_30d_start["pnl_usd"]
+                    end_val = row_30d_end["account_value"] or row_30d_end["pnl_usd"]
+                    if start_val and end_val and start_val > 0:
+                        pnl_30d = (end_val / start_val) - 1
+            
+            if pnl_90d is None:
+                cutoff_90d = now_pnl - (90 * 86400)
+                c_pnl.execute("""
+                    SELECT pnl_usd, account_value FROM pnl_history
+                    WHERE vault_pk = ? AND ts >= ?
+                    ORDER BY ts ASC
+                    LIMIT 1
+                """, (pk, cutoff_90d))
+                row_90d_start = c_pnl.fetchone()
+                c_pnl.execute("""
+                    SELECT pnl_usd, account_value FROM pnl_history
+                    WHERE vault_pk = ?
+                    ORDER BY ts DESC
+                    LIMIT 1
+                """, (pk,))
+                row_90d_end = c_pnl.fetchone()
+                
+                if row_90d_start and row_90d_end:
+                    start_val = row_90d_start["account_value"] or row_90d_start["pnl_usd"]
+                    end_val = row_90d_end["account_value"] or row_90d_end["pnl_usd"]
+                    if start_val and end_val and start_val > 0:
+                        pnl_90d = (end_val / start_val) - 1
+            
+            conn_pnl.close()
+        
+        # Try snapshots fallback for non-Hyperliquid or if still missing
+        if pnl_30d is None and not is_hyperliquid:
             pnl_30d = compute_pnl_from_snapshots(row["pk"], 30)
-        if pnl_90d is None:
+        if pnl_90d is None and not is_hyperliquid:
             pnl_90d = compute_pnl_from_snapshots(row["pk"], 90)
         
         # If still None or 0 (snapshots insufficient), estimate from APR (approximate)
@@ -1789,6 +1846,19 @@ def get_all_vaults() -> List[dict]:
                 # r90 ≈ (1 + apr)^(90/365) - 1
                 pnl_90d = (1 + apr) ** (90 / 365) - 1
                 vault["r90_estimated"] = True
+        
+        # Validate and cap returns to reasonable values (prevent display errors)
+        # Cap at ±500% (5.0) for 30d and ±1000% (10.0) for 90d
+        if pnl_30d is not None:
+            if pnl_30d > 5.0 or pnl_30d < -0.95:  # Cap at +500% or -95%
+                print(f"[WARN] Suspicious r30 value {pnl_30d:.2%} for {pk[:16]}..., capping/clamping")
+                pnl_30d = min(max(pnl_30d, -0.95), 5.0)
+                vault["r30_capped"] = True
+        if pnl_90d is not None:
+            if pnl_90d > 10.0 or pnl_90d < -0.99:  # Cap at +1000% or -99%
+                print(f"[WARN] Suspicious r90 value {pnl_90d:.2%} for {pk[:16]}..., capping/clamping")
+                pnl_90d = min(max(pnl_90d, -0.99), 10.0)
+                vault["r90_capped"] = True
         
         # Always include r30/r90 if we have values
         if pnl_30d is not None:
