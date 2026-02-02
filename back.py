@@ -437,16 +437,32 @@ def normalize_vault(raw_vault: dict) -> dict:
         protocol = raw_vault.get("protocol", "")
         
         if protocol == "hyperliquid":
-            # Hyperliquid: API returns percentage format (e.g., 17.51 = 17.51%, 128.25 = 128.25%)
-            # Convert to decimal by dividing by 100
-            # Exception: if value is very large (>= 1000), it might be percentage * 100 (e.g., 1751 = 1751% = 17.51 decimal)
-            if apr >= 1000:
-                # Very large values: likely percentage * 100 format (e.g., 1751 = 1751% = 17.51 decimal)
-                apr = apr / 10000  # 1751 -> 0.1751 (17.51%)
+            # Hyperliquid: Based on user feedback, API seems to return values that need different handling
+            # If value >= 100, it's likely percentage * 100 format (e.g., 1751 = 1751% on site = 17.51 decimal)
+            # If value < 100 and >= 1.0, it's percentage format (e.g., 17.51 = 17.51% on site = 0.1751 decimal)
+            # If value < 1.0, it's already decimal (e.g., 0.1751 = 17.51% on site)
+            
+            # Log normalization for debugging (first vault only)
+            if raw_vault.get("vault_name", "").startswith("Long HYPE") or raw_vault.get("vault_name", "").startswith("Hyperliquidity"):
+                print(f"[HL APR DEBUG] {raw_vault.get('vault_name', 'unknown')}: raw_apr={apr}, ", end="")
+            
+            if apr >= 100:
+                # Large values: percentage * 100 format (e.g., 1751 = 1751% on site = 17.51 decimal)
+                apr_normalized = apr / 10000  # 1751 -> 0.1751 (17.51%)
+                if raw_vault.get("vault_name", "").startswith("Long HYPE") or raw_vault.get("vault_name", "").startswith("Hyperliquidity"):
+                    print(f"normalized={apr_normalized} (divide by 10000)")
             elif apr >= 1.0:
                 # Normal percentage format: divide by 100
-                apr = apr / 100  # 17.51 -> 0.1751 (17.51%), 128.25 -> 1.2825 (128.25%)
-            # else: already decimal (0.1751), keep as is
+                apr_normalized = apr / 100  # 17.51 -> 0.1751 (17.51%), 128.25 -> 1.2825 (128.25%)
+                if raw_vault.get("vault_name", "").startswith("Long HYPE") or raw_vault.get("vault_name", "").startswith("Hyperliquidity"):
+                    print(f"normalized={apr_normalized} (divide by 100)")
+            else:
+                # Already decimal
+                apr_normalized = apr
+                if raw_vault.get("vault_name", "").startswith("Long HYPE") or raw_vault.get("vault_name", "").startswith("Hyperliquidity"):
+                    print(f"normalized={apr_normalized} (keep as is)")
+            
+            apr = apr_normalized
         else:
             # Other protocols: normalize if > 1.0 (likely percentage format)
             if apr > 1.0:
@@ -2112,12 +2128,10 @@ def fetch_hl_vaults_from_scraper() -> List[dict]:
                 tvl = float(summary.get("tvl", 0) or 0)
                 apr_raw = item.get("apr")
                 apr = float(apr_raw) if apr_raw is not None else None
-                # Hyperliquid API returns APR in different formats:
-                # - Sometimes as decimal (0.1751 = 17.51%)
-                # - Sometimes as percentage (17.51 = 17.51%)
-                # - Sometimes as percentage * 100 (1751 = 1751% = 17.51 decimal)
-                # We'll normalize in normalize_vault() based on value range
-                # For now, keep raw value - normalization happens in normalize_vault()
+                # Log raw APR for debugging (first 3 vaults only)
+                if len(vaults) < 3 and apr is not None:
+                    print(f"[HL DEBUG] Raw APR for {name[:30]}: {apr} (type: {type(apr_raw).__name__})")
+                # Keep raw value - normalization happens in normalize_vault()
             except:
                 continue
             
