@@ -1191,12 +1191,17 @@ def compute_vault_analytics(vault_pk: str, protocol: str, force_recompute: bool 
     snapshots = get_snapshots_for_analytics(vault_pk, days=120)
     
     if len(snapshots) < 2:
+        if len(snapshots) == 0:
+            print(f"[ANALYTICS DEBUG] {vault_pk[:16]}...: No snapshots found")
+        else:
+            print(f"[ANALYTICS DEBUG] {vault_pk[:16]}...: Only {len(snapshots)} snapshot(s), need at least 2")
         return 0  # Need at least 2 points
     
     # Compute daily returns
     daily_data = compute_daily_returns(snapshots)
     
     if not daily_data:
+        print(f"[ANALYTICS DEBUG] {vault_pk[:16]}...: No daily returns computed from {len(snapshots)} snapshots")
         return 0
     
     # Check if Hyperliquid has real PnL
@@ -1343,6 +1348,8 @@ def compute_all_vaults_analytics(force_recompute: bool = False) -> dict:
         try:
             count = compute_vault_analytics(vault_pk, protocol, force_recompute)
             total_computed += count
+            if count > 0 and total_computed <= 3:  # Log first 3 successful computations
+                print(f"[ANALYTICS DEBUG] {vault_pk[:16]}...: Computed {count} analytics rows")
         except Exception as e:
             errors.append(f"{vault_pk[:16]}...: {e}")
             print(f"[ANALYTICS] Error computing for {vault_pk[:16]}...: {e}")
@@ -2028,14 +2035,96 @@ def get_all_vaults() -> List[dict]:
                 except:
                     pass
         else:
-            # Fallback to legacy risk score if no Risk Engine v2 data
-            vault["risk_score"] = compute_risk_score(vault)
-            vault["risk_band"] = "moderate"  # Default fallback
+            # Fallback: compute risk components from available vault data
+            # Use Risk Engine v2 functions with available data
+            tvl_usd = vault.get("tvl_usd")
+            apr = vault.get("apr") or vault.get("apy") or 0
+            r30 = vault.get("r30")
+            r90 = vault.get("r90")
+            age_days = vault.get("age_days", 0)
+            
+            # Performance risk: estimate from r30/r90 and APR volatility
+            volatility_30d = None
+            worst_day_30d = None
+            if r30 is not None:
+                # Estimate volatility from 30d return
+                # Higher absolute return suggests higher volatility, but normalize
+                volatility_30d = min(0.1, abs(r30) * 0.2)  # Cap at 10% volatility
+                # Estimate worst day: if negative return, use portion; if positive, assume small drawdown
+                if r30 < 0:
+                    worst_day_30d = max(-0.2, r30 * 0.4)  # Use 40% of negative return, cap at -20%
+                else:
+                    worst_day_30d = -0.005  # Small drawdown even in positive periods
+            elif apr is not None:
+                # Estimate from APR: higher APR often means higher volatility
+                apr_abs = abs(apr)
+                if apr_abs > 1.0:  # >100% APR
+                    volatility_30d = 0.05
+                    worst_day_30d = -0.03
+                elif apr_abs > 0.5:  # >50% APR
+                    volatility_30d = 0.03
+                    worst_day_30d = -0.02
+                else:
+                    volatility_30d = 0.015
+                    worst_day_30d = -0.01
+            
+            comp_perf, _ = compute_performance_risk(volatility_30d, worst_day_30d)
+            
+            # Drawdown risk: estimate from r30/r90 if available
+            max_drawdown_30d = None
+            if r30 is not None:
+                if r30 < 0:
+                    max_drawdown_30d = min(0.5, abs(r30) * 0.6)  # Use 60% of negative return, cap at 50%
+                elif r90 is not None and r90 < r30:
+                    # If 90d return is worse than 30d, estimate drawdown
+                    max_drawdown_30d = min(0.3, (r30 - r90) * 0.5)
+            elif apr is not None and abs(apr) > 1.0:
+                # High APR suggests potential for larger drawdowns
+                max_drawdown_30d = 0.15
+            
+            comp_dd, _ = compute_drawdown_risk(max_drawdown_30d)
+            
+            # Liquidity risk: use TVL directly (this will vary significantly)
+            comp_liq, _ = compute_liquidity_risk(tvl_usd, None)
+            
+            # Confidence risk: use data_quality and age_days
+            quality_label = vault.get("data_quality", "derived")
+            if quality_label in ["full", "verified"]:
+                quality_label = "real"
+            elif quality_label in ["partial"]:
+                quality_label = "derived"
+            elif quality_label in ["demo", "mock"]:
+                quality_label = "demo"
+            else:
+                quality_label = "derived"
+            
+            # Estimate data_points_30d from age_days
+            # More accurate: if vault is old, assume more data points
+            if age_days >= 30:
+                data_points_30d = 30
+            elif age_days >= 20:
+                data_points_30d = 20
+            elif age_days >= 10:
+                data_points_30d = 10
+            elif age_days > 0:
+                data_points_30d = age_days
+            else:
+                data_points_30d = None
+            
+            comp_conf, _ = compute_confidence_risk(quality_label, data_points_30d)
+            
+            # Compute total risk score
+            risk_score, risk_band = compute_total_risk_score(
+                comp_perf, comp_dd, comp_liq, comp_conf
+            )
+            
+            vault["risk_score"] = risk_score
+            vault["risk_band"] = risk_band
             vault["risk_components"] = {
-                "perf": 50,
-                "drawdown": 50,
-                "liquidity": 50,
-                "confidence": 50
+                "perf": comp_perf,
+                "drawdown": comp_dd,
+                "liquidity": comp_liq,
+                "confidence": comp_conf
             }
         
         # Data Quality Contract: Get latest snapshot for freshness/confidence
@@ -2416,6 +2505,8 @@ def run_risk_engine(target_date_ts: Optional[int] = None) -> dict:
             
             if not analytics_row:
                 skipped_count += 1
+                if skipped_count <= 3:  # Log first 3 skips
+                    print(f"[RISK DEBUG] {vault_pk[:16]}...: Skipped - no analytics data found")
                 continue
             
             # Get latest snapshot for TVL
