@@ -447,6 +447,7 @@ tbody tr:last-child td{border-bottom:none}
 <section class="hero-stats"><div class="stat-card"><div class="stat-label">Total TVL</div><div class="stat-value highlight" id="sTvl">$0</div><div class="stat-sub">Across all protocols</div></div><div class="stat-card"><div class="stat-label">Best APR</div><div class="stat-value" id="sApr">0%</div><div class="stat-sub" id="sAprV">-</div></div><div class="stat-card"><div class="stat-label">Active Vaults</div><div class="stat-value" id="sCnt">0</div><div class="stat-sub" id="sCntS">-</div></div><div class="stat-card"><div class="stat-label">Protocols</div><div class="stat-value">4</div><div class="stat-sub">Nado · Lighter · HL · Drift</div></div></section>
 <section class="section"><div class="section-header"><h2 class="section-title">Protocol Vaults<span class="badge">Official</span></h2></div><div class="grid" id="protoGrid"></div></section>
 <section class="section"><div class="section-header"><h2 class="section-title">User Vaults<span class="badge">Community</span></h2><div class="pills" id="dashPills"></div></div><div class="grid" id="userGrid"></div></section>
+<section class="section" id="bestRiskSection"><div class="section-header"><h2 class="section-title">Best Risk-Adjusted<span class="badge">Return/Risk</span></h2></div><div class="table-wrap"><table id="bestRiskTable"><thead><tr><th>#</th><th>Vault</th><th>Protocol</th><th>Score</th><th>Risk</th><th>Return</th><th>TVL</th></tr></thead><tbody id="bestRiskTbody"></tbody></table></div></section>
 </div>
 <div class="page" id="pg-analytics"><section class="section"><div class="section-header"><h2 class="section-title">Vault Analytics<span class="badge">Rankings</span></h2></div><div class="pills" id="anaPills" style="margin-bottom:24px"></div><div class="table-wrap"><table id="anaTable"><thead><tr><th data-s="rank">#</th><th data-s="vault_name">Vault</th><th data-s="protocol">Protocol</th><th>Data</th><th data-s="tvl_usd" class="sorted">TVL ↓</th><th data-s="apy">APR ↓</th><th data-s="age_days">Age ↓</th><th data-s="r30">30D ↓</th><th data-s="risk_score">Risk ↓</th><th>Action</th></tr></thead><tbody id="anaTbody"></tbody></table></div></section></div>
 <div class="page" id="pg-compare"><section class="section"><div class="section-header"><h2 class="section-title">Compare Vaults<span class="badge">Select 2-4</span></h2></div><div class="compare-sel" id="compSel"></div><div class="compare-grid" id="compGrid"></div></section></div>
@@ -841,6 +842,31 @@ function renderDash(){
   document.querySelectorAll('#dashPills .pill').forEach(b=>{b.onclick=()=>{dashF=b.dataset.f;renderDash();};});
   let flt=dashF==='all'?UV:UV.filter(v=>v.protocol===dashF);
   document.getElementById('userGrid').innerHTML=flt.sort((a,b)=>b.apy-a.apy).map(userCard).join('');
+  // Render Best Risk-Adjusted section
+  renderBestRisk();
+}
+
+function renderBestRisk(){
+  const vaults=all().filter(v=>v.rankings?.risk_adjusted?.rank>0).sort((a,b)=>(a.rankings?.risk_adjusted?.rank||999)-(b.rankings?.risk_adjusted?.rank||999)).slice(0,10);
+  const riskColor=r=>r<=30?'positive':r>=70?'negative':'';
+  if(vaults.length===0){
+    document.getElementById('bestRiskTbody').innerHTML='<tr><td colspan="7" style="text-align:center;opacity:0.6">No risk-adjusted rankings yet. Run fetch job.</td></tr>';
+    return;
+  }
+  document.getElementById('bestRiskTbody').innerHTML=vaults.map(v=>{
+    const rank=v.rankings?.risk_adjusted?.rank||'-';
+    const score=v.rankings?.risk_adjusted?.score;
+    const ret=v.r30!=null?fmtPctS(v.r30):(v.apy!=null?fmtPct(v.apy):'N/A');
+    return `<tr>
+      <td><strong>${rank}</strong></td>
+      <td class="name-link" onclick="nav('vault',{id:'${v.id}'})">${v.vault_name}</td>
+      <td><span class="card-proto ${v.protocol}">${v.protocol}</span></td>
+      <td>${score!=null?score.toFixed(3):'N/A'}</td>
+      <td class="${riskColor(v.risk_score)}">${v.risk_score!=null?v.risk_score+'/100':'N/A'}</td>
+      <td class="${(v.r30||v.apy||0)>=0?'positive':'negative'}">${ret}</td>
+      <td>${fmtTvl(v.tvl_usd)}</td>
+    </tr>`;
+  }).join('');
 }
 
 function renderAna(){
@@ -861,8 +887,14 @@ function renderAna(){
     th.textContent=th.textContent.replace(/[↑↓]/,'')+(th.dataset.s===sortK?(sortD==='desc'?' ↓':' ↑'):'');
   });
   const riskColor=r=>r<=30?'positive':r>=70?'negative':'';
-  document.getElementById('anaTbody').innerHTML=vaults.map((v,i)=>`<tr>
-    <td>${i+1}</td>
+  document.getElementById('anaTbody').innerHTML=vaults.map((v,i)=>{
+    // Show verified_top rank if available, otherwise estimated_top, otherwise display order
+    const vRank=v.rankings?.verified_top?.rank;
+    const eRank=v.rankings?.estimated_top?.rank;
+    const displayRank=vRank||eRank||(i+1);
+    const rankBadge=vRank?'<span title="Verified Rank" style="color:#10b981">✓</span>':'';
+    return `<tr>
+    <td>${displayRank}${rankBadge}</td>
     <td class="name-link" onclick="nav('vault',{id:'${v.id}'})">${v.vault_name}</td>
     <td><span class="card-proto ${v.protocol}">${v.protocol}</span></td>
     <td>${dataQualityBadge(v.data_quality)}</td>
@@ -872,7 +904,7 @@ function renderAna(){
     <td class="${(v.r30||0)>=0?'positive':'negative'}">${v.r30!=null?fmtPctS(v.r30):'N/A'}</td>
     <td class="${riskColor(v.risk_score)}">${v.risk_score!=null?v.risk_score+'/100':'N/A'}</td>
     <td><button class="pill" onclick="nav('vault',{id:'${v.id}'})">View</button></td>
-  </tr>`).join('');
+  </tr>`;}).join('');
   document.querySelectorAll('#anaTable th[data-s]').forEach(th=>{
     th.onclick=()=>{if(sortK===th.dataset.s)sortD=sortD==='desc'?'asc':'desc';else{sortK=th.dataset.s;sortD='desc';}renderAna();};
   });
