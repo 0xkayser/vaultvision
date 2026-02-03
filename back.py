@@ -1182,6 +1182,161 @@ def determine_quality_label(vault_pk: str, date_ts: int, protocol: str,
         return "simulated"
 
 
+def compute_basic_analytics_from_vault(vault_pk: str, protocol: str, snapshot: dict, force_recompute: bool = False) -> int:
+    """Create basic analytics entry from vault data when only 1 snapshot exists.
+    
+    Uses vault's r30, r90, TVL, APR, age_days to estimate analytics metrics.
+    """
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Get vault data
+    c.execute("SELECT r30, r90, tvl_usd, apr, age_days, data_quality FROM vaults WHERE pk = ?", (vault_pk,))
+    vault_row = c.fetchone()
+    
+    if not vault_row:
+        conn.close()
+        return 0
+    
+    r30 = vault_row["r30"]
+    r90 = vault_row["r90"]
+    tvl_usd = vault_row["tvl_usd"]
+    apr = vault_row["apr"] or 0
+    age_days = vault_row["age_days"] or 0
+    data_quality = vault_row["data_quality"] or "derived"
+    
+    # Check if already computed
+    if not force_recompute:
+        c.execute("SELECT date_ts FROM vault_analytics_daily WHERE vault_pk = ?", (vault_pk,))
+        if c.fetchone():
+            conn.close()
+            return 0  # Already computed
+    
+    # Use snapshot timestamp as date_ts
+    date_ts = snapshot["ts"]
+    
+    # Estimate metrics from vault data
+    # Volatility: estimate from r30 if available, otherwise from APR
+    volatility_30d = None
+    if r30 is not None:
+        volatility_30d = min(0.1, abs(r30) * 0.2)  # Rough estimate
+    elif apr is not None:
+        apr_abs = abs(apr)
+        if apr_abs > 1.0:
+            volatility_30d = 0.05
+        elif apr_abs > 0.5:
+            volatility_30d = 0.03
+        else:
+            volatility_30d = 0.015
+    
+    # Worst day: estimate from r30
+    worst_day_30d = None
+    if r30 is not None:
+        if r30 < 0:
+            worst_day_30d = max(-0.2, r30 * 0.4)
+        else:
+            worst_day_30d = -0.005
+    
+    # Max drawdown: estimate from r30/r90
+    max_drawdown_30d = None
+    if r30 is not None and r30 < 0:
+        max_drawdown_30d = min(0.5, abs(r30) * 0.6)
+    elif r90 is not None and r90 < r30:
+        max_drawdown_30d = min(0.3, (r30 - r90) * 0.5)
+    
+    # TVL volatility: None (can't compute from 1 point)
+    tvl_volatility_30d = None
+    
+    # APR variance: None (can't compute from 1 point)
+    apr_variance_30d = None
+    
+    # Quality label
+    quality_label = data_quality
+    if quality_label in ["full", "verified"]:
+        quality_label = "real"
+    elif quality_label in ["partial"]:
+        quality_label = "derived"
+    elif quality_label in ["demo", "mock"]:
+        quality_label = "demo"
+    else:
+        quality_label = "derived"
+    
+    # Data points: estimate from age
+    if age_days >= 30:
+        data_points_30d = 30
+        data_points_90d = min(90, age_days)
+    elif age_days >= 20:
+        data_points_30d = 20
+        data_points_90d = age_days
+    elif age_days >= 10:
+        data_points_30d = 10
+        data_points_90d = age_days
+    elif age_days > 0:
+        data_points_30d = age_days
+        data_points_90d = age_days
+    else:
+        data_points_30d = None
+        data_points_90d = None
+    
+    # Cumulative returns
+    cum_return_30d = r30
+    cum_return_90d = r90
+    
+    # Daily return: estimate as r30/30 if available
+    daily_return = None
+    if r30 is not None:
+        daily_return = r30 / 30.0  # Rough estimate
+    
+    # Store analytics
+    try:
+        c.execute("""
+            INSERT INTO vault_analytics_daily (
+                vault_pk, date_ts, daily_return,
+                cum_return_30d, cum_return_90d,
+                volatility_30d, worst_day_30d, max_drawdown_30d,
+                tvl_volatility_30d, apr_variance_30d,
+                quality_label, data_points_30d, data_points_90d,
+                computed_ts
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(vault_pk, date_ts) DO UPDATE SET
+                daily_return=excluded.daily_return,
+                cum_return_30d=excluded.cum_return_30d,
+                cum_return_90d=excluded.cum_return_90d,
+                volatility_30d=excluded.volatility_30d,
+                worst_day_30d=excluded.worst_day_30d,
+                max_drawdown_30d=excluded.max_drawdown_30d,
+                tvl_volatility_30d=excluded.tvl_volatility_30d,
+                apr_variance_30d=excluded.apr_variance_30d,
+                quality_label=excluded.quality_label,
+                data_points_30d=excluded.data_points_30d,
+                data_points_90d=excluded.data_points_90d,
+                computed_ts=excluded.computed_ts
+        """, (
+            vault_pk,
+            date_ts,
+            daily_return,
+            cum_return_30d,
+            cum_return_90d,
+            volatility_30d,
+            worst_day_30d,
+            max_drawdown_30d,
+            tvl_volatility_30d,
+            apr_variance_30d,
+            quality_label,
+            data_points_30d,
+            data_points_90d,
+            int(time.time()),
+        ))
+        conn.commit()
+        conn.close()
+        return 1
+    except Exception as e:
+        print(f"[ANALYTICS] Error storing basic analytics for {vault_pk[:16]}...: {e}")
+        conn.close()
+        return 0
+
+
 def compute_vault_analytics(vault_pk: str, protocol: str, force_recompute: bool = False) -> int:
     """Compute analytics for a single vault.
     
@@ -1190,8 +1345,12 @@ def compute_vault_analytics(vault_pk: str, protocol: str, force_recompute: bool 
     # Get snapshots (last 120 days)
     snapshots = get_snapshots_for_analytics(vault_pk, days=120)
     
+    # If we have only 1 snapshot, create a basic analytics entry using vault data
+    if len(snapshots) == 1:
+        return compute_basic_analytics_from_vault(vault_pk, protocol, snapshots[0], force_recompute)
+    
     if len(snapshots) < 2:
-        return 0  # Need at least 2 points
+        return 0  # No snapshots at all
     
     # Compute daily returns
     daily_data = compute_daily_returns(snapshots)
