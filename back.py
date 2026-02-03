@@ -1191,17 +1191,12 @@ def compute_vault_analytics(vault_pk: str, protocol: str, force_recompute: bool 
     snapshots = get_snapshots_for_analytics(vault_pk, days=120)
     
     if len(snapshots) < 2:
-        if len(snapshots) == 0:
-            print(f"[ANALYTICS DEBUG] {vault_pk[:16]}...: No snapshots found")
-        else:
-            print(f"[ANALYTICS DEBUG] {vault_pk[:16]}...: Only {len(snapshots)} snapshot(s), need at least 2")
         return 0  # Need at least 2 points
     
     # Compute daily returns
     daily_data = compute_daily_returns(snapshots)
     
     if not daily_data:
-        print(f"[ANALYTICS DEBUG] {vault_pk[:16]}...: No daily returns computed from {len(snapshots)} snapshots")
         return 0
     
     # Check if Hyperliquid has real PnL
@@ -1348,8 +1343,6 @@ def compute_all_vaults_analytics(force_recompute: bool = False) -> dict:
         try:
             count = compute_vault_analytics(vault_pk, protocol, force_recompute)
             total_computed += count
-            if count > 0 and total_computed <= 3:  # Log first 3 successful computations
-                print(f"[ANALYTICS DEBUG] {vault_pk[:16]}...: Computed {count} analytics rows")
         except Exception as e:
             errors.append(f"{vault_pk[:16]}...: {e}")
             print(f"[ANALYTICS] Error computing for {vault_pk[:16]}...: {e}")
@@ -2454,6 +2447,119 @@ def compute_total_risk_score(
     return risk_score, risk_band
 
 
+def compute_risk_components_from_vault_data(vault_pk: str, protocol: str, conn) -> tuple[int, int, int, int, dict]:
+    """Compute risk components from available vault data when analytics are missing.
+    
+    Args:
+        vault_pk: Vault primary key
+        protocol: Protocol name
+        conn: Database connection
+    
+    Returns:
+        (comp_perf, comp_dd, comp_liq, comp_conf, reasons_dict)
+    """
+    c = conn.cursor()
+    
+    # Get vault data
+    c.execute("SELECT tvl_usd, apr, r30, r90, age_days, data_quality FROM vaults WHERE pk = ?", (vault_pk,))
+    vault_row = c.fetchone()
+    
+    if not vault_row:
+        # Fallback to defaults if vault not found
+        return 50, 50, 50, 50, {"notes": ["vault not found in database"]}
+    
+    tvl_usd = vault_row["tvl_usd"]
+    apr = vault_row["apr"] or 0
+    r30 = vault_row["r30"]
+    r90 = vault_row["r90"]
+    age_days = vault_row["age_days"] or 0
+    data_quality = vault_row["data_quality"] or "derived"
+    
+    # Performance risk: estimate from r30/r90 and APR volatility
+    volatility_30d = None
+    worst_day_30d = None
+    if r30 is not None:
+        volatility_30d = min(0.1, abs(r30) * 0.2)
+        if r30 < 0:
+            worst_day_30d = max(-0.2, r30 * 0.4)
+        else:
+            worst_day_30d = -0.005
+    elif apr is not None:
+        apr_abs = abs(apr)
+        if apr_abs > 1.0:
+            volatility_30d = 0.05
+            worst_day_30d = -0.03
+        elif apr_abs > 0.5:
+            volatility_30d = 0.03
+            worst_day_30d = -0.02
+        else:
+            volatility_30d = 0.015
+            worst_day_30d = -0.01
+    
+    comp_perf, details_perf = compute_performance_risk(volatility_30d, worst_day_30d)
+    
+    # Drawdown risk
+    max_drawdown_30d = None
+    if r30 is not None:
+        if r30 < 0:
+            max_drawdown_30d = min(0.5, abs(r30) * 0.6)
+        elif r90 is not None and r90 < r30:
+            max_drawdown_30d = min(0.3, (r30 - r90) * 0.5)
+    elif apr is not None and abs(apr) > 1.0:
+        max_drawdown_30d = 0.15
+    
+    comp_dd, details_dd = compute_drawdown_risk(max_drawdown_30d)
+    
+    # Liquidity risk
+    comp_liq, details_liq = compute_liquidity_risk(tvl_usd, None)
+    
+    # Confidence risk
+    quality_label = data_quality
+    if quality_label in ["full", "verified"]:
+        quality_label = "real"
+    elif quality_label in ["partial"]:
+        quality_label = "derived"
+    elif quality_label in ["demo", "mock"]:
+        quality_label = "demo"
+    else:
+        quality_label = "derived"
+    
+    if age_days >= 30:
+        data_points_30d = 30
+    elif age_days >= 20:
+        data_points_30d = 20
+    elif age_days >= 10:
+        data_points_30d = 10
+    elif age_days > 0:
+        data_points_30d = age_days
+    else:
+        data_points_30d = None
+    
+    comp_conf, details_conf = compute_confidence_risk(quality_label, data_points_30d)
+    
+    # Build reasons dict
+    reasons_dict = {
+        "volatility_30d": volatility_30d,
+        "worst_day_30d": worst_day_30d,
+        "max_drawdown_30d": max_drawdown_30d,
+        "tvl_usd": tvl_usd,
+        "tvl_volatility_30d": None,
+        "quality_label": quality_label,
+        "data_points_30d": data_points_30d,
+        "mapped": {
+            "perf": comp_perf,
+            "dd": comp_dd,
+            "liq": comp_liq,
+            "conf": comp_conf
+        },
+        "notes": details_perf.get("notes", []) + details_dd.get("notes", []) + 
+                 details_liq.get("notes", []) + details_conf.get("notes", []) +
+                 ["computed from vault data (no analytics available)"]
+    }
+    
+    return comp_perf, comp_dd, comp_liq, comp_conf, reasons_dict
+
+
 def run_risk_engine(target_date_ts: Optional[int] = None) -> dict:
     """Run risk engine for all active vaults.
     
@@ -2504,64 +2610,77 @@ def run_risk_engine(target_date_ts: Optional[int] = None) -> dict:
             analytics_row = c.fetchone()
             
             if not analytics_row:
-                skipped_count += 1
-                if skipped_count <= 3:  # Log first 3 skips
-                    print(f"[RISK DEBUG] {vault_pk[:16]}...: Skipped - no analytics data found")
-                continue
-            
-            # Get latest snapshot for TVL
-            c.execute("""
-                SELECT tvl_usd
-                FROM snapshots
-                WHERE vault_pk = ? AND ts <= ?
-                ORDER BY ts DESC
-                LIMIT 1
-            """, (vault_pk, target_date_ts))
-            snapshot_row = c.fetchone()
-            tvl_usd = snapshot_row["tvl_usd"] if snapshot_row else None
-            
-            # Extract analytics metrics
-            volatility_30d = analytics_row["volatility_30d"]
-            worst_day_30d = analytics_row["worst_day_30d"]
-            max_drawdown_30d = analytics_row["max_drawdown_30d"]
-            tvl_volatility_30d = analytics_row["tvl_volatility_30d"]
-            quality_label = analytics_row["quality_label"]
-            data_points_30d = analytics_row["data_points_30d"]
-            
-            # Compute components
-            comp_perf, details_perf = compute_performance_risk(volatility_30d, worst_day_30d)
-            comp_dd, details_dd = compute_drawdown_risk(max_drawdown_30d)
-            comp_liq, details_liq = compute_liquidity_risk(tvl_usd, tvl_volatility_30d)
-            comp_conf, details_conf = compute_confidence_risk(quality_label, data_points_30d)
-            
-            # Compute total risk score
-            risk_score, risk_band = compute_total_risk_score(
-                comp_perf, comp_dd, comp_liq, comp_conf
-            )
-            
-            # Build reasons JSON
-            all_notes = []
-            all_notes.extend(details_perf.get("notes", []))
-            all_notes.extend(details_dd.get("notes", []))
-            all_notes.extend(details_liq.get("notes", []))
-            all_notes.extend(details_conf.get("notes", []))
-            
-            reasons_json = json.dumps({
-                "volatility_30d": volatility_30d,
-                "worst_day_30d": worst_day_30d,
-                "max_drawdown_30d": max_drawdown_30d,
-                "tvl_usd": tvl_usd,
-                "tvl_volatility_30d": tvl_volatility_30d,
-                "quality_label": quality_label,
-                "data_points_30d": data_points_30d,
-                "mapped": {
-                    "perf": comp_perf,
-                    "dd": comp_dd,
-                    "liq": comp_liq,
-                    "conf": comp_conf
-                },
-                "notes": all_notes
-            })
+                # Fallback: compute from vault data when analytics unavailable
+                comp_perf, comp_dd, comp_liq, comp_conf, reasons_dict = compute_risk_components_from_vault_data(
+                    vault_pk, protocol, conn
+                )
+                
+                # Compute total risk score
+                risk_score, risk_band = compute_total_risk_score(
+                    comp_perf, comp_dd, comp_liq, comp_conf
+                )
+                
+                reasons_json = json.dumps(reasons_dict)
+                
+                # Use today's date_ts for fallback computation
+                date_ts_to_use = target_date_ts
+            else:
+                # Use analytics data (normal path)
+                # Get latest snapshot for TVL
+                c.execute("""
+                    SELECT tvl_usd
+                    FROM snapshots
+                    WHERE vault_pk = ? AND ts <= ?
+                    ORDER BY ts DESC
+                    LIMIT 1
+                """, (vault_pk, target_date_ts))
+                snapshot_row = c.fetchone()
+                tvl_usd = snapshot_row["tvl_usd"] if snapshot_row else None
+                
+                # Extract analytics metrics
+                volatility_30d = analytics_row["volatility_30d"]
+                worst_day_30d = analytics_row["worst_day_30d"]
+                max_drawdown_30d = analytics_row["max_drawdown_30d"]
+                tvl_volatility_30d = analytics_row["tvl_volatility_30d"]
+                quality_label = analytics_row["quality_label"]
+                data_points_30d = analytics_row["data_points_30d"]
+                
+                # Compute components
+                comp_perf, details_perf = compute_performance_risk(volatility_30d, worst_day_30d)
+                comp_dd, details_dd = compute_drawdown_risk(max_drawdown_30d)
+                comp_liq, details_liq = compute_liquidity_risk(tvl_usd, tvl_volatility_30d)
+                comp_conf, details_conf = compute_confidence_risk(quality_label, data_points_30d)
+                
+                # Compute total risk score
+                risk_score, risk_band = compute_total_risk_score(
+                    comp_perf, comp_dd, comp_liq, comp_conf
+                )
+                
+                # Build reasons JSON
+                all_notes = []
+                all_notes.extend(details_perf.get("notes", []))
+                all_notes.extend(details_dd.get("notes", []))
+                all_notes.extend(details_liq.get("notes", []))
+                all_notes.extend(details_conf.get("notes", []))
+                
+                reasons_json = json.dumps({
+                    "volatility_30d": volatility_30d,
+                    "worst_day_30d": worst_day_30d,
+                    "max_drawdown_30d": max_drawdown_30d,
+                    "tvl_usd": tvl_usd,
+                    "tvl_volatility_30d": tvl_volatility_30d,
+                    "quality_label": quality_label,
+                    "data_points_30d": data_points_30d,
+                    "mapped": {
+                        "perf": comp_perf,
+                        "dd": comp_dd,
+                        "liq": comp_liq,
+                        "conf": comp_conf
+                    },
+                    "notes": all_notes
+                })
+                
+                date_ts_to_use = analytics_row["date_ts"]
             
             # Upsert into vault_risk_daily
             computed_ts = int(_time.time())
@@ -2583,7 +2702,7 @@ def run_risk_engine(target_date_ts: Optional[int] = None) -> dict:
                     reasons_json=excluded.reasons_json,
                     computed_ts=excluded.computed_ts
             """, (
-                vault_pk, protocol, analytics_row["date_ts"],
+                vault_pk, protocol, date_ts_to_use,
                 risk_score, risk_band,
                 comp_perf, comp_dd, comp_liq, comp_conf,
                 reasons_json, computed_ts
