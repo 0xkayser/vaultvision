@@ -408,6 +408,31 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     
+    # =============================================================================
+    # VAULT RANK DAILY (rankings per day per rank_type)
+    # =============================================================================
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS vault_rank_daily (
+            vault_pk TEXT NOT NULL,
+            protocol TEXT NOT NULL,
+            date_ts INTEGER NOT NULL,  -- Day bucket timestamp
+            rank_type TEXT NOT NULL,   -- "verified_top" | "estimated_top" | "risk_adjusted"
+            score REAL NOT NULL,       -- Ranking score (higher = better)
+            rank INTEGER NOT NULL,     -- 1..N (1 = best)
+            included INTEGER NOT NULL, -- 1 = included in ranking, 0 = excluded
+            exclude_reason TEXT,       -- Why excluded (if included=0)
+            computed_ts INTEGER NOT NULL,
+            PRIMARY KEY (vault_pk, date_ts, rank_type)
+        )
+    """)
+    
+    # Create indexes for fast ranking queries
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_rank_type_date ON vault_rank_daily(rank_type, date_ts DESC, rank ASC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_rank_vault_date ON vault_rank_daily(vault_pk, date_ts DESC)")
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
     conn.close()
     print(f"[DB] Initialized {DB_PATH} with canonical schema")
@@ -2349,6 +2374,26 @@ def get_all_vaults() -> List[dict]:
             )
             vault.update(url_info)
         
+        # Get rankings from vault_rank_daily
+        conn4 = get_db()
+        c4 = conn4.cursor()
+        c4.execute("""
+            SELECT rank_type, rank, score, included
+            FROM vault_rank_daily
+            WHERE vault_pk = ? AND included = 1
+            ORDER BY date_ts DESC
+        """, (pk,))
+        rank_rows = c4.fetchall()
+        conn4.close()
+        
+        if rank_rows:
+            vault["rankings"] = {}
+            for rrow in rank_rows:
+                vault["rankings"][rrow["rank_type"]] = {
+                    "rank": rrow["rank"],
+                    "score": round(rrow["score"], 4)
+                }
+        
         vaults.append(vault)
     
     return vaults
@@ -2887,6 +2932,427 @@ def run_risk_engine(target_date_ts: Optional[int] = None) -> dict:
     }
     
     print(f"[RISK] Done: {computed_count} computed, {skipped_count} skipped, {len(errors)} errors in {elapsed_sec:.2f}s")
+    
+    return result
+
+
+# =============================================================================
+# RANK ENGINE v1 (Deterministic Rankings with Gating)
+# =============================================================================
+
+def normalize_apr(apr: Optional[float]) -> float:
+    """Normalize APR to 0..1 range. APR 0..60% (0..0.6) maps to 0..1."""
+    if apr is None:
+        return 0.0
+    clamped = max(0.0, min(0.6, apr))
+    return clamped / 0.6
+
+
+def normalize_tvl(tvl_usd: Optional[float]) -> float:
+    """Normalize TVL to 0..1 using log scale. $500K..500M maps to 0..1."""
+    if tvl_usd is None or tvl_usd <= 0:
+        return 0.0
+    import math
+    min_tvl = 500_000       # $500K
+    max_tvl = 500_000_000   # $500M
+    clamped = max(min_tvl, min(max_tvl, tvl_usd))
+    # Log scale: log(500K)=5.7, log(500M)=8.7
+    log_min = math.log10(min_tvl)
+    log_max = math.log10(max_tvl)
+    log_val = math.log10(clamped)
+    return (log_val - log_min) / (log_max - log_min)
+
+
+def normalize_drawdown(max_drawdown: Optional[float]) -> float:
+    """Normalize max drawdown to 0..1. 0..25% maps to 0..1."""
+    if max_drawdown is None:
+        return 0.5  # Unknown = mid-risk
+    clamped = max(0.0, min(0.25, abs(max_drawdown)))
+    return clamped / 0.25
+
+
+def check_gating_verified_top(
+    quality_label: Optional[str],
+    data_points_30d: Optional[int],
+    tvl_usd: Optional[float],
+    apr: Optional[float]
+) -> tuple[bool, Optional[str]]:
+    """Check if vault qualifies for Verified Top ranking.
+    
+    Rules:
+    - quality_label IN ("real", "derived")
+    - data_points_30d >= 10
+    - tvl_usd >= 500,000
+    - apr > 0
+    
+    Returns:
+        (included, exclude_reason)
+    """
+    if quality_label not in ("real", "derived"):
+        return False, f"quality_label={quality_label} (need real/derived)"
+    if data_points_30d is None or data_points_30d < 10:
+        return False, f"data_points_30d={data_points_30d} (need >=10)"
+    if tvl_usd is None or tvl_usd < 500_000:
+        return False, f"tvl_usd={tvl_usd} (need >=500K)"
+    if apr is None or apr <= 0:
+        return False, f"apr={apr} (need >0)"
+    return True, None
+
+
+def check_gating_estimated_top(
+    quality_label: Optional[str],
+    tvl_usd: Optional[float],
+    apr: Optional[float]
+) -> tuple[bool, Optional[str]]:
+    """Check if vault qualifies for Estimated Top ranking.
+    
+    Rules:
+    - quality_label IN ("real", "derived", "simulated") - NOT demo
+    - tvl_usd >= 500,000
+    - apr > 0
+    
+    Returns:
+        (included, exclude_reason)
+    """
+    if quality_label not in ("real", "derived", "simulated"):
+        return False, f"quality_label={quality_label} (demo excluded)"
+    if tvl_usd is None or tvl_usd < 500_000:
+        return False, f"tvl_usd={tvl_usd} (need >=500K)"
+    if apr is None or apr <= 0:
+        return False, f"apr={apr} (need >0)"
+    return True, None
+
+
+def check_gating_risk_adjusted(
+    quality_label: Optional[str],
+    data_points_30d: Optional[int],
+    tvl_usd: Optional[float],
+    risk_score: Optional[int],
+    cum_return_30d: Optional[float],
+    apr: Optional[float]
+) -> tuple[bool, Optional[str]]:
+    """Check if vault qualifies for Risk-Adjusted ranking.
+    
+    Rules:
+    - quality_label NOT in ("demo")
+    - data_points_30d >= 10
+    - tvl_usd >= 1,000,000 (stricter)
+    - risk_score exists
+    - cum_return_30d exists OR apr exists (fallback)
+    
+    Returns:
+        (included, exclude_reason)
+    """
+    if quality_label == "demo":
+        return False, "quality_label=demo (excluded)"
+    if data_points_30d is None or data_points_30d < 10:
+        return False, f"data_points_30d={data_points_30d} (need >=10)"
+    if tvl_usd is None or tvl_usd < 1_000_000:
+        return False, f"tvl_usd={tvl_usd} (need >=1M)"
+    if risk_score is None:
+        return False, "risk_score missing"
+    if cum_return_30d is None and (apr is None or apr <= 0):
+        return False, "no return data (need cum_return_30d or apr)"
+    return True, None
+
+
+def compute_verified_top_score(
+    apr: Optional[float],
+    tvl_usd: Optional[float],
+    max_drawdown_30d: Optional[float]
+) -> float:
+    """Compute Verified Top score: stable returns + size.
+    
+    Formula: 0.55 * norm(apr) + 0.30 * norm(tvl) - 0.15 * norm(drawdown)
+    """
+    norm_apr = normalize_apr(apr)
+    norm_tvl = normalize_tvl(tvl_usd)
+    norm_dd = normalize_drawdown(max_drawdown_30d)
+    
+    score = 0.55 * norm_apr + 0.30 * norm_tvl - 0.15 * norm_dd
+    return max(0.0, score)
+
+
+def compute_estimated_top_score(
+    apr: Optional[float],
+    tvl_usd: Optional[float],
+    quality_label: Optional[str]
+) -> float:
+    """Compute Estimated Top score: APR + TVL with simulated penalty.
+    
+    Formula: 0.70 * norm(apr) + 0.30 * norm(tvl)
+    Penalty: * 0.80 if simulated
+    """
+    norm_apr = normalize_apr(apr)
+    norm_tvl = normalize_tvl(tvl_usd)
+    
+    score = 0.70 * norm_apr + 0.30 * norm_tvl
+    
+    # Apply penalty for simulated data
+    if quality_label == "simulated":
+        score *= 0.80
+    
+    return max(0.0, score)
+
+
+def compute_risk_adjusted_score(
+    cum_return_30d: Optional[float],
+    apr: Optional[float],
+    risk_score: int,
+    tvl_usd: Optional[float]
+) -> float:
+    """Compute Risk-Adjusted score: return per unit risk.
+    
+    Formula:
+    - expected_return = cum_return_30d OR apr/12 (monthly approx)
+    - risk_penalty = risk_score / 100 (min 0.15 to avoid blow-ups)
+    - base_score = expected_return / risk_penalty
+    - tvl_factor = 0.8 + 0.2 * norm(tvl)
+    - final_score = base_score * tvl_factor
+    """
+    # Get expected return
+    if cum_return_30d is not None:
+        expected_return = cum_return_30d
+    elif apr is not None and apr > 0:
+        expected_return = apr / 12  # Monthly approximation
+    else:
+        expected_return = 0.0
+    
+    # Risk penalty (min 0.15 to avoid division issues)
+    risk_penalty = max(0.15, risk_score / 100.0)
+    
+    # Base score: return per unit risk
+    base_score = expected_return / risk_penalty
+    
+    # TVL trust factor
+    norm_tvl = normalize_tvl(tvl_usd)
+    tvl_factor = 0.8 + 0.2 * norm_tvl
+    
+    return base_score * tvl_factor
+
+
+def run_rank_engine(target_date_ts: Optional[int] = None) -> dict:
+    """Run rank engine for all active vaults.
+    
+    Computes rankings for:
+    - verified_top: Only real/derived with enough history
+    - estimated_top: Includes simulated (with penalty)
+    - risk_adjusted: Return per unit risk
+    
+    Args:
+        target_date_ts: Target date timestamp (day bucket). If None, uses today.
+    
+    Returns:
+        Summary dict with counts and stats.
+    """
+    import time as _time
+    start_time = _time.time()
+    
+    if target_date_ts is None:
+        now = int(_time.time())
+        target_date_ts = (now // 86400) * 86400
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Get all active vaults with their latest data
+    c.execute("""
+        SELECT 
+            v.pk as vault_pk,
+            v.protocol,
+            v.vault_name,
+            v.tvl_usd,
+            v.apr,
+            v.data_quality,
+            v.age_days,
+            a.cum_return_30d,
+            a.cum_return_90d,
+            a.max_drawdown_30d,
+            a.volatility_30d,
+            a.data_points_30d,
+            a.quality_label,
+            r.risk_score,
+            r.risk_band
+        FROM vaults v
+        LEFT JOIN vault_analytics_daily a ON v.pk = a.vault_pk 
+            AND a.date_ts = (SELECT MAX(date_ts) FROM vault_analytics_daily WHERE vault_pk = v.pk)
+        LEFT JOIN vault_risk_daily r ON v.pk = r.vault_pk
+            AND r.date_ts = (SELECT MAX(date_ts) FROM vault_risk_daily WHERE vault_pk = v.pk)
+        WHERE v.status = 'active'
+    """)
+    
+    vaults = c.fetchall()
+    total_vaults = len(vaults)
+    
+    print(f"[RANK] Computing rankings for {total_vaults} vaults (target_date={target_date_ts})...")
+    
+    # Prepare ranking data for each type
+    rank_data = {
+        "verified_top": [],
+        "estimated_top": [],
+        "risk_adjusted": []
+    }
+    
+    # Exclusion stats
+    exclusion_stats = {
+        "verified_top": {"included": 0, "excluded": 0, "reasons": {}},
+        "estimated_top": {"included": 0, "excluded": 0, "reasons": {}},
+        "risk_adjusted": {"included": 0, "excluded": 0, "reasons": {}}
+    }
+    
+    computed_ts = int(_time.time())
+    
+    for row in vaults:
+        vault_pk = row["vault_pk"]
+        protocol = row["protocol"]
+        tvl_usd = row["tvl_usd"]
+        apr = row["apr"]
+        quality_label = row["quality_label"] or row["data_quality"] or "derived"
+        data_points_30d = row["data_points_30d"]
+        cum_return_30d = row["cum_return_30d"]
+        max_drawdown_30d = row["max_drawdown_30d"]
+        risk_score = row["risk_score"]
+        
+        # Normalize quality_label
+        if quality_label in ("full", "verified"):
+            quality_label = "real"
+        elif quality_label in ("partial"):
+            quality_label = "derived"
+        elif quality_label in ("mock"):
+            quality_label = "demo"
+        
+        # Check gating for each rank type
+        # 1. VERIFIED_TOP
+        included, reason = check_gating_verified_top(quality_label, data_points_30d, tvl_usd, apr)
+        if included:
+            score = compute_verified_top_score(apr, tvl_usd, max_drawdown_30d)
+            rank_data["verified_top"].append({
+                "vault_pk": vault_pk,
+                "protocol": protocol,
+                "score": score,
+                "included": 1,
+                "exclude_reason": None
+            })
+            exclusion_stats["verified_top"]["included"] += 1
+        else:
+            rank_data["verified_top"].append({
+                "vault_pk": vault_pk,
+                "protocol": protocol,
+                "score": 0.0,
+                "included": 0,
+                "exclude_reason": reason
+            })
+            exclusion_stats["verified_top"]["excluded"] += 1
+            short_reason = reason.split("=")[0] if reason else "unknown"
+            exclusion_stats["verified_top"]["reasons"][short_reason] = exclusion_stats["verified_top"]["reasons"].get(short_reason, 0) + 1
+        
+        # 2. ESTIMATED_TOP
+        included, reason = check_gating_estimated_top(quality_label, tvl_usd, apr)
+        if included:
+            score = compute_estimated_top_score(apr, tvl_usd, quality_label)
+            rank_data["estimated_top"].append({
+                "vault_pk": vault_pk,
+                "protocol": protocol,
+                "score": score,
+                "included": 1,
+                "exclude_reason": None
+            })
+            exclusion_stats["estimated_top"]["included"] += 1
+        else:
+            rank_data["estimated_top"].append({
+                "vault_pk": vault_pk,
+                "protocol": protocol,
+                "score": 0.0,
+                "included": 0,
+                "exclude_reason": reason
+            })
+            exclusion_stats["estimated_top"]["excluded"] += 1
+            short_reason = reason.split("=")[0] if reason else "unknown"
+            exclusion_stats["estimated_top"]["reasons"][short_reason] = exclusion_stats["estimated_top"]["reasons"].get(short_reason, 0) + 1
+        
+        # 3. RISK_ADJUSTED
+        included, reason = check_gating_risk_adjusted(quality_label, data_points_30d, tvl_usd, risk_score, cum_return_30d, apr)
+        if included:
+            score = compute_risk_adjusted_score(cum_return_30d, apr, risk_score, tvl_usd)
+            rank_data["risk_adjusted"].append({
+                "vault_pk": vault_pk,
+                "protocol": protocol,
+                "score": score,
+                "included": 1,
+                "exclude_reason": None
+            })
+            exclusion_stats["risk_adjusted"]["included"] += 1
+        else:
+            rank_data["risk_adjusted"].append({
+                "vault_pk": vault_pk,
+                "protocol": protocol,
+                "score": 0.0,
+                "included": 0,
+                "exclude_reason": reason
+            })
+            exclusion_stats["risk_adjusted"]["excluded"] += 1
+            short_reason = reason.split("=")[0] if reason else "unknown"
+            exclusion_stats["risk_adjusted"]["reasons"][short_reason] = exclusion_stats["risk_adjusted"]["reasons"].get(short_reason, 0) + 1
+    
+    # Sort and assign ranks for each type
+    for rank_type in rank_data:
+        # Sort included vaults by score descending
+        included_vaults = [v for v in rank_data[rank_type] if v["included"] == 1]
+        included_vaults.sort(key=lambda x: x["score"], reverse=True)
+        
+        # Assign ranks
+        for i, vault in enumerate(included_vaults):
+            vault["rank"] = i + 1
+        
+        # Excluded vaults get rank = 0
+        for vault in rank_data[rank_type]:
+            if vault["included"] == 0:
+                vault["rank"] = 0
+    
+    # Upsert into vault_rank_daily
+    for rank_type, vaults_list in rank_data.items():
+        for vault in vaults_list:
+            c.execute("""
+                INSERT INTO vault_rank_daily (
+                    vault_pk, protocol, date_ts, rank_type,
+                    score, rank, included, exclude_reason, computed_ts
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(vault_pk, date_ts, rank_type) DO UPDATE SET
+                    score=excluded.score,
+                    rank=excluded.rank,
+                    included=excluded.included,
+                    exclude_reason=excluded.exclude_reason,
+                    computed_ts=excluded.computed_ts
+            """, (
+                vault["vault_pk"],
+                vault["protocol"],
+                target_date_ts,
+                rank_type,
+                vault["score"],
+                vault["rank"],
+                vault["included"],
+                vault["exclude_reason"],
+                computed_ts
+            ))
+    
+    conn.commit()
+    conn.close()
+    
+    elapsed_sec = _time.time() - start_time
+    
+    result = {
+        "total_vaults": total_vaults,
+        "verified_top": exclusion_stats["verified_top"],
+        "estimated_top": exclusion_stats["estimated_top"],
+        "risk_adjusted": exclusion_stats["risk_adjusted"],
+        "elapsed_sec": elapsed_sec
+    }
+    
+    print(f"[RANK] Done in {elapsed_sec:.2f}s:")
+    for rank_type in ["verified_top", "estimated_top", "risk_adjusted"]:
+        stats = exclusion_stats[rank_type]
+        print(f"  {rank_type}: {stats['included']} included, {stats['excluded']} excluded")
     
     return result
 
@@ -4164,6 +4630,13 @@ def run_fetch_job():
     risk_result = run_risk_engine(target_date_ts=None)
     print(f"[FETCH] Risk: {risk_result['computed']} vaults computed, {risk_result['skipped']} skipped in {risk_result['elapsed_sec']:.1f}s")
     
+    # =============================================================================
+    # STEP 6: COMPUTE RANKINGS (Rank Engine v1)
+    # =============================================================================
+    print("[FETCH] Step 6: Computing rankings...")
+    rank_result = run_rank_engine(target_date_ts=None)
+    print(f"[FETCH] Rankings: verified={rank_result['verified_top']['included']}, estimated={rank_result['estimated_top']['included']}, risk_adj={rank_result['risk_adjusted']['included']} in {rank_result['elapsed_sec']:.1f}s")
+    
     # Summary
     if validation_errors:
         print(f"[FETCH] Validation errors: {sum(len(v) for v in validation_errors.values())} total")
@@ -4431,6 +4904,70 @@ class APIHandler(BaseHTTPRequestHandler):
                 
                 conn_risk.close()
                 
+                # Rankings debug info
+                conn_rank = get_db()
+                c_rank = conn_rank.cursor()
+                
+                # Get ranking counts per type
+                c_rank.execute("""
+                    SELECT rank_type, 
+                           SUM(CASE WHEN included = 1 THEN 1 ELSE 0 END) as included,
+                           SUM(CASE WHEN included = 0 THEN 1 ELSE 0 END) as excluded
+                    FROM vault_rank_daily
+                    WHERE date_ts = (SELECT MAX(date_ts) FROM vault_rank_daily)
+                    GROUP BY rank_type
+                """)
+                rank_counts = {}
+                for row in c_rank.fetchall():
+                    rank_counts[row["rank_type"]] = {
+                        "included": row["included"],
+                        "excluded": row["excluded"]
+                    }
+                
+                # Get top 10 for each ranking type
+                rank_top10 = {}
+                for rank_type in ["verified_top", "estimated_top", "risk_adjusted"]:
+                    c_rank.execute("""
+                        SELECT r.vault_pk, r.score, r.rank, v.vault_name, v.protocol, v.tvl_usd, v.apr
+                        FROM vault_rank_daily r
+                        JOIN vaults v ON r.vault_pk = v.pk
+                        WHERE r.rank_type = ? AND r.included = 1
+                          AND r.date_ts = (SELECT MAX(date_ts) FROM vault_rank_daily WHERE rank_type = ?)
+                        ORDER BY r.rank ASC
+                        LIMIT 10
+                    """, (rank_type, rank_type))
+                    rank_top10[rank_type] = [
+                        {
+                            "rank": row["rank"],
+                            "vault_name": row["vault_name"],
+                            "protocol": row["protocol"],
+                            "score": round(row["score"], 4),
+                            "tvl_usd": row["tvl_usd"],
+                            "apr": row["apr"]
+                        }
+                        for row in c_rank.fetchall()
+                    ]
+                
+                # Get exclusion reasons distribution
+                c_rank.execute("""
+                    SELECT rank_type, exclude_reason, COUNT(*) as count
+                    FROM vault_rank_daily
+                    WHERE included = 0 AND date_ts = (SELECT MAX(date_ts) FROM vault_rank_daily)
+                    GROUP BY rank_type, exclude_reason
+                    ORDER BY rank_type, count DESC
+                """)
+                exclusion_reasons = {}
+                for row in c_rank.fetchall():
+                    rt = row["rank_type"]
+                    if rt not in exclusion_reasons:
+                        exclusion_reasons[rt] = []
+                    exclusion_reasons[rt].append({
+                        "reason": row["exclude_reason"],
+                        "count": row["count"]
+                    })
+                
+                conn_rank.close()
+                
                 self.send_json({
                     "debug": True,
                     "api_response_ms": api_elapsed_ms,
@@ -4444,6 +4981,9 @@ class APIHandler(BaseHTTPRequestHandler):
                     "risk_debug": risk_debug,
                     "risk_band_counts": band_counts,
                     "risk_quality_stats": quality_stats,
+                    "rank_counts": rank_counts,
+                    "rank_top10": rank_top10,
+                    "rank_exclusion_reasons": exclusion_reasons,
                     "acceptance_checks": {
                         "lighter_url_format": sample_urls.get("lighter", {}).get("sample_url", "").startswith("https://app.lighter.xyz/public-pools/") if sample_urls.get("lighter") else False,
                         "drift_url_format": "/vaults/strategy-vaults/" in sample_urls.get("drift", {}).get("sample_url", "") if sample_urls.get("drift") else False,
@@ -4451,6 +4991,8 @@ class APIHandler(BaseHTTPRequestHandler):
                         "drift_old_vaults_exist": old_drift >= 3,
                         "nado_present": len([v for v in debug_vaults if v["protocol"] == "nado"]) == 1,
                         "nado_has_values": any(v.get("tvl_raw") and v.get("apr_raw") for v in debug_vaults if v["protocol"] == "nado"),
+                        "demo_not_in_verified": all(v["protocol"] != "nado" for v in rank_top10.get("verified_top", [])),
+                        "rankings_populated": len(rank_counts) == 3,
                     },
                     "updated_utc": int(time.time()),
                     "notes": "acceptance_checks should all be True for Ralph acceptance."
@@ -4483,6 +5025,130 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.send_json(vault)
             else:
                 self.send_json({"error": "Vault not found"}, 404)
+        
+        elif path.startswith("/api/rankings/"):
+            # Rankings API endpoints
+            # GET /api/rankings/verified?limit=50
+            # GET /api/rankings/estimated?limit=50
+            # GET /api/rankings/risk-adjusted?limit=50
+            
+            rank_type_map = {
+                "/api/rankings/verified": "verified_top",
+                "/api/rankings/estimated": "estimated_top",
+                "/api/rankings/risk-adjusted": "risk_adjusted"
+            }
+            
+            rank_type = rank_type_map.get(path)
+            if not rank_type:
+                self.send_json({"error": "Invalid ranking type. Use: verified, estimated, risk-adjusted"}, 400)
+                return
+            
+            limit = int(query.get("limit", ["50"])[0])
+            limit = min(max(1, limit), 200)  # Clamp 1..200
+            
+            include_excluded = query.get("include_excluded", ["0"])[0] == "1"
+            
+            conn = get_db()
+            c = conn.cursor()
+            
+            # Get latest date_ts
+            c.execute("SELECT MAX(date_ts) as max_ts FROM vault_rank_daily WHERE rank_type = ?", (rank_type,))
+            max_ts_row = c.fetchone()
+            if not max_ts_row or not max_ts_row["max_ts"]:
+                self.send_json({
+                    "rank_type": rank_type,
+                    "rankings": [],
+                    "total_included": 0,
+                    "total_excluded": 0,
+                    "message": "No ranking data. Run fetch job first."
+                })
+                conn.close()
+                return
+            
+            max_ts = max_ts_row["max_ts"]
+            
+            # Query rankings with vault details
+            if include_excluded:
+                c.execute("""
+                    SELECT 
+                        r.vault_pk, r.protocol, r.score, r.rank, r.included, r.exclude_reason,
+                        v.vault_name, v.tvl_usd, v.apr, v.age_days, v.data_quality,
+                        vr.risk_score, vr.risk_band,
+                        a.data_points_30d, a.quality_label, a.cum_return_30d, a.max_drawdown_30d
+                    FROM vault_rank_daily r
+                    JOIN vaults v ON r.vault_pk = v.pk
+                    LEFT JOIN vault_risk_daily vr ON r.vault_pk = vr.vault_pk 
+                        AND vr.date_ts = (SELECT MAX(date_ts) FROM vault_risk_daily WHERE vault_pk = r.vault_pk)
+                    LEFT JOIN vault_analytics_daily a ON r.vault_pk = a.vault_pk
+                        AND a.date_ts = (SELECT MAX(date_ts) FROM vault_analytics_daily WHERE vault_pk = r.vault_pk)
+                    WHERE r.rank_type = ? AND r.date_ts = ?
+                    ORDER BY r.included DESC, r.rank ASC
+                    LIMIT ?
+                """, (rank_type, max_ts, limit))
+            else:
+                c.execute("""
+                    SELECT 
+                        r.vault_pk, r.protocol, r.score, r.rank, r.included, r.exclude_reason,
+                        v.vault_name, v.tvl_usd, v.apr, v.age_days, v.data_quality,
+                        vr.risk_score, vr.risk_band,
+                        a.data_points_30d, a.quality_label, a.cum_return_30d, a.max_drawdown_30d
+                    FROM vault_rank_daily r
+                    JOIN vaults v ON r.vault_pk = v.pk
+                    LEFT JOIN vault_risk_daily vr ON r.vault_pk = vr.vault_pk 
+                        AND vr.date_ts = (SELECT MAX(date_ts) FROM vault_risk_daily WHERE vault_pk = r.vault_pk)
+                    LEFT JOIN vault_analytics_daily a ON r.vault_pk = a.vault_pk
+                        AND a.date_ts = (SELECT MAX(date_ts) FROM vault_analytics_daily WHERE vault_pk = r.vault_pk)
+                    WHERE r.rank_type = ? AND r.date_ts = ? AND r.included = 1
+                    ORDER BY r.rank ASC
+                    LIMIT ?
+                """, (rank_type, max_ts, limit))
+            
+            rows = c.fetchall()
+            
+            # Get counts
+            c.execute("""
+                SELECT 
+                    SUM(CASE WHEN included = 1 THEN 1 ELSE 0 END) as total_included,
+                    SUM(CASE WHEN included = 0 THEN 1 ELSE 0 END) as total_excluded
+                FROM vault_rank_daily
+                WHERE rank_type = ? AND date_ts = ?
+            """, (rank_type, max_ts))
+            counts = c.fetchone()
+            
+            conn.close()
+            
+            rankings = []
+            for row in rows:
+                vault_entry = {
+                    "vault_id": row["vault_pk"],
+                    "protocol": row["protocol"],
+                    "vault_name": row["vault_name"],
+                    "tvl_usd": row["tvl_usd"],
+                    "apr": row["apr"],
+                    "age_days": row["age_days"],
+                    "risk_score": row["risk_score"],
+                    "risk_band": row["risk_band"],
+                    "rank": row["rank"],
+                    "score": round(row["score"], 6),
+                    "included": row["included"] == 1,
+                    "quality_label": row["quality_label"] or row["data_quality"],
+                    "data_points_30d": row["data_points_30d"],
+                    "cum_return_30d": row["cum_return_30d"],
+                    "max_drawdown_30d": row["max_drawdown_30d"]
+                }
+                
+                if row["included"] == 0:
+                    vault_entry["exclude_reason"] = row["exclude_reason"]
+                
+                rankings.append(vault_entry)
+            
+            self.send_json({
+                "rank_type": rank_type,
+                "date_ts": max_ts,
+                "total_included": counts["total_included"] or 0,
+                "total_excluded": counts["total_excluded"] or 0,
+                "rankings": rankings
+            })
         
         elif path == "/api/risk-sanity":
             # Risk Engine sanity check endpoint
