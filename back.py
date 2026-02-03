@@ -4484,6 +4484,229 @@ class APIHandler(BaseHTTPRequestHandler):
             else:
                 self.send_json({"error": "Vault not found"}, 404)
         
+        elif path == "/api/risk-sanity":
+            # Risk Engine sanity check endpoint
+            # 1. Стабильность: перезапуск сервера → risk_score не меняется
+            # 2. Распределение: low/moderate/high по протоколам
+            # 3. Тест worst_day: vault с worst_day = -6% должен иметь perf ≈ 90
+            
+            conn = get_db()
+            c = conn.cursor()
+            
+            result = {
+                "stability_check": {},
+                "distribution": {},
+                "worst_day_test": [],
+                "component_tests": [],
+                "warnings": []
+            }
+            
+            # 1. Stability check: verify risk scores are deterministic
+            # Re-compute risk for 3 random vaults and compare with stored
+            c.execute("""
+                SELECT v.pk, v.protocol, v.pnl_30d, v.pnl_90d, v.tvl_usd, v.apr, v.age_days, v.data_quality,
+                       r.risk_score as stored_score, r.component_perf, r.component_drawdown, 
+                       r.component_liquidity, r.component_confidence
+                FROM vaults v
+                JOIN vault_risk_daily r ON v.pk = r.vault_pk
+                WHERE v.status = 'active'
+                ORDER BY RANDOM()
+                LIMIT 3
+            """)
+            stability_rows = c.fetchall()
+            
+            for row in stability_rows:
+                # Re-compute components
+                r30 = row["pnl_30d"]
+                r90 = row["pnl_90d"]
+                tvl_usd = row["tvl_usd"]
+                apr = row["apr"] or 0
+                age_days = row["age_days"] or 0
+                data_quality = row["data_quality"] or "derived"
+                
+                # Estimate volatility/worst_day from r30
+                volatility_30d = None
+                worst_day_30d = None
+                if r30 is not None:
+                    volatility_30d = min(0.1, abs(r30) * 0.2)
+                    worst_day_30d = max(-0.2, r30 * 0.4) if r30 < 0 else -0.005
+                elif apr is not None:
+                    apr_abs = abs(apr)
+                    if apr_abs > 1.0:
+                        volatility_30d = 0.05
+                        worst_day_30d = -0.03
+                    elif apr_abs > 0.5:
+                        volatility_30d = 0.03
+                        worst_day_30d = -0.02
+                    else:
+                        volatility_30d = 0.015
+                        worst_day_30d = -0.01
+                
+                recomputed_perf, _ = compute_performance_risk(volatility_30d, worst_day_30d)
+                
+                # Drawdown
+                max_drawdown_30d = None
+                if r30 is not None and r30 < 0:
+                    max_drawdown_30d = min(0.5, abs(r30) * 0.6)
+                elif apr is not None and abs(apr) > 1.0:
+                    max_drawdown_30d = 0.15
+                recomputed_dd, _ = compute_drawdown_risk(max_drawdown_30d)
+                
+                recomputed_liq, _ = compute_liquidity_risk(tvl_usd, None)
+                
+                quality_label = data_quality
+                if quality_label in ["full", "verified"]:
+                    quality_label = "real"
+                elif quality_label in ["partial"]:
+                    quality_label = "derived"
+                elif quality_label in ["demo", "mock"]:
+                    quality_label = "demo"
+                else:
+                    quality_label = "derived"
+                data_points_30d = min(30, max(0, age_days)) if age_days else None
+                recomputed_conf, _ = compute_confidence_risk(quality_label, data_points_30d)
+                
+                recomputed_score, _ = compute_total_risk_score(
+                    recomputed_perf, recomputed_dd, recomputed_liq, recomputed_conf
+                )
+                
+                stored_score = row["stored_score"]
+                is_stable = abs(recomputed_score - stored_score) <= 2  # Allow 2-point tolerance
+                
+                result["stability_check"][row["pk"][:20]] = {
+                    "stored_score": stored_score,
+                    "recomputed_score": recomputed_score,
+                    "diff": abs(recomputed_score - stored_score),
+                    "is_stable": is_stable,
+                    "components": {
+                        "stored": {
+                            "perf": row["component_perf"],
+                            "drawdown": row["component_drawdown"],
+                            "liquidity": row["component_liquidity"],
+                            "confidence": row["component_confidence"]
+                        },
+                        "recomputed": {
+                            "perf": recomputed_perf,
+                            "drawdown": recomputed_dd,
+                            "liquidity": recomputed_liq,
+                            "confidence": recomputed_conf
+                        }
+                    }
+                }
+                
+                if not is_stable:
+                    result["warnings"].append(f"Stability issue: {row['pk'][:20]} diff={abs(recomputed_score - stored_score)}")
+            
+            # 2. Distribution: count low/moderate/high per protocol
+            c.execute("""
+                SELECT protocol, risk_band, COUNT(*) as count
+                FROM vault_risk_daily
+                WHERE date_ts = (SELECT MAX(date_ts) FROM vault_risk_daily)
+                GROUP BY protocol, risk_band
+                ORDER BY protocol, risk_band
+            """)
+            
+            for row in c.fetchall():
+                proto = row["protocol"]
+                if proto not in result["distribution"]:
+                    result["distribution"][proto] = {"low": 0, "moderate": 0, "high": 0, "total": 0}
+                result["distribution"][proto][row["risk_band"]] = row["count"]
+                result["distribution"][proto]["total"] += row["count"]
+            
+            # Check for imbalanced distribution
+            for proto, dist in result["distribution"].items():
+                total = dist["total"]
+                if total > 0:
+                    moderate_pct = dist["moderate"] / total * 100
+                    if moderate_pct > 90:
+                        result["warnings"].append(f"{proto}: {moderate_pct:.0f}% moderate - mappings may be too narrow")
+                    elif moderate_pct < 20 and total > 5:
+                        result["warnings"].append(f"{proto}: only {moderate_pct:.0f}% moderate - check extreme values")
+            
+            # 3. Worst day test: verify mapping is correct
+            # Test specific worst_day values
+            test_cases = [
+                {"worst_day": -0.003, "expected_score_range": (10, 25)},   # ≤0.5% → 10
+                {"worst_day": -0.015, "expected_score_range": (25, 45)},   # ≤2% → 35
+                {"worst_day": -0.04, "expected_score_range": (50, 75)},    # ≤5% → 65
+                {"worst_day": -0.06, "expected_score_range": (75, 95)},    # >5% → 90
+                {"worst_day": -0.10, "expected_score_range": (80, 100)},   # >5% → 90
+            ]
+            
+            for tc in test_cases:
+                # Compute perf with only worst_day (vol = None to isolate worst_day effect)
+                perf_score, details = compute_performance_risk(None, tc["worst_day"])
+                worst_day_component = details.get("worst_day_score", 0)
+                
+                in_range = tc["expected_score_range"][0] <= worst_day_component <= tc["expected_score_range"][1]
+                
+                result["worst_day_test"].append({
+                    "worst_day": f"{tc['worst_day']*100:.1f}%",
+                    "worst_day_score": worst_day_component,
+                    "perf_score": perf_score,
+                    "expected_range": tc["expected_score_range"],
+                    "pass": in_range
+                })
+                
+                if not in_range:
+                    result["warnings"].append(
+                        f"Worst day test failed: {tc['worst_day']*100:.1f}% → {worst_day_component}, expected {tc['expected_score_range']}"
+                    )
+            
+            # 4. Component tests: verify each component function
+            component_tests = [
+                # Performance risk
+                {"func": "compute_performance_risk", "args": [0.005, -0.01], "expected_range": (15, 35)},
+                {"func": "compute_performance_risk", "args": [0.03, -0.04], "expected_range": (55, 75)},
+                # Drawdown risk
+                {"func": "compute_drawdown_risk", "args": [0.02], "expected_range": (10, 40)},
+                {"func": "compute_drawdown_risk", "args": [0.15], "expected_range": (55, 85)},
+                # Liquidity risk
+                {"func": "compute_liquidity_risk", "args": [50_000_000, 0.02], "expected_range": (15, 35)},
+                {"func": "compute_liquidity_risk", "args": [500_000, 0.05], "expected_range": (55, 80)},
+                # Confidence risk
+                {"func": "compute_confidence_risk", "args": ["real", 30], "expected_range": (5, 20)},
+                {"func": "compute_confidence_risk", "args": ["demo", 5], "expected_range": (55, 80)},
+            ]
+            
+            for tc in component_tests:
+                if tc["func"] == "compute_performance_risk":
+                    score, _ = compute_performance_risk(*tc["args"])
+                elif tc["func"] == "compute_drawdown_risk":
+                    score, _ = compute_drawdown_risk(*tc["args"])
+                elif tc["func"] == "compute_liquidity_risk":
+                    score, _ = compute_liquidity_risk(*tc["args"])
+                elif tc["func"] == "compute_confidence_risk":
+                    score, _ = compute_confidence_risk(*tc["args"])
+                else:
+                    continue
+                
+                in_range = tc["expected_range"][0] <= score <= tc["expected_range"][1]
+                result["component_tests"].append({
+                    "func": tc["func"],
+                    "args": tc["args"],
+                    "score": score,
+                    "expected_range": tc["expected_range"],
+                    "pass": in_range
+                })
+                
+                if not in_range:
+                    result["warnings"].append(
+                        f"Component test failed: {tc['func']}({tc['args']}) → {score}, expected {tc['expected_range']}"
+                    )
+            
+            conn.close()
+            
+            # Summary
+            result["summary"] = {
+                "stability_tests_passed": all(v["is_stable"] for v in result["stability_check"].values()),
+                "worst_day_tests_passed": all(t["pass"] for t in result["worst_day_test"]),
+                "component_tests_passed": all(t["pass"] for t in result["component_tests"]),
+                "total_warnings": len(result["warnings"])
+            }
+            
+            self.send_json(result)
+        
         elif path == "/api/status":
             self.send_json({
                 "status": "ok",
