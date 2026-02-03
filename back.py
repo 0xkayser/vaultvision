@@ -46,6 +46,7 @@ HL_API_URL = "https://api.hyperliquid.xyz/info"
 HL_SCRAPE_URL = "https://stats-data.hyperliquid.xyz/Mainnet/vaults"
 HL_MIN_TVL = 500_000  # Expanded filter: >500K TVL for user vaults
 HL_HLP_ADDRESS = "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303"
+HL_APR_FIX_TTL_SEC = 30 * 60  # Throttle APR fix runs
 
 # Excluded vaults (TASK E: Ban fake HL vaults)
 HL_EXCLUDED_NAMES = {
@@ -55,6 +56,9 @@ HL_EXCLUDED_NAMES = {
 
 # Additional banned patterns (substring matches)
 HL_BANNED_PATTERNS = ["Liquidator", "liquidator"]  # Case-insensitive check
+
+# Hyperliquid APR fix throttle
+_HL_APR_FIX_LAST_TS: float = 0
 
 # =============================================================================
 # BANNED VAULTS (persistent list of vaults that should never be shown)
@@ -428,31 +432,22 @@ def normalize_vault(raw_vault: dict) -> dict:
         source_kind = "derived"
     
     # Normalize APR to decimal (0.15 = 15%)
-    # Hyperliquid API returns APR in percentage format (e.g., 17.51 = 17.51%, 1751 = 1751%)
-    # We need to convert to decimal: divide by 100
-    # But if value is very large (>= 100), it might be percentage * 100 (e.g., 1751 = 1751% = 17.51 decimal)
     apr = raw_vault.get("apr")
     if apr is not None:
         apr = float(apr)
         protocol = raw_vault.get("protocol", "")
         
         if protocol == "hyperliquid":
-            # Hyperliquid API returns APR in percentage format (e.g., 17.51 = 17.51%, 128.25 = 128.25%, 1751 = 1751%)
-            # ALL values >= 1.0 should be divided by 100 to convert to decimal
-            # Values < 1.0 are already in decimal format
-            
+            # Hyperliquid API APR is already decimal (e.g., 1.28 = 128%, 17.51 = 1751%)
+            # Keep as-is, but guard for rare percent-style values (>= 100 -> divide by 100).
             vault_name = raw_vault.get("vault_name", "")
             if "Long HYPE" in vault_name or "Hyperliquidity Provider" in vault_name:
                 print(f"[HL APR DEBUG] {vault_name[:40]}: raw={apr}, ", end="")
-            
-            if apr >= 1.0:
-                # All percentage values: divide by 100
-                # 17.51 -> 0.1751 (17.51%), 128.25 -> 1.2825 (128.25%), 1751 -> 17.51 (1751%)
+            if apr >= 100:
                 apr = apr / 100
                 if "Long HYPE" in vault_name or "Hyperliquidity Provider" in vault_name:
                     print(f"normalized={apr} (÷100)")
             else:
-                # Already decimal (e.g., 0.1751 = 17.51%)
                 if "Long HYPE" in vault_name or "Hyperliquidity Provider" in vault_name:
                     print(f"normalized={apr} (keep as is)")
         else:
@@ -1722,6 +1717,14 @@ def get_all_vaults() -> List[dict]:
     - Hyperliquid: exclude vaults with null TVL or TVL < $500K
     - Nado (demo): always include (exclude_from_rankings=true)
     """
+    global _HL_APR_FIX_LAST_TS
+    now_ts = int(time.time())
+    if now_ts - _HL_APR_FIX_LAST_TS >= HL_APR_FIX_TTL_SEC:
+        try:
+            fix_hyperliquid_apr_in_db()
+            _HL_APR_FIX_LAST_TS = now_ts
+        except Exception as e:
+            print(f"[HL APR FIX] Skipped (error): {e}")
     # Retry logic for database locked errors
     max_retries = 5
     retry_delay = 0.1  # 100ms
@@ -1861,20 +1864,7 @@ def get_all_vaults() -> List[dict]:
             vault["discovery_source"] = "unknown"
         
         # APR (both fields for frontend compatibility)
-        # Fix: Re-normalize APR for Hyperliquid if it looks wrong (already divided incorrectly)
         apr_from_db = row["apr"]
-        if apr_from_db is not None and protocol == "hyperliquid":
-            # If APR is suspiciously low (< 0.01) but should be higher, it might be double-divided
-            # Check if raw value from API would be >= 1.0 (percentage format)
-            # If current value * 100 >= 1.0, it was likely already divided once incorrectly
-            if apr_from_db < 0.01 and apr_from_db > 0:
-                # This looks like it was divided twice (e.g., 17.51 / 100 / 100 = 0.001751)
-                # Try to recover: multiply by 100 to get back to one division
-                potential_correct = apr_from_db * 100
-                if 0.01 <= potential_correct < 1.0:
-                    apr_from_db = potential_correct
-                    print(f"[HL APR FIX] Fixed double-divided APR for {pk[:16]}...: {row['apr']} -> {apr_from_db}")
-        
         if apr_from_db is not None:
             vault["apr"] = apr_from_db
             vault["apy"] = apr_from_db
