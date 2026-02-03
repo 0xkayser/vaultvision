@@ -632,14 +632,25 @@ function renderRiskBreakdown(vault, riskScore) {
   if (vault.risk_components && typeof vault.risk_components === 'object') {
     // Use backend Risk Engine v2 components
     const rc = vault.risk_components;
-    const getLabel = (score) => score <= 20 ? 'Low' : score <= 40 ? 'Medium' : score <= 60 ? 'Elevated' : 'High';
-    const getColor = (score) => score <= 25 ? '#10b981' : score <= 45 ? '#fbbf24' : '#f43f5e';
+    // Match risk band logic: Low ≤33, Moderate 33-66, High >66
+    const getLabel = (score) => {
+      if (score == null) return 'N/A';
+      if (score <= 33) return 'Low';
+      if (score <= 66) return 'Moderate';
+      return 'High';
+    };
+    const getColor = (score) => {
+      if (score == null) return '#94a3b8';
+      if (score <= 33) return '#10b981';  // green
+      if (score <= 66) return '#fbbf24';   // yellow/orange
+      return '#f43f5e';  // red
+    };
     
     components = {
-      perf: { score: rc.perf || 50, label: getLabel(rc.perf || 50), color: getColor(rc.perf || 50) },
-      drawdown: { score: rc.drawdown || 50, label: getLabel(rc.drawdown || 50), color: getColor(rc.drawdown || 50) },
-      liquidity: { score: rc.liquidity || 50, label: getLabel(rc.liquidity || 50), color: getColor(rc.liquidity || 50) },
-      confidence: { score: rc.confidence || 50, label: getLabel(rc.confidence || 50), color: getColor(rc.confidence || 50) }
+      perf: { score: rc.perf ?? null, label: getLabel(rc.perf), color: getColor(rc.perf) },
+      drawdown: { score: rc.drawdown ?? null, label: getLabel(rc.drawdown), color: getColor(rc.drawdown) },
+      liquidity: { score: rc.liquidity ?? null, label: getLabel(rc.liquidity), color: getColor(rc.liquidity) },
+      confidence: { score: rc.confidence ?? null, label: getLabel(rc.confidence), color: getColor(rc.confidence) }
     };
   } else {
     // Fallback to legacy client-side computation
@@ -667,28 +678,28 @@ function renderRiskBreakdown(vault, riskScore) {
         <span class="risk-breakdown-label" tabindex="0">Performance Risk<span class="info-icon">?</span>
           <span class="risk-tooltip">${tooltips.perf}</span>
         </span>
-        <div class="risk-breakdown-bar"><div class="risk-breakdown-fill" style="width:${components.perf.score}%;background:${components.perf.color}"></div></div>
+        <div class="risk-breakdown-bar"><div class="risk-breakdown-fill" style="width:${components.perf.score != null ? components.perf.score : 0}%;background:${components.perf.color}"></div></div>
         <span class="risk-breakdown-val" style="color:${components.perf.color}">${components.perf.label}</span>
       </div>
       <div class="risk-breakdown-row">
         <span class="risk-breakdown-label" tabindex="0">Drawdown Risk<span class="info-icon">?</span>
           <span class="risk-tooltip">${tooltips.drawdown}</span>
         </span>
-        <div class="risk-breakdown-bar"><div class="risk-breakdown-fill" style="width:${components.drawdown.score}%;background:${components.drawdown.color}"></div></div>
+        <div class="risk-breakdown-bar"><div class="risk-breakdown-fill" style="width:${components.drawdown.score != null ? components.drawdown.score : 0}%;background:${components.drawdown.color}"></div></div>
         <span class="risk-breakdown-val" style="color:${components.drawdown.color}">${components.drawdown.label}</span>
       </div>
       <div class="risk-breakdown-row">
         <span class="risk-breakdown-label" tabindex="0">Liquidity Risk<span class="info-icon">?</span>
           <span class="risk-tooltip">${tooltips.liquidity}</span>
         </span>
-        <div class="risk-breakdown-bar"><div class="risk-breakdown-fill" style="width:${components.liquidity.score}%;background:${components.liquidity.color}"></div></div>
+        <div class="risk-breakdown-bar"><div class="risk-breakdown-fill" style="width:${components.liquidity.score != null ? components.liquidity.score : 0}%;background:${components.liquidity.color}"></div></div>
         <span class="risk-breakdown-val" style="color:${components.liquidity.color}">${components.liquidity.label}</span>
       </div>
       <div class="risk-breakdown-row">
         <span class="risk-breakdown-label" tabindex="0">Data Confidence<span class="info-icon">?</span>
           <span class="risk-tooltip">${tooltips.confidence}</span>
         </span>
-        <div class="risk-breakdown-bar"><div class="risk-breakdown-fill" style="width:${components.confidence.score}%;background:${components.confidence.color}"></div></div>
+        <div class="risk-breakdown-bar"><div class="risk-breakdown-fill" style="width:${components.confidence.score != null ? components.confidence.score : 0}%;background:${components.confidence.color}"></div></div>
         <span class="risk-breakdown-val" style="color:${components.confidence.color}">${components.confidence.label}</span>
       </div>
     </div>
