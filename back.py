@@ -381,6 +381,33 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     
+    # =============================================================================
+    # VAULT RISK DAILY (risk scores per day)
+    # =============================================================================
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS vault_risk_daily (
+            vault_pk TEXT NOT NULL,
+            protocol TEXT NOT NULL,
+            date_ts INTEGER NOT NULL,  -- Day bucket timestamp
+            risk_score INTEGER NOT NULL,  -- 0..100 (higher = riskier)
+            risk_band TEXT NOT NULL,  -- "low" | "moderate" | "high"
+            component_perf INTEGER NOT NULL,  -- 0..100
+            component_drawdown INTEGER NOT NULL,  -- 0..100
+            component_liquidity INTEGER NOT NULL,  -- 0..100
+            component_confidence INTEGER NOT NULL,  -- 0..100
+            reasons_json TEXT,  -- JSON with inputs and mapped scores
+            computed_ts INTEGER,
+            PRIMARY KEY (vault_pk, date_ts)
+        )
+    """)
+    
+    # Create index for fast lookups
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_risk_vault_date ON vault_risk_daily(vault_pk, date_ts DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_risk_protocol_date ON vault_risk_daily(protocol, date_ts DESC)")
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
     conn.close()
     print(f"[DB] Initialized {DB_PATH} with canonical schema")
@@ -1970,8 +1997,46 @@ def get_all_vaults() -> List[dict]:
         if pnl_90d is not None:
             vault["r90"] = pnl_90d
         
-        # Compute risk score
-        vault["risk_score"] = compute_risk_score(vault)
+        # Get risk score from Risk Engine v2 (vault_risk_daily)
+        conn3 = get_db()
+        c3 = conn3.cursor()
+        c3.execute("""
+            SELECT risk_score, risk_band,
+                   component_perf, component_drawdown, component_liquidity, component_confidence,
+                   reasons_json
+            FROM vault_risk_daily
+            WHERE vault_pk = ?
+            ORDER BY date_ts DESC
+            LIMIT 1
+        """, (pk,))
+        risk_row = c3.fetchone()
+        conn3.close()
+        
+        if risk_row:
+            # Use Risk Engine v2 data
+            vault["risk_score"] = risk_row["risk_score"]
+            vault["risk_band"] = risk_row["risk_band"]
+            vault["risk_components"] = {
+                "perf": risk_row["component_perf"],
+                "drawdown": risk_row["component_drawdown"],
+                "liquidity": risk_row["component_liquidity"],
+                "confidence": risk_row["component_confidence"]
+            }
+            if risk_row["reasons_json"]:
+                try:
+                    vault["risk_reasons"] = json.loads(risk_row["reasons_json"])
+                except:
+                    pass
+        else:
+            # Fallback to legacy risk score if no Risk Engine v2 data
+            vault["risk_score"] = compute_risk_score(vault)
+            vault["risk_band"] = "moderate"  # Default fallback
+            vault["risk_components"] = {
+                "perf": 50,
+                "drawdown": 50,
+                "liquidity": 50,
+                "confidence": 50
+            }
         
         # Data Quality Contract: Get latest snapshot for freshness/confidence
         conn2 = get_db()
@@ -2049,7 +2114,416 @@ def get_all_vaults() -> List[dict]:
 
 
 # =============================================================================
-# RISK ENGINE (Simple)
+# RISK ENGINE v2 (Deterministic, Explainable)
+# =============================================================================
+
+def compute_performance_risk(volatility_30d: Optional[float], worst_day_30d: Optional[float]) -> tuple[int, dict]:
+    """Compute performance risk component (0-100, higher = worse).
+    
+    Args:
+        volatility_30d: Standard deviation of daily returns
+        worst_day_30d: Minimum daily return (negative value)
+    
+    Returns:
+        (score, details_dict)
+    """
+    notes = []
+    
+    # Volatility mapping
+    if volatility_30d is None:
+        vol_score = 50  # Conservative default
+        notes.append("missing volatility_30d -> using mid-risk default")
+    else:
+        vol = abs(volatility_30d)
+        if vol <= 0.003:
+            vol_score = 10
+        elif vol <= 0.01:
+            vol_score = 25
+        elif vol <= 0.02:
+            vol_score = 45
+        elif vol <= 0.04:
+            vol_score = 65
+        else:
+            vol_score = 85
+    
+    # Worst day mapping (absolute downside)
+    if worst_day_30d is None:
+        worst_day_score = 50  # Conservative default
+        notes.append("missing worst_day_30d -> using mid-risk default")
+    else:
+        worst_abs = abs(worst_day_30d)
+        if worst_abs <= 0.005:
+            worst_day_score = 10
+        elif worst_abs <= 0.02:
+            worst_day_score = 35
+        elif worst_abs <= 0.05:
+            worst_day_score = 65
+        else:
+            worst_day_score = 90
+    
+    # Weighted combination
+    component_score = int(0.6 * vol_score + 0.4 * worst_day_score)
+    
+    details = {
+        "volatility_30d": volatility_30d,
+        "worst_day_30d": worst_day_30d,
+        "vol_score": vol_score,
+        "worst_day_score": worst_day_score,
+        "component_score": component_score,
+        "notes": notes
+    }
+    
+    return component_score, details
+
+
+def compute_drawdown_risk(max_drawdown_30d: Optional[float]) -> tuple[int, dict]:
+    """Compute drawdown risk component (0-100, higher = worse).
+    
+    Args:
+        max_drawdown_30d: Maximum peak-to-trough drop (positive %)
+    
+    Returns:
+        (score, details_dict)
+    """
+    notes = []
+    
+    if max_drawdown_30d is None:
+        component_score = 60  # Conservative default
+        notes.append("missing max_drawdown_30d -> using mid-high risk default")
+    else:
+        dd = abs(max_drawdown_30d)
+        if dd <= 0.01:
+            component_score = 10
+        elif dd <= 0.05:
+            component_score = 35
+        elif dd <= 0.12:
+            component_score = 60
+        elif dd <= 0.25:
+            component_score = 80
+        else:
+            component_score = 95
+    
+    details = {
+        "max_drawdown_30d": max_drawdown_30d,
+        "component_score": component_score,
+        "notes": notes
+    }
+    
+    return component_score, details
+
+
+def compute_liquidity_risk(tvl_usd: Optional[float], tvl_volatility_30d: Optional[float]) -> tuple[int, dict]:
+    """Compute liquidity/crowding risk component (0-100, higher = worse).
+    
+    Args:
+        tvl_usd: Total value locked in USD
+        tvl_volatility_30d: Standard deviation of log(TVL_t / TVL_t-1)
+    
+    Returns:
+        (score, details_dict)
+    """
+    notes = []
+    
+    # TVL size score (smaller = riskier)
+    if tvl_usd is None:
+        tvl_size_score = 75  # Conservative default (small TVL = risky)
+        notes.append("missing tvl_usd -> assuming small TVL (risky)")
+    else:
+        tvl = float(tvl_usd)
+        if tvl >= 100_000_000:  # >= $100M
+            tvl_size_score = 10
+        elif tvl >= 20_000_000:  # $20M-$100M
+            tvl_size_score = 20
+        elif tvl >= 5_000_000:  # $5M-$20M
+            tvl_size_score = 35
+        elif tvl >= 1_000_000:  # $1M-$5M
+            tvl_size_score = 55
+        else:  # < $1M
+            tvl_size_score = 75
+    
+    # TVL volatility score
+    if tvl_volatility_30d is None:
+        tvl_vol_score = 50  # Conservative default
+        notes.append("missing tvl_volatility_30d -> using mid-risk default")
+    else:
+        tvl_vol = abs(tvl_volatility_30d)
+        if tvl_vol <= 0.01:
+            tvl_vol_score = 15
+        elif tvl_vol <= 0.03:
+            tvl_vol_score = 35
+        elif tvl_vol <= 0.08:
+            tvl_vol_score = 60
+        else:
+            tvl_vol_score = 85
+    
+    # Weighted combination
+    component_score = int(0.7 * tvl_size_score + 0.3 * tvl_vol_score)
+    
+    details = {
+        "tvl_usd": tvl_usd,
+        "tvl_volatility_30d": tvl_volatility_30d,
+        "tvl_size_score": tvl_size_score,
+        "tvl_vol_score": tvl_vol_score,
+        "component_score": component_score,
+        "notes": notes
+    }
+    
+    return component_score, details
+
+
+def compute_confidence_risk(quality_label: Optional[str], data_points_30d: Optional[int]) -> tuple[int, dict]:
+    """Compute confidence/data quality risk component (0-100, higher = worse).
+    
+    Args:
+        quality_label: "real" | "derived" | "simulated" | "demo"
+        data_points_30d: Number of valid data points in 30d window
+    
+    Returns:
+        (score, details_dict)
+    """
+    notes = []
+    
+    # Quality score
+    if quality_label is None:
+        quality_score = 45  # Conservative default
+        notes.append("missing quality_label -> assuming derived")
+    else:
+        quality_map = {
+            "real": 10,
+            "derived": 25,
+            "simulated": 45,
+            "demo": 70
+        }
+        quality_score = quality_map.get(quality_label.lower(), 45)
+    
+    # History score (more history = less risk)
+    if data_points_30d is None:
+        history_score = 55  # Conservative default
+        notes.append("missing data_points_30d -> assuming sparse history")
+    else:
+        dp = int(data_points_30d)
+        if dp >= 30:
+            history_score = 10
+        elif dp >= 20:
+            history_score = 20
+        elif dp >= 10:
+            history_score = 35
+        else:
+            history_score = 55
+    
+    # Weighted combination
+    component_score = int(0.7 * quality_score + 0.3 * history_score)
+    
+    details = {
+        "quality_label": quality_label,
+        "data_points_30d": data_points_30d,
+        "quality_score": quality_score,
+        "history_score": history_score,
+        "component_score": component_score,
+        "notes": notes
+    }
+    
+    return component_score, details
+
+
+def compute_total_risk_score(
+    component_perf: int,
+    component_drawdown: int,
+    component_liquidity: int,
+    component_confidence: int
+) -> tuple[int, str]:
+    """Compute total risk score and band.
+    
+    Args:
+        component_perf: Performance risk (0-100)
+        component_drawdown: Drawdown risk (0-100)
+        component_liquidity: Liquidity risk (0-100)
+        component_confidence: Confidence risk (0-100)
+    
+    Returns:
+        (risk_score, risk_band)
+    """
+    # Weighted combination
+    risk_score_raw = (
+        0.35 * component_perf +
+        0.25 * component_drawdown +
+        0.25 * component_liquidity +
+        0.15 * component_confidence
+    )
+    
+    # Clamp and round
+    risk_score = max(0, min(100, int(round(risk_score_raw))))
+    
+    # Determine band
+    if risk_score <= 33:
+        risk_band = "low"
+    elif risk_score <= 66:
+        risk_band = "moderate"
+    else:
+        risk_band = "high"
+    
+    return risk_score, risk_band
+
+
+def run_risk_engine(target_date_ts: Optional[int] = None) -> dict:
+    """Run risk engine for all active vaults.
+    
+    For each vault, computes risk score and components based on latest analytics.
+    Stores results in vault_risk_daily table.
+    
+    Args:
+        target_date_ts: Target date timestamp (day bucket). If None, uses today.
+    
+    Returns:
+        Summary dict with counts and stats.
+    """
+    import time as _time
+    start_time = _time.time()
+    
+    if target_date_ts is None:
+        # Use today's day bucket
+        now = int(_time.time())
+        target_date_ts = (now // 86400) * 86400
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Get all active vaults
+    c.execute("SELECT DISTINCT pk, protocol FROM vaults WHERE status = 'active'")
+    vaults = c.fetchall()
+    
+    total_vaults = len(vaults)
+    computed_count = 0
+    skipped_count = 0
+    errors = []
+    
+    print(f"[RISK] Computing risk scores for {total_vaults} vaults (target_date={target_date_ts})...")
+    
+    for row in vaults:
+        vault_pk = row["pk"]
+        protocol = row["protocol"]
+        
+        try:
+            # Get latest analytics row for this vault (up to target_date)
+            c.execute("""
+                SELECT *
+                FROM vault_analytics_daily
+                WHERE vault_pk = ? AND date_ts <= ?
+                ORDER BY date_ts DESC
+                LIMIT 1
+            """, (vault_pk, target_date_ts))
+            analytics_row = c.fetchone()
+            
+            if not analytics_row:
+                skipped_count += 1
+                continue
+            
+            # Get latest snapshot for TVL
+            c.execute("""
+                SELECT tvl_usd
+                FROM snapshots
+                WHERE vault_pk = ? AND ts <= ?
+                ORDER BY ts DESC
+                LIMIT 1
+            """, (vault_pk, target_date_ts))
+            snapshot_row = c.fetchone()
+            tvl_usd = snapshot_row["tvl_usd"] if snapshot_row else None
+            
+            # Extract analytics metrics
+            volatility_30d = analytics_row["volatility_30d"]
+            worst_day_30d = analytics_row["worst_day_30d"]
+            max_drawdown_30d = analytics_row["max_drawdown_30d"]
+            tvl_volatility_30d = analytics_row["tvl_volatility_30d"]
+            quality_label = analytics_row["quality_label"]
+            data_points_30d = analytics_row["data_points_30d"]
+            
+            # Compute components
+            comp_perf, details_perf = compute_performance_risk(volatility_30d, worst_day_30d)
+            comp_dd, details_dd = compute_drawdown_risk(max_drawdown_30d)
+            comp_liq, details_liq = compute_liquidity_risk(tvl_usd, tvl_volatility_30d)
+            comp_conf, details_conf = compute_confidence_risk(quality_label, data_points_30d)
+            
+            # Compute total risk score
+            risk_score, risk_band = compute_total_risk_score(
+                comp_perf, comp_dd, comp_liq, comp_conf
+            )
+            
+            # Build reasons JSON
+            all_notes = []
+            all_notes.extend(details_perf.get("notes", []))
+            all_notes.extend(details_dd.get("notes", []))
+            all_notes.extend(details_liq.get("notes", []))
+            all_notes.extend(details_conf.get("notes", []))
+            
+            reasons_json = json.dumps({
+                "volatility_30d": volatility_30d,
+                "worst_day_30d": worst_day_30d,
+                "max_drawdown_30d": max_drawdown_30d,
+                "tvl_usd": tvl_usd,
+                "tvl_volatility_30d": tvl_volatility_30d,
+                "quality_label": quality_label,
+                "data_points_30d": data_points_30d,
+                "mapped": {
+                    "perf": comp_perf,
+                    "dd": comp_dd,
+                    "liq": comp_liq,
+                    "conf": comp_conf
+                },
+                "notes": all_notes
+            })
+            
+            # Upsert into vault_risk_daily
+            computed_ts = int(_time.time())
+            c.execute("""
+                INSERT INTO vault_risk_daily (
+                    vault_pk, protocol, date_ts,
+                    risk_score, risk_band,
+                    component_perf, component_drawdown, component_liquidity, component_confidence,
+                    reasons_json, computed_ts
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(vault_pk, date_ts) DO UPDATE SET
+                    risk_score=excluded.risk_score,
+                    risk_band=excluded.risk_band,
+                    component_perf=excluded.component_perf,
+                    component_drawdown=excluded.component_drawdown,
+                    component_liquidity=excluded.component_liquidity,
+                    component_confidence=excluded.component_confidence,
+                    reasons_json=excluded.reasons_json,
+                    computed_ts=excluded.computed_ts
+            """, (
+                vault_pk, protocol, analytics_row["date_ts"],
+                risk_score, risk_band,
+                comp_perf, comp_dd, comp_liq, comp_conf,
+                reasons_json, computed_ts
+            ))
+            
+            computed_count += 1
+            
+        except Exception as e:
+            errors.append(f"{vault_pk[:16]}...: {e}")
+            print(f"[RISK] Error computing risk for {vault_pk[:16]}...: {e}")
+    
+    conn.commit()
+    conn.close()
+    
+    elapsed_sec = _time.time() - start_time
+    
+    result = {
+        "total_vaults": total_vaults,
+        "computed": computed_count,
+        "skipped": skipped_count,
+        "errors": errors,
+        "elapsed_sec": elapsed_sec
+    }
+    
+    print(f"[RISK] Done: {computed_count} computed, {skipped_count} skipped, {len(errors)} errors in {elapsed_sec:.2f}s")
+    
+    return result
+
+
+# =============================================================================
+# RISK ENGINE (Simple) - Legacy, kept for backward compatibility
 # =============================================================================
 def compute_risk_score(vault: dict) -> int:
     """Simple risk score: 0 (safe) to 100 (risky).
@@ -3314,6 +3788,13 @@ def run_fetch_job():
     analytics_result = compute_all_vaults_analytics(force_recompute=False)
     print(f"[FETCH] Analytics: {analytics_result['total_computed']} new rows computed in {analytics_result['elapsed_sec']:.1f}s")
     
+    # =============================================================================
+    # STEP 5: COMPUTE RISK SCORES (Risk Engine v2)
+    # =============================================================================
+    print("[FETCH] Step 5: Computing risk scores...")
+    risk_result = run_risk_engine(target_date_ts=None)
+    print(f"[FETCH] Risk: {risk_result['computed']} vaults computed, {risk_result['skipped']} skipped in {risk_result['elapsed_sec']:.1f}s")
+    
     # Summary
     if validation_errors:
         print(f"[FETCH] Validation errors: {sum(len(v) for v in validation_errors.values())} total")
@@ -3490,6 +3971,97 @@ class APIHandler(BaseHTTPRequestHandler):
                 drift_ages = [v.get("age_days", 0) for v in drift_vaults if v.get("age_days")]
                 old_drift = len([a for a in drift_ages if a > 100])
                 
+                # Risk Engine v2 debug info
+                conn_risk = get_db()
+                c_risk = conn_risk.cursor()
+                
+                # Get top 3 lowest and highest risk vaults per protocol
+                risk_debug = {}
+                for proto in ["hyperliquid", "drift", "lighter", "nado"]:
+                    c_risk.execute("""
+                        SELECT vault_pk, risk_score, risk_band,
+                               component_perf, component_drawdown, component_liquidity, component_confidence,
+                               reasons_json
+                        FROM vault_risk_daily
+                        WHERE protocol = ?
+                        ORDER BY date_ts DESC, risk_score ASC
+                        LIMIT 3
+                    """, (proto,))
+                    low_risk = c_risk.fetchall()
+                    
+                    c_risk.execute("""
+                        SELECT vault_pk, risk_score, risk_band,
+                               component_perf, component_drawdown, component_liquidity, component_confidence,
+                               reasons_json
+                        FROM vault_risk_daily
+                        WHERE protocol = ?
+                        ORDER BY date_ts DESC, risk_score DESC
+                        LIMIT 3
+                    """, (proto,))
+                    high_risk = c_risk.fetchall()
+                    
+                    # Get vault names
+                    def enrich_risk_row(row):
+                        c_risk.execute("SELECT vault_name FROM vaults WHERE pk = ?", (row["vault_pk"],))
+                        vault_name_row = c_risk.fetchone()
+                        return {
+                            "vault_pk": row["vault_pk"],
+                            "vault_name": vault_name_row["vault_name"] if vault_name_row else "unknown",
+                            "risk_score": row["risk_score"],
+                            "risk_band": row["risk_band"],
+                            "components": {
+                                "perf": row["component_perf"],
+                                "drawdown": row["component_drawdown"],
+                                "liquidity": row["component_liquidity"],
+                                "confidence": row["component_confidence"]
+                            },
+                            "reasons": json.loads(row["reasons_json"]) if row["reasons_json"] else None
+                        }
+                    
+                    risk_debug[proto] = {
+                        "lowest_risk": [enrich_risk_row(r) for r in low_risk],
+                        "highest_risk": [enrich_risk_row(r) for r in high_risk]
+                    }
+                
+                # Count by band per protocol
+                c_risk.execute("""
+                    SELECT protocol, risk_band, COUNT(*) as count
+                    FROM vault_risk_daily
+                    WHERE date_ts = (SELECT MAX(date_ts) FROM vault_risk_daily)
+                    GROUP BY protocol, risk_band
+                """)
+                band_counts = {}
+                for row in c_risk.fetchall():
+                    proto = row["protocol"]
+                    if proto not in band_counts:
+                        band_counts[proto] = {}
+                    band_counts[proto][row["risk_band"]] = row["count"]
+                
+                # Quality label stats (parse JSON in Python)
+                c_risk.execute("""
+                    SELECT protocol, reasons_json
+                    FROM vault_risk_daily
+                    WHERE date_ts = (SELECT MAX(date_ts) FROM vault_risk_daily)
+                """)
+                quality_stats = {}
+                for row in c_risk.fetchall():
+                    proto = row["protocol"]
+                    if proto not in quality_stats:
+                        quality_stats[proto] = {"real": 0, "derived_simulated_demo": 0}
+                    
+                    if row["reasons_json"]:
+                        try:
+                            reasons = json.loads(row["reasons_json"])
+                            ql = reasons.get("quality_label", "")
+                            if ql == "real":
+                                quality_stats[proto]["real"] += 1
+                            else:
+                                quality_stats[proto]["derived_simulated_demo"] += 1
+                        except:
+                            pass
+                
+                conn_risk.close()
+                
                 self.send_json({
                     "debug": True,
                     "api_response_ms": api_elapsed_ms,
@@ -3500,6 +4072,9 @@ class APIHandler(BaseHTTPRequestHandler):
                         "drift": len(set(fingerprint_samples["drift"])) == len(fingerprint_samples["drift"]),
                         "lighter": len(set(fingerprint_samples["lighter"])) == len(fingerprint_samples["lighter"]),
                     },
+                    "risk_debug": risk_debug,
+                    "risk_band_counts": band_counts,
+                    "risk_quality_stats": quality_stats,
                     "acceptance_checks": {
                         "lighter_url_format": sample_urls.get("lighter", {}).get("sample_url", "").startswith("https://app.lighter.xyz/public-pools/") if sample_urls.get("lighter") else False,
                         "drift_url_format": "/vaults/strategy-vaults/" in sample_urls.get("drift", {}).get("sample_url", "") if sample_urls.get("drift") else False,
