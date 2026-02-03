@@ -3105,6 +3105,7 @@ def compute_risk_adjusted_score(
     
     Formula:
     - expected_return = cum_return_30d OR apr/12 (monthly approx)
+    - CAPPED at 100% (1.0) to prevent outliers from dominating
     - risk_penalty = risk_score / 100 (min 0.15 to avoid blow-ups)
     - base_score = expected_return / risk_penalty
     - tvl_factor = 0.8 + 0.2 * norm(tvl)
@@ -3117,6 +3118,10 @@ def compute_risk_adjusted_score(
         expected_return = apr / 12  # Monthly approximation
     else:
         expected_return = 0.0
+    
+    # CAP return at 100% (1.0) to prevent outliers like +500% from dominating
+    # This makes the ranking more fair - beyond 100%/month is exceptional but capped
+    expected_return = min(1.0, max(-0.5, expected_return))
     
     # Risk penalty (min 0.15 to avoid division issues)
     risk_penalty = max(0.15, risk_score / 100.0)
