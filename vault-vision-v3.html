@@ -877,9 +877,19 @@ function renderAna(){
   let vaults=anaF==='all'?all():all().filter(v=>v.protocol===anaF);
   vaults=vaults.filter(v=>!v.exclude_from_rankings);
   vaults.sort((a,b)=>{
-    const gv=(v,k)=>{if(k==='r30')return v.r30??-Infinity;if(k==='risk_score')return v.risk_score??-Infinity;return v[k]??-Infinity;};
+    const gv=(v,k)=>{
+      if(k==='rank'){
+        // Get verified or estimated rank, unranked vaults go to end (999)
+        return v.rankings?.verified_top?.rank || v.rankings?.estimated_top?.rank || 999;
+      }
+      if(k==='r30')return v.r30??-Infinity;
+      if(k==='risk_score')return v.risk_score??-Infinity;
+      return v[k]??-Infinity;
+    };
     const av=gv(a,sortK),bv=gv(b,sortK);
     if(av===bv)return(b.tvl_usd||0)-(a.tvl_usd||0);
+    // For rank: ascending means 1,2,3... (lower is better), descending means 999,998...
+    if(sortK==='rank') return sortD==='desc'?bv-av:av-bv;
     return sortD==='desc'?bv-av:av-bv;
   });
   document.querySelectorAll('#anaTable th[data-s]').forEach(th=>{
