@@ -2025,6 +2025,12 @@ def get_all_vaults() -> List[dict]:
         confidence = vault["data_quality_contract"]["confidence"]
         vault["meets_confidence_threshold"] = confidence >= 0.7
         
+        # Apply confidence threshold for rankings (except Nado demo vaults)
+        # Only vaults with confidence >= 0.7 (API or UI scrape) appear in rankings
+        if row["protocol"] != "nado":  # Nado is demo, always show
+            if confidence < 0.7:
+                vault["exclude_from_rankings"] = True
+        
         # Build official vault URL (use external_url if available)
         if external_url:
             vault["vault_url"] = external_url
