@@ -1191,15 +1191,15 @@ def compute_basic_analytics_from_vault(vault_pk: str, protocol: str, snapshot: d
     c = conn.cursor()
     
     # Get vault data
-    c.execute("SELECT r30, r90, tvl_usd, apr, age_days, data_quality FROM vaults WHERE pk = ?", (vault_pk,))
+    c.execute("SELECT pnl_30d, pnl_90d, tvl_usd, apr, age_days, data_quality FROM vaults WHERE pk = ?", (vault_pk,))
     vault_row = c.fetchone()
     
     if not vault_row:
         conn.close()
         return 0
     
-    r30 = vault_row["r30"]
-    r90 = vault_row["r90"]
+    r30 = vault_row["pnl_30d"]  # pnl_30d is the same as r30
+    r90 = vault_row["pnl_90d"]  # pnl_90d is the same as r90
     tvl_usd = vault_row["tvl_usd"]
     apr = vault_row["apr"] or 0
     age_days = vault_row["age_days"] or 0
@@ -2620,7 +2620,7 @@ def compute_risk_components_from_vault_data(vault_pk: str, protocol: str, conn) 
     c = conn.cursor()
     
     # Get vault data
-    c.execute("SELECT tvl_usd, apr, r30, r90, age_days, data_quality FROM vaults WHERE pk = ?", (vault_pk,))
+    c.execute("SELECT tvl_usd, apr, pnl_30d, pnl_90d, age_days, data_quality FROM vaults WHERE pk = ?", (vault_pk,))
     vault_row = c.fetchone()
     
     if not vault_row:
@@ -2629,8 +2629,8 @@ def compute_risk_components_from_vault_data(vault_pk: str, protocol: str, conn) 
     
     tvl_usd = vault_row["tvl_usd"]
     apr = vault_row["apr"] or 0
-    r30 = vault_row["r30"]
-    r90 = vault_row["r90"]
+    r30 = vault_row["pnl_30d"]  # pnl_30d is the same as r30
+    r90 = vault_row["pnl_90d"]  # pnl_90d is the same as r90
     age_days = vault_row["age_days"] or 0
     data_quality = vault_row["data_quality"] or "derived"
     
