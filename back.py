@@ -433,6 +433,57 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     
+    # =============================================================================
+    # VAULT CLICK EVENTS (outbound click tracking for revshare & analytics)
+    # =============================================================================
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS vault_click_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,           -- Unix timestamp (seconds)
+            vault_id TEXT NOT NULL,
+            protocol TEXT NOT NULL,
+            source_page TEXT NOT NULL,     -- "dashboard" | "vault_page" | "analytics"
+            rank_type TEXT,                -- "verified_top" | "estimated_top" | "risk_adjusted" | NULL
+            user_agent TEXT,
+            ip_hash TEXT,                  -- sha256(ip + salt), privacy-safe
+            ref_tag TEXT DEFAULT 'vaultvision',
+            created_ts INTEGER NOT NULL
+        )
+    """)
+    
+    # Create indexes for click analytics
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_click_vault_ts ON vault_click_events(vault_id, ts DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_click_protocol_ts ON vault_click_events(protocol, ts DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_click_ts ON vault_click_events(ts DESC)")
+    except sqlite3.OperationalError:
+        pass
+    
+    # =============================================================================
+    # VAULT EXPECTATION DAILY (Expected vs Observed performance)
+    # =============================================================================
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS vault_expectation_daily (
+            vault_id TEXT NOT NULL,
+            protocol TEXT NOT NULL,
+            date_ts INTEGER NOT NULL,      -- Day bucket timestamp
+            expected_return_30d REAL,      -- APR/12 as decimal (0.02 = +2%)
+            observed_return_30d REAL,      -- cum_return_30d from analytics
+            deviation REAL,                -- observed - expected
+            confidence REAL,               -- 0.0-1.0 based on data quality
+            quality_label TEXT,
+            computed_ts INTEGER NOT NULL,
+            PRIMARY KEY (vault_id, date_ts)
+        )
+    """)
+    
+    # Create index for expectation queries
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_expect_vault_date ON vault_expectation_daily(vault_id, date_ts DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_expect_protocol ON vault_expectation_daily(protocol, date_ts DESC)")
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
     conn.close()
     print(f"[DB] Initialized {DB_PATH} with canonical schema")
@@ -3359,6 +3410,281 @@ def run_rank_engine(target_date_ts: Optional[int] = None) -> dict:
 
 
 # =============================================================================
+# CLICK TRACKING (Outbound click analytics for revshare & proof of value)
+# =============================================================================
+
+# Static salt for IP hashing (privacy-safe)
+CLICK_IP_SALT = "vaultvision_click_salt_2024"
+
+def record_click_event(
+    vault_id: str,
+    protocol: str,
+    source_page: str,
+    rank_type: Optional[str],
+    user_agent: Optional[str],
+    ip_address: Optional[str]
+) -> bool:
+    """Record an outbound click event.
+    
+    Args:
+        vault_id: Vault identifier
+        protocol: Protocol name
+        source_page: Where the click originated ("dashboard", "vault_page", "analytics")
+        rank_type: Which ranking list (if any)
+        user_agent: Browser User-Agent
+        ip_address: Client IP (will be hashed)
+    
+    Returns:
+        True if recorded successfully
+    """
+    import hashlib
+    
+    now = int(time.time())
+    
+    # Hash IP for privacy
+    ip_hash = None
+    if ip_address:
+        ip_hash = hashlib.sha256(f"{ip_address}{CLICK_IP_SALT}".encode()).hexdigest()[:16]
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    try:
+        c.execute("""
+            INSERT INTO vault_click_events (
+                ts, vault_id, protocol, source_page, rank_type,
+                user_agent, ip_hash, ref_tag, created_ts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'vaultvision', ?)
+        """, (now, vault_id, protocol, source_page, rank_type, user_agent, ip_hash, now))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"[CLICK] Error recording click: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_click_stats(days: int = 7) -> dict:
+    """Get click statistics for the last N days.
+    
+    Returns:
+        Dict with clicks_per_vault, clicks_per_protocol, clicks_by_rank_type
+    """
+    conn = get_db()
+    c = conn.cursor()
+    
+    cutoff_ts = int(time.time()) - (days * 86400)
+    
+    # Clicks per vault
+    c.execute("""
+        SELECT vault_id, protocol, COUNT(*) as clicks
+        FROM vault_click_events
+        WHERE ts >= ?
+        GROUP BY vault_id, protocol
+        ORDER BY clicks DESC
+        LIMIT 20
+    """, (cutoff_ts,))
+    clicks_per_vault = [dict(row) for row in c.fetchall()]
+    
+    # Clicks per protocol
+    c.execute("""
+        SELECT protocol, COUNT(*) as clicks
+        FROM vault_click_events
+        WHERE ts >= ?
+        GROUP BY protocol
+        ORDER BY clicks DESC
+    """, (cutoff_ts,))
+    clicks_per_protocol = [dict(row) for row in c.fetchall()]
+    
+    # Clicks by rank_type
+    c.execute("""
+        SELECT rank_type, COUNT(*) as clicks
+        FROM vault_click_events
+        WHERE ts >= ?
+        GROUP BY rank_type
+        ORDER BY clicks DESC
+    """, (cutoff_ts,))
+    clicks_by_rank_type = [dict(row) for row in c.fetchall()]
+    
+    # Total clicks
+    c.execute("SELECT COUNT(*) as total FROM vault_click_events WHERE ts >= ?", (cutoff_ts,))
+    total = c.fetchone()["total"]
+    
+    conn.close()
+    
+    return {
+        "period_days": days,
+        "total_clicks": total,
+        "clicks_per_vault": clicks_per_vault,
+        "clicks_per_protocol": clicks_per_protocol,
+        "clicks_by_rank_type": clicks_by_rank_type
+    }
+
+
+# =============================================================================
+# EXPECTATION ENGINE (Expected vs Observed performance)
+# =============================================================================
+
+def run_expectation_engine(target_date_ts: Optional[int] = None) -> dict:
+    """Compute Expected vs Observed returns for all vaults.
+    
+    Expected = APR / 12 (monthly)
+    Observed = cum_return_30d from analytics
+    Deviation = Observed - Expected
+    Confidence = based on data quality
+    
+    Args:
+        target_date_ts: Target date timestamp. If None, uses today.
+    
+    Returns:
+        Summary dict with counts and stats.
+    """
+    import time as _time
+    start_time = _time.time()
+    
+    if target_date_ts is None:
+        now = int(_time.time())
+        target_date_ts = (now // 86400) * 86400
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Get all active vaults with their APR and analytics
+    c.execute("""
+        SELECT 
+            v.pk as vault_id,
+            v.protocol,
+            v.apr,
+            a.cum_return_30d,
+            a.quality_label,
+            a.data_points_30d
+        FROM vaults v
+        LEFT JOIN vault_analytics_daily a ON v.pk = a.vault_pk
+            AND a.date_ts = (SELECT MAX(date_ts) FROM vault_analytics_daily WHERE vault_pk = v.pk)
+        WHERE v.status = 'active'
+    """)
+    
+    vaults = c.fetchall()
+    total_vaults = len(vaults)
+    
+    print(f"[EXPECT] Computing expectations for {total_vaults} vaults...")
+    
+    computed_count = 0
+    skipped_count = 0
+    computed_ts = int(_time.time())
+    
+    for row in vaults:
+        vault_id = row["vault_id"]
+        protocol = row["protocol"]
+        apr = row["apr"]
+        cum_return_30d = row["cum_return_30d"]
+        quality_label = row["quality_label"] or "derived"
+        data_points_30d = row["data_points_30d"] or 0
+        
+        # Skip if no APR
+        if apr is None:
+            skipped_count += 1
+            continue
+        
+        # Expected return = APR / 12 (monthly)
+        expected_return_30d = apr / 12.0
+        
+        # Observed return from analytics (can be None)
+        observed_return_30d = cum_return_30d
+        
+        # Deviation (None if no observed)
+        deviation = None
+        if observed_return_30d is not None:
+            deviation = observed_return_30d - expected_return_30d
+        
+        # Confidence calculation
+        confidence = 1.0
+        if quality_label == "derived":
+            confidence *= 0.7
+        elif quality_label == "simulated":
+            confidence *= 0.4
+        elif quality_label == "demo":
+            confidence *= 0.2
+        
+        if data_points_30d < 20:
+            confidence *= 0.7
+        
+        confidence = max(0.0, min(1.0, confidence))
+        
+        # Upsert
+        c.execute("""
+            INSERT INTO vault_expectation_daily (
+                vault_id, protocol, date_ts, expected_return_30d, observed_return_30d,
+                deviation, confidence, quality_label, computed_ts
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(vault_id, date_ts) DO UPDATE SET
+                expected_return_30d=excluded.expected_return_30d,
+                observed_return_30d=excluded.observed_return_30d,
+                deviation=excluded.deviation,
+                confidence=excluded.confidence,
+                quality_label=excluded.quality_label,
+                computed_ts=excluded.computed_ts
+        """, (
+            vault_id, protocol, target_date_ts,
+            expected_return_30d, observed_return_30d, deviation,
+            confidence, quality_label, computed_ts
+        ))
+        
+        computed_count += 1
+    
+    conn.commit()
+    conn.close()
+    
+    elapsed_sec = _time.time() - start_time
+    
+    result = {
+        "total_vaults": total_vaults,
+        "computed": computed_count,
+        "skipped": skipped_count,
+        "elapsed_sec": elapsed_sec
+    }
+    
+    print(f"[EXPECT] Done: {computed_count} computed, {skipped_count} skipped in {elapsed_sec:.2f}s")
+    
+    return result
+
+
+def get_vault_expectation(vault_id: str) -> Optional[dict]:
+    """Get latest expectation data for a vault.
+    
+    Returns:
+        Dict with expected_30d, observed_30d, deviation_30d, confidence
+        or None if not found.
+    """
+    conn = get_db()
+    c = conn.cursor()
+    
+    c.execute("""
+        SELECT expected_return_30d, observed_return_30d, deviation, confidence, quality_label
+        FROM vault_expectation_daily
+        WHERE vault_id = ?
+        ORDER BY date_ts DESC
+        LIMIT 1
+    """, (vault_id,))
+    
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        return None
+    
+    return {
+        "expected_30d": row["expected_return_30d"],
+        "observed_30d": row["observed_return_30d"],
+        "deviation_30d": row["deviation"],
+        "confidence": row["confidence"],
+        "quality_label": row["quality_label"]
+    }
+
+
+# =============================================================================
 # RISK ENGINE (Simple) - Legacy, kept for backward compatibility
 # =============================================================================
 def compute_risk_score(vault: dict) -> int:
@@ -4638,6 +4964,13 @@ def run_fetch_job():
     rank_result = run_rank_engine(target_date_ts=None)
     print(f"[FETCH] Rankings: verified={rank_result['verified_top']['included']}, estimated={rank_result['estimated_top']['included']}, risk_adj={rank_result['risk_adjusted']['included']} in {rank_result['elapsed_sec']:.1f}s")
     
+    # =============================================================================
+    # STEP 7: COMPUTE EXPECTATIONS (Expected vs Observed)
+    # =============================================================================
+    print("[FETCH] Step 7: Computing expectations...")
+    expect_result = run_expectation_engine(target_date_ts=None)
+    print(f"[FETCH] Expectations: {expect_result['computed']} computed, {expect_result['skipped']} skipped in {expect_result['elapsed_sec']:.1f}s")
+    
     # Summary
     if validation_errors:
         print(f"[FETCH] Validation errors: {sum(len(v) for v in validation_errors.values())} total")
@@ -4969,6 +5302,45 @@ class APIHandler(BaseHTTPRequestHandler):
                 
                 conn_rank.close()
                 
+                # Expectation debug stats
+                conn_expect = get_db()
+                c_expect = conn_expect.cursor()
+                
+                # Sample expectations (3 vaults)
+                c_expect.execute("""
+                    SELECT vault_id, protocol, expected_return_30d, observed_return_30d, 
+                           deviation, confidence, quality_label
+                    FROM vault_expectation_daily
+                    WHERE date_ts = (SELECT MAX(date_ts) FROM vault_expectation_daily)
+                    AND deviation IS NOT NULL
+                    LIMIT 3
+                """)
+                sample_expectations = [dict(row) for row in c_expect.fetchall()]
+                
+                # Avg deviation by protocol
+                c_expect.execute("""
+                    SELECT protocol, AVG(deviation) as avg_deviation, COUNT(*) as count
+                    FROM vault_expectation_daily
+                    WHERE date_ts = (SELECT MAX(date_ts) FROM vault_expectation_daily)
+                    AND deviation IS NOT NULL
+                    GROUP BY protocol
+                """)
+                avg_deviation_by_protocol = {row["protocol"]: {"avg": row["avg_deviation"], "count": row["count"]} for row in c_expect.fetchall()}
+                
+                # Count with large deviation (>5%)
+                c_expect.execute("""
+                    SELECT COUNT(*) as count
+                    FROM vault_expectation_daily
+                    WHERE date_ts = (SELECT MAX(date_ts) FROM vault_expectation_daily)
+                    AND ABS(deviation) > 0.05
+                """)
+                large_deviation_count = c_expect.fetchone()["count"]
+                
+                # Click stats (last 7 days)
+                click_stats = get_click_stats(days=7)
+                
+                conn_expect.close()
+                
                 self.send_json({
                     "debug": True,
                     "api_response_ms": api_elapsed_ms,
@@ -4985,6 +5357,12 @@ class APIHandler(BaseHTTPRequestHandler):
                     "rank_counts": rank_counts,
                     "rank_top10": rank_top10,
                     "rank_exclusion_reasons": exclusion_reasons,
+                    "expectation_debug": {
+                        "sample_expectations": sample_expectations,
+                        "avg_deviation_by_protocol": avg_deviation_by_protocol,
+                        "large_deviation_count": large_deviation_count
+                    },
+                    "click_stats_7d": click_stats,
                     "acceptance_checks": {
                         "lighter_url_format": sample_urls.get("lighter", {}).get("sample_url", "").startswith("https://app.lighter.xyz/public-pools/") if sample_urls.get("lighter") else False,
                         "drift_url_format": "/vaults/strategy-vaults/" in sample_urls.get("drift", {}).get("sample_url", "") if sample_urls.get("drift") else False,
@@ -4994,6 +5372,7 @@ class APIHandler(BaseHTTPRequestHandler):
                         "nado_has_values": any(v.get("tvl_raw") and v.get("apr_raw") for v in debug_vaults if v["protocol"] == "nado"),
                         "demo_not_in_verified": all(v["protocol"] != "nado" for v in rank_top10.get("verified_top", [])),
                         "rankings_populated": len(rank_counts) == 3,
+                        "expectations_computed": len(sample_expectations) > 0,
                     },
                     "updated_utc": int(time.time()),
                     "notes": "acceptance_checks should all be True for Ralph acceptance."
@@ -5023,6 +5402,10 @@ class APIHandler(BaseHTTPRequestHandler):
             vaults = get_all_vaults()
             vault = next((v for v in vaults if v["id"] == vault_id), None)
             if vault:
+                # Add expectation data (Expected vs Observed)
+                expectation = get_vault_expectation(vault_id)
+                if expectation:
+                    vault["expectation"] = expectation
                 self.send_json(vault)
             else:
                 self.send_json({"error": "Vault not found"}, 404)
@@ -5150,6 +5533,14 @@ class APIHandler(BaseHTTPRequestHandler):
                 "total_excluded": counts["total_excluded"] or 0,
                 "rankings": rankings
             })
+        
+        elif path == "/api/click-stats":
+            # Click statistics endpoint
+            days = int(query.get("days", ["7"])[0])
+            days = min(max(1, days), 90)  # Clamp 1..90
+            
+            stats = get_click_stats(days=days)
+            self.send_json(stats)
         
         elif path == "/api/risk-sanity":
             # Risk Engine sanity check endpoint
@@ -5504,6 +5895,57 @@ class APIHandler(BaseHTTPRequestHandler):
                 "validation": validation,
                 "total_analytics_rows": len(vault_pks),
             })
+        
+        else:
+            self.send_json({"error": "Not found"}, 404)
+    
+    def do_POST(self):
+        """Handle POST requests."""
+        parsed = urlparse(self.path)
+        path = parsed.path
+        
+        # Read request body
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+        
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            self.send_json({"error": "Invalid JSON"}, 400)
+            return
+        
+        if path == "/api/track/click":
+            # Record outbound click event
+            vault_id = data.get("vault_id")
+            protocol = data.get("protocol")
+            source_page = data.get("source_page", "unknown")
+            rank_type = data.get("rank_type")
+            
+            if not vault_id or not protocol:
+                self.send_json({"error": "vault_id and protocol required"}, 400)
+                return
+            
+            # Extract user agent and IP
+            user_agent = self.headers.get("User-Agent")
+            
+            # Get client IP (handle proxies)
+            ip_address = self.headers.get("X-Forwarded-For")
+            if ip_address:
+                ip_address = ip_address.split(",")[0].strip()
+            else:
+                ip_address = self.client_address[0] if self.client_address else None
+            
+            # Record the click (fire-and-forget)
+            success = record_click_event(
+                vault_id=vault_id,
+                protocol=protocol,
+                source_page=source_page,
+                rank_type=rank_type,
+                user_agent=user_agent,
+                ip_address=ip_address
+            )
+            
+            self.send_json({"ok": success})
         
         else:
             self.send_json({"error": "Not found"}, 404)

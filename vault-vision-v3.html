@@ -175,6 +175,16 @@ tbody tr:last-child td{border-bottom:none}
 .calc-card::before{content:'';position:absolute;inset:0;border-radius:20px;padding:2px;background:var(--gradient-accent);-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
 .calc-card h3{font-size:18px;margin-bottom:20px;color:var(--text-primary)}
 .calc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px}
+.expect-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:20px}
+.expect-item{text-align:center}
+.expect-label{font-size:12px;color:var(--text-secondary);text-transform:uppercase;margin-bottom:8px}
+.expect-val{font-size:24px;font-weight:700;color:var(--text-primary)}
+.expect-val.positive{color:#10b981}
+.expect-val.negative{color:#f43f5e}
+.expect-val.neutral{color:var(--text-secondary)}
+.expect-sub{font-size:11px;color:var(--text-secondary);margin-top:4px}
+.expect-confidence{height:8px;background:var(--bg-card);border-radius:4px;overflow:hidden;margin-top:8px}
+.expect-conf-bar{height:100%;border-radius:4px;transition:width .3s}
 .calc-group label{display:block;font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;margin-bottom:6px}
 .calc-input{width:100%;padding:12px;border:1px solid var(--border-light);border-radius:12px;font-size:16px;background:var(--bg-card-solid);color:var(--text-primary);transition:all .2s}
 .calc-input:focus{outline:none;border-color:var(--sky-400);box-shadow:0 0 0 3px rgba(56,189,248,0.15)}
@@ -625,6 +635,63 @@ function renderRiskGauge(score, protoAccent) {
 }
 
 // =============================================================================
+// EXPECTED VS OBSERVED BLOCK
+// =============================================================================
+function renderExpectationBlock(v) {
+  const exp = v.expectation;
+  if (!exp) return '';
+  
+  const expected = exp.expected_30d;
+  const observed = exp.observed_30d;
+  const deviation = exp.deviation_30d;
+  const confidence = exp.confidence;
+  
+  if (expected == null) return '';
+  
+  const fmtPctE = (val) => val != null ? (val >= 0 ? '+' : '') + (val * 100).toFixed(2) + '%' : 'N/A';
+  
+  // Determine deviation status
+  let devStatus = 'neutral';
+  let devLabel = 'On Track';
+  if (deviation != null) {
+    if (deviation > 0.02) { devStatus = 'positive'; devLabel = 'Outperforming'; }
+    else if (deviation < -0.02) { devStatus = 'negative'; devLabel = 'Underperforming'; }
+  }
+  
+  // Confidence bar width and color
+  const confPct = Math.round((confidence || 0) * 100);
+  const confColor = confidence >= 0.7 ? '#10b981' : confidence >= 0.4 ? '#fbbf24' : '#f43f5e';
+  
+  return `
+  <div class="calc-card fade-in" style="animation-delay:.12s">
+    <h3>📊 Expected vs Observed (30D)</h3>
+    <div class="expect-grid">
+      <div class="expect-item">
+        <div class="expect-label">Expected Return</div>
+        <div class="expect-val">${fmtPctE(expected)}</div>
+        <div class="expect-sub">Based on APR/12</div>
+      </div>
+      <div class="expect-item">
+        <div class="expect-label">Observed Return</div>
+        <div class="expect-val ${observed != null && observed >= 0 ? 'positive' : 'negative'}">${fmtPctE(observed)}</div>
+        <div class="expect-sub">Actual 30D performance</div>
+      </div>
+      <div class="expect-item">
+        <div class="expect-label">Deviation</div>
+        <div class="expect-val ${devStatus}">${fmtPctE(deviation)}</div>
+        <div class="expect-sub">${devLabel}</div>
+      </div>
+      <div class="expect-item">
+        <div class="expect-label">Data Confidence</div>
+        <div class="expect-confidence">
+          <div class="expect-conf-bar" style="width:${confPct}%;background:${confColor}"></div>
+        </div>
+        <div class="expect-sub">${confPct}% (${exp.quality_label || 'unknown'})</div>
+      </div>
+    </div>
+  </div>`;
+}
+
 // RISK BREAKDOWN COMPONENT (with tooltips)
 // =============================================================================
 function renderRiskBreakdown(vault, riskScore) {
@@ -796,9 +863,22 @@ function fmtAge(v){
   if(v.age_days!=null&&v.age_days>0) return v.age_days+'d';
   return 'N/A';
 }
-function extLinkBtn(v){
+function trackClick(vaultId, protocol, sourcePage, rankType) {
+  // Fire-and-forget click tracking
+  fetch('/api/track/click', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      vault_id: vaultId,
+      protocol: protocol,
+      source_page: sourcePage,
+      rank_type: rankType || null
+    })
+  }).catch(() => {}); // Ignore errors
+}
+function extLinkBtn(v, sourcePage='dashboard', rankType=null){
   if(!v.vault_url)return '';
-  return `<a href="${escapeHtml(v.vault_url)}" target="_blank" rel="noopener noreferrer" class="card-ext-link" onclick="event.stopPropagation()" title="${escapeHtml(v.vault_url_label||'Open')}">Open ↗</a>`;
+  return `<a href="${escapeHtml(v.vault_url)}" target="_blank" rel="noopener noreferrer" class="card-ext-link" onclick="event.stopPropagation();trackClick('${v.id}','${v.protocol}','${sourcePage}',${rankType?`'${rankType}'`:'null'})" title="${escapeHtml(v.vault_url_label||'Open')}">Open ↗</a>`;
 }
 function escapeHtml(s){
   if(!s)return '';
@@ -1135,7 +1215,7 @@ function renderVault(id){
         </div>
       </div>
     </div>
-    ${v.vault_url?`<a href="${escapeHtml(v.vault_url)}" target="_blank" rel="noopener noreferrer" class="vault-hero-btn ${v.protocol}">
+    ${v.vault_url?`<a href="${escapeHtml(v.vault_url)}" target="_blank" rel="noopener noreferrer" class="vault-hero-btn ${v.protocol}" onclick="trackClick('${v.id}','${v.protocol}','vault_page',null)">
       Open on ${v.protocol.charAt(0).toUpperCase()+v.protocol.slice(1)}
       <svg viewBox="0 0 20 20" fill="currentColor"><path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/><path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/></svg>
     </a>`:''}
@@ -1162,6 +1242,8 @@ function renderVault(id){
       <div class="calc-res"><div class="calc-res-label">ROI</div><div class="calc-res-val" id="cRoi">0%</div></div>
     </div>
   </div>
+
+  ${renderExpectationBlock(v)}
 
   <div class="charts-grid fade-in" style="animation-delay:.15s">
     <div class="chart-card proto-${v.protocol}">
