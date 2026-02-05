@@ -197,6 +197,48 @@ tbody tr:last-child td{border-bottom:none}
 .calc-res-val{font-size:22px;font-weight:700;margin-top:4px;color:var(--text-primary)}
 .calc-res-val.profit{background:var(--gradient-positive);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .calc-res-val.loss{background:var(--gradient-negative);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+/* Entry Intelligence Blocks */
+.entry-intel-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:32px}
+.entry-card{background:var(--bg-card);border:1px solid var(--border-light);border-radius:20px;padding:24px;backdrop-filter:blur(10px);animation:fadeInUp .5s ease-out both}
+.entry-card:nth-child(1){animation-delay:.08s}
+.entry-card:nth-child(2){animation-delay:.14s}
+.entry-card:nth-child(3){animation-delay:.2s}
+.entry-card h4{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--text-secondary);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.entry-meter-score{font-size:56px;font-weight:800;line-height:1;margin-bottom:4px;transition:color .3s}
+.entry-meter-label{font-size:16px;font-weight:600;margin-bottom:16px}
+.entry-meter-label.good{color:#10b981}
+.entry-meter-label.neutral{color:#fbbf24}
+.entry-meter-label.avoid{color:#f43f5e}
+.entry-reasons{list-style:none;padding:0;margin:0 0 16px 0}
+.entry-reasons li{font-size:13px;color:var(--text-secondary);padding:5px 0;border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:6px}
+.entry-reasons li:last-child{border-bottom:none}
+.entry-reasons li::before{content:'';width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.entry-reasons li.positive::before{background:#10b981}
+.entry-reasons li.negative::before{background:#f43f5e}
+.entry-reasons li.neutral::before{background:#fbbf24}
+.coverage-badges{display:flex;gap:6px;flex-wrap:wrap}
+.coverage-badge{font-size:10px;padding:3px 8px;border-radius:6px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.coverage-badge.real{background:rgba(16,185,129,0.15);color:#10b981}
+.coverage-badge.proxy{background:rgba(251,191,36,0.15);color:#fbbf24}
+.coverage-badge.unavailable{background:rgba(148,163,184,0.15);color:#94a3b8}
+.pos-health-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border-light)}
+.pos-health-row:last-child{border-bottom:none}
+.pos-health-label{font-size:12px;color:var(--text-secondary);text-transform:uppercase}
+.pos-health-val{font-size:16px;font-weight:700;color:var(--text-primary)}
+.pos-health-val.warn{color:#fbbf24}
+.pos-health-val.danger{color:#f43f5e}
+.pos-health-val.ok{color:#10b981}
+.flow-tape-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-light)}
+.flow-tape-row:last-child{border-bottom:none}
+.flow-tape-label{font-size:12px;color:var(--text-secondary)}
+.flow-tape-val{font-size:18px;font-weight:700}
+.flow-tape-val.inflow{color:#10b981}
+.flow-tape-val.outflow{color:#f43f5e}
+.flow-tape-val.neutral{color:var(--text-secondary)}
+.entry-card-pulse{animation:entryPulse .6s ease-out}
+@keyframes entryPulse{0%{box-shadow:0 0 0 0 rgba(56,189,248,0.4)}50%{box-shadow:0 0 0 8px rgba(56,189,248,0)}100%{box-shadow:none}}
+@media(max-width:900px){.entry-intel-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.entry-meter-score{font-size:40px}.entry-intel-grid{gap:12px}.entry-card{padding:16px}}
 .charts-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-bottom:32px}
 .chart-card{background:var(--bg-card);border:1px solid var(--border-light);border-radius:20px;padding:20px;backdrop-filter:blur(10px)}
 .chart-card h3{font-size:15px;margin-bottom:16px;display:flex;align-items:center;gap:8px;color:var(--text-primary)}
@@ -687,6 +729,128 @@ function renderExpectationBlock(v) {
           <div class="expect-conf-bar" style="width:${confPct}%;background:${confColor}"></div>
         </div>
         <div class="expect-sub">${confPct}% (${exp.quality_label || 'unknown'})</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// =============================================================================
+// ENTRY INTELLIGENCE BLOCKS (HL vault page only)
+// =============================================================================
+function renderEntryIntel(v) {
+  if (v.protocol !== 'hyperliquid') return '';
+  const ei = v.entry_intel;
+  if (!ei) return '';
+  
+  const score = ei.entry_score;
+  const label = ei.entry_label || 'N/A';
+  const reasons = ei.reasons || [];
+  const coverage = ei.coverage || {};
+  
+  // Score color
+  const scoreColor = score >= 70 ? '#10b981' : score >= 40 ? '#fbbf24' : '#f43f5e';
+  const labelClass = score >= 70 ? 'good' : score >= 40 ? 'neutral' : 'avoid';
+  
+  // Coverage badge helper
+  const covBadge = (key, lbl) => {
+    const val = coverage[key] || 'unavailable';
+    return `<span class="coverage-badge ${val}">${lbl}: ${val}</span>`;
+  };
+  
+  // Reason sentiment
+  const reasonClass = (r) => {
+    if (/positive|conservative|inflow|strong/i.test(r)) return 'positive';
+    if (/drawdown|high|elevated|outflow|negative|avoid|liquidation/i.test(r)) return 'negative';
+    return 'neutral';
+  };
+  
+  // Format helpers
+  const fmtK = (v) => { if (v == null) return 'N/A'; return (v >= 0 ? '+' : '') + (v/1000).toFixed(0) + 'k'; };
+  const fmtPctE = (v) => { if (v == null) return 'N/A'; return (v >= 0 ? '+' : '') + (v*100).toFixed(2) + '%'; };
+  const fmtUsdE = (v) => { if (v == null) return 'N/A'; const a=Math.abs(v); if(a>=1e9) return (v>=0?'':'-')+'$'+(a/1e9).toFixed(2)+'B'; if(a>=1e6) return (v>=0?'':'-')+'$'+(a/1e6).toFixed(2)+'M'; if(a>=1e3) return (v>=0?'':'-')+'$'+(a/1e3).toFixed(0)+'K'; return '$'+v.toFixed(0); };
+  
+  // Leverage color
+  const levVal = ei.leverage_effective;
+  const levClass = levVal == null ? '' : levVal > 5 ? 'danger' : levVal > 3 ? 'warn' : 'ok';
+  
+  // uPnL color
+  const upnlPct = ei.upnl_pct;
+  const upnlClass = upnlPct == null ? '' : upnlPct < -0.02 ? 'danger' : upnlPct > 0.02 ? 'ok' : 'warn';
+  
+  // Concentration color
+  const c1 = ei.concentration_top1;
+  const c1Class = c1 == null ? '' : c1 > 0.8 ? 'danger' : c1 > 0.5 ? 'warn' : 'ok';
+  
+  // Flow colors
+  const f24 = ei.net_flow_24h;
+  const f7 = ei.net_flow_7d;
+  const f24Class = f24 == null ? 'neutral' : f24 > 0 ? 'inflow' : 'outflow';
+  const f7Class = f7 == null ? 'neutral' : f7 > 0 ? 'inflow' : 'outflow';
+  const whaleClass = (ei.whale_outflow_7d && ei.whale_outflow_7d < -50000) ? 'outflow' : 'neutral';
+  
+  return `
+  <div class="entry-intel-grid fade-in" style="animation-delay:.18s">
+    <!-- ENTRY METER -->
+    <div class="entry-card" id="entryMeterCard">
+      <h4>🎯 Entry Meter</h4>
+      <div class="entry-meter-score" id="entryScoreNum" style="color:${scoreColor}">${score}</div>
+      <div class="entry-meter-label ${labelClass}">${label}</div>
+      <ul class="entry-reasons">
+        ${reasons.map(r => `<li class="${reasonClass(r)}">${r}</li>`).join('')}
+      </ul>
+      <div class="coverage-badges">
+        ${covBadge('positions','Positions')}
+        ${covBadge('flows','Flows')}
+        ${covBadge('realized_pnl','Realized')}
+      </div>
+    </div>
+    
+    <!-- POSITION HEALTH -->
+    <div class="entry-card">
+      <h4>📊 Position Health</h4>
+      <div class="pos-health-row">
+        <span class="pos-health-label">Gross Exposure</span>
+        <span class="pos-health-val">${fmtUsdE(ei.gross_exposure_usd)}</span>
+      </div>
+      <div class="pos-health-row">
+        <span class="pos-health-label">Eff. Leverage</span>
+        <span class="pos-health-val ${levClass}">${levVal != null ? levVal.toFixed(1) + 'x' : 'N/A'}</span>
+      </div>
+      <div class="pos-health-row">
+        <span class="pos-health-label">Top Position</span>
+        <span class="pos-health-val ${c1Class}">${c1 != null ? (c1 * 100).toFixed(0) + '% of book' : 'N/A'}</span>
+      </div>
+      <div class="pos-health-row">
+        <span class="pos-health-label">uPnL</span>
+        <span class="pos-health-val ${upnlClass}">${fmtUsdE(ei.upnl_usd)} ${upnlPct != null ? '(' + fmtPctE(upnlPct) + ')' : ''}</span>
+      </div>
+      <div class="pos-health-row">
+        <span class="pos-health-label">Liq Risk</span>
+        <span class="pos-health-val ${ei.liq_risk === 'elevated' ? 'danger' : ei.liq_risk === 'low' ? 'ok' : ''}">${ei.liq_risk || 'N/A'}</span>
+      </div>
+    </div>
+    
+    <!-- FLOW TAPE -->
+    <div class="entry-card">
+      <h4>💧 Flow Tape</h4>
+      <div class="flow-tape-row">
+        <span class="flow-tape-label">Net Flow (24h)</span>
+        <span class="flow-tape-val ${f24Class}">${f24 != null ? fmtK(f24) : 'N/A'}</span>
+      </div>
+      <div class="flow-tape-row">
+        <span class="flow-tape-label">Net Flow (7d)</span>
+        <span class="flow-tape-val ${f7Class}">${f7 != null ? fmtK(f7) : 'N/A'}</span>
+      </div>
+      <div class="flow-tape-row">
+        <span class="flow-tape-label">Whale Outflow (7d)</span>
+        <span class="flow-tape-val ${whaleClass}">${ei.whale_outflow_7d != null ? fmtK(ei.whale_outflow_7d) : 'N/A'}</span>
+      </div>
+      <div class="flow-tape-row">
+        <span class="flow-tape-label">Realized PnL (30d)</span>
+        <span class="flow-tape-val ${ei.realized_pnl_30d != null && ei.realized_pnl_30d > 0 ? 'inflow' : ei.realized_pnl_30d != null && ei.realized_pnl_30d < 0 ? 'outflow' : 'neutral'}">${ei.realized_pnl_30d != null ? fmtK(ei.realized_pnl_30d) : 'N/A'}</span>
+      </div>
+      <div style="margin-top:12px;font-size:11px;color:var(--text-secondary)">
+        Last updated: ${ei.ts ? new Date(ei.ts * 1000).toLocaleString() : 'N/A'}
       </div>
     </div>
   </div>`;
@@ -1245,6 +1409,8 @@ function renderVault(id){
 
   ${renderExpectationBlock(v)}
 
+  ${renderEntryIntel(v)}
+
   <div class="charts-grid fade-in" style="animation-delay:.15s">
     <div class="chart-card proto-${v.protocol}">
       <div class="chart-section-header">
@@ -1323,6 +1489,26 @@ function renderVault(id){
   document.getElementById('cDays').oninput=updateCalc;
   document.getElementById('cApr').oninput=updateCalc;
   updateCalc();
+
+  // Load entry intelligence for HL vaults (async, non-blocking)
+  if (v.protocol === 'hyperliquid' && !v.entry_intel) {
+    fetch(API_BASE + '/api/vault/' + id + '/entry').then(r => r.json()).then(ei => {
+      if (ei && ei.entry_score != null) {
+        v.entry_intel = ei;
+        // Re-render entry intel block
+        const grid = document.querySelector('.entry-intel-grid');
+        if (!grid) {
+          // Insert before charts-grid
+          const chartsGrid = document.querySelector('.charts-grid');
+          if (chartsGrid) {
+            chartsGrid.insertAdjacentHTML('beforebegin', renderEntryIntel(v));
+            // Animate score count-up
+            animateNumber('entryScoreNum', ei.entry_score, {format:'int'});
+          }
+        }
+      }
+    }).catch(() => {});
+  }
 
   // Load unified history from API (uses new series contract with backwards compat)
   loadHistory(id,90).then(histData=>{

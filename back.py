@@ -484,6 +484,60 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     
+    # =============================================================================
+    # HL VAULT STATE (Entry Intelligence - position health, flows, entry score)
+    # =============================================================================
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS hl_vault_state (
+            ts INTEGER NOT NULL,
+            vault_id TEXT NOT NULL,
+            equity_usd REAL,
+            gross_exposure_usd REAL,
+            net_exposure_usd REAL,
+            upnl_usd REAL,
+            upnl_pct REAL,
+            concentration_top1 REAL,
+            concentration_top3 REAL,
+            leverage_effective REAL,
+            liq_risk TEXT DEFAULT 'unknown',
+            realized_pnl_7d REAL,
+            realized_pnl_30d REAL,
+            net_flow_24h REAL,
+            net_flow_7d REAL,
+            whale_outflow_7d REAL,
+            data_coverage TEXT,
+            entry_score INTEGER,
+            entry_label TEXT,
+            reasons TEXT,
+            PRIMARY KEY (ts, vault_id)
+        )
+    """)
+    
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_hl_state_vault ON hl_vault_state(vault_id, ts DESC)")
+    except sqlite3.OperationalError:
+        pass
+    
+    # =============================================================================
+    # HL VAULT FLOW EVENTS (deposit/withdrawal tracking)
+    # =============================================================================
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS hl_vault_flow_events (
+            ts INTEGER NOT NULL,
+            vault_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            amount_usd REAL NOT NULL,
+            depositor TEXT,
+            txid TEXT NOT NULL,
+            PRIMARY KEY (vault_id, txid)
+        )
+    """)
+    
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_hl_flow_vault_ts ON hl_vault_flow_events(vault_id, ts DESC)")
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
     conn.close()
     print(f"[DB] Initialized {DB_PATH} with canonical schema")
@@ -4024,6 +4078,610 @@ def fetch_hyperliquid() -> List[dict]:
 
 
 # =============================================================================
+# HL ENTRY INTELLIGENCE ENGINE
+# =============================================================================
+
+def fetch_hl_clearinghouse_state(vault_address: str) -> Optional[dict]:
+    """Fetch positions/margin state for an HL vault via clearinghouseState."""
+    try:
+        payload = json.dumps({"type": "clearinghouseState", "user": vault_address}).encode()
+        req = urllib.request.Request(HL_API_URL, data=payload,
+                                      headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode())
+    except Exception as e:
+        print(f"[HL-ENTRY] clearinghouseState error for {vault_address[:10]}...: {e}")
+        return None
+
+
+def parse_hl_positions(clearing_state: dict) -> dict:
+    """Extract position metrics from HL clearinghouseState response.
+    
+    Returns dict with:
+        positions: list of {coin, size_usd, upnl, leverage, liq_px, entry_px, mark_px}
+        equity_usd, gross_exposure, net_exposure, upnl_usd, upnl_pct,
+        concentration_top1, concentration_top3, leverage_effective, liq_risk
+    """
+    result = {
+        "positions": [],
+        "equity_usd": None, "gross_exposure_usd": None, "net_exposure_usd": None,
+        "upnl_usd": None, "upnl_pct": None,
+        "concentration_top1": None, "concentration_top3": None,
+        "leverage_effective": None, "liq_risk": "unknown"
+    }
+    
+    if not clearing_state:
+        return result
+    
+    # Extract margin summary
+    margin_summary = clearing_state.get("marginSummary", {})
+    equity = None
+    try:
+        equity = float(margin_summary.get("accountValue", 0))
+    except (ValueError, TypeError):
+        pass
+    
+    result["equity_usd"] = equity
+    
+    # Extract positions from assetPositions
+    asset_positions = clearing_state.get("assetPositions", [])
+    positions = []
+    total_upnl = 0.0
+    gross_exposure = 0.0
+    net_exposure = 0.0
+    
+    for ap in asset_positions:
+        pos = ap.get("position", {}) if isinstance(ap, dict) else {}
+        if not pos:
+            continue
+        
+        coin = pos.get("coin", "?")
+        
+        try:
+            szi = float(pos.get("szi", 0))  # Signed size
+            entry_px = float(pos.get("entryPx", 0))
+            pos_value = float(pos.get("positionValue", 0))
+            upnl = float(pos.get("unrealizedPnl", 0))
+            leverage_val = float(pos.get("leverage", {}).get("value", 0)) if isinstance(pos.get("leverage"), dict) else float(pos.get("leverage", 0))
+            liq_px = pos.get("liquidationPx")
+            if liq_px:
+                liq_px = float(liq_px)
+        except (ValueError, TypeError):
+            continue
+        
+        abs_val = abs(pos_value)
+        direction = "long" if szi > 0 else "short" if szi < 0 else "flat"
+        
+        positions.append({
+            "coin": coin,
+            "direction": direction,
+            "size_usd": abs_val,
+            "upnl": upnl,
+            "leverage": leverage_val,
+            "liq_px": liq_px,
+            "entry_px": entry_px,
+        })
+        
+        total_upnl += upnl
+        gross_exposure += abs_val
+        net_exposure += pos_value if szi > 0 else -abs_val
+    
+    result["positions"] = positions
+    result["upnl_usd"] = total_upnl
+    result["gross_exposure_usd"] = gross_exposure
+    result["net_exposure_usd"] = net_exposure
+    
+    if equity and equity > 0:
+        result["upnl_pct"] = total_upnl / equity
+        result["leverage_effective"] = gross_exposure / equity
+    
+    # Concentration
+    if gross_exposure > 0 and positions:
+        sorted_pos = sorted(positions, key=lambda p: p["size_usd"], reverse=True)
+        result["concentration_top1"] = sorted_pos[0]["size_usd"] / gross_exposure
+        top3_sum = sum(p["size_usd"] for p in sorted_pos[:3])
+        result["concentration_top3"] = top3_sum / gross_exposure
+    
+    # Liq risk heuristic
+    if positions:
+        has_liq = any(p["liq_px"] and p["liq_px"] > 0 for p in positions)
+        if has_liq and equity and equity > 0:
+            # Check if any position is within 15% of liquidation
+            close_to_liq = False
+            for p in positions:
+                if p["liq_px"] and p["liq_px"] > 0 and p["entry_px"] and p["entry_px"] > 0:
+                    dist = abs(p["entry_px"] - p["liq_px"]) / p["entry_px"]
+                    if dist < 0.15:
+                        close_to_liq = True
+                        break
+            result["liq_risk"] = "elevated" if close_to_liq else "low"
+        elif result["leverage_effective"] and result["leverage_effective"] > 5:
+            result["liq_risk"] = "elevated"
+        else:
+            result["liq_risk"] = "unknown"
+    
+    # Sanity assertions
+    if result["leverage_effective"] is not None:
+        assert result["leverage_effective"] >= 0 and result["leverage_effective"] < 1000, \
+            f"Leverage out of range: {result['leverage_effective']}"
+    if result["concentration_top1"] is not None:
+        assert 0 <= result["concentration_top1"] <= 1.001, \
+            f"Concentration top1 out of range: {result['concentration_top1']}"
+    if result["concentration_top3"] is not None:
+        assert 0 <= result["concentration_top3"] <= 1.001, \
+            f"Concentration top3 out of range: {result['concentration_top3']}"
+    
+    return result
+
+
+def compute_hl_flow_proxy(vault_id: str, equity_usd: Optional[float]) -> dict:
+    """Compute flow metrics from TVL snapshot deltas (proxy for deposit/withdrawal activity).
+    
+    Since HL doesn't expose deposit/withdrawal history, we use TVL changes minus PnL
+    as a proxy for net flows.
+    
+    Returns:
+        net_flow_24h, net_flow_7d, whale_outflow_7d
+    """
+    result = {"net_flow_24h": None, "net_flow_7d": None, "whale_outflow_7d": None}
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    now = int(time.time())
+    
+    # Get recent snapshots for flow estimation
+    c.execute("""
+        SELECT ts, tvl_usd FROM snapshots
+        WHERE vault_pk = ? AND ts >= ?
+        ORDER BY ts ASC
+    """, (vault_id, now - 8 * 86400))
+    
+    snapshots = c.fetchall()
+    
+    # Get PnL changes to subtract from TVL deltas
+    c.execute("""
+        SELECT ts, pnl_usd, account_value FROM pnl_history
+        WHERE vault_pk = ? AND ts >= ?
+        ORDER BY ts ASC
+    """, (vault_id, now - 8 * 86400))
+    pnl_rows = c.fetchall()
+    conn.close()
+    
+    if len(snapshots) < 2:
+        return result
+    
+    # Net flow = TVL change - PnL change (i.e., what's left is deposits/withdrawals)
+    latest_snap = snapshots[-1]
+    
+    # 24h flow
+    cutoff_24h = now - 86400
+    past_24h = None
+    for s in snapshots:
+        if s["ts"] <= cutoff_24h:
+            past_24h = s
+    
+    if past_24h and latest_snap["tvl_usd"] and past_24h["tvl_usd"]:
+        tvl_delta = latest_snap["tvl_usd"] - past_24h["tvl_usd"]
+        # Approximate PnL delta in the same period
+        pnl_delta = 0
+        for pr in pnl_rows:
+            if pr["ts"] >= cutoff_24h:
+                pnl_delta = (pr["pnl_usd"] or 0)
+                break
+        # If we have the latest PnL, compute delta
+        if pnl_rows:
+            latest_pnl = pnl_rows[-1]["pnl_usd"] or 0
+            past_pnl = pnl_delta
+            pnl_change = latest_pnl - past_pnl
+        else:
+            pnl_change = 0
+        
+        result["net_flow_24h"] = tvl_delta - pnl_change
+    
+    # 7d flow
+    cutoff_7d = now - 7 * 86400
+    past_7d = None
+    for s in snapshots:
+        if s["ts"] <= cutoff_7d:
+            past_7d = s
+    
+    if not past_7d and snapshots:
+        past_7d = snapshots[0]  # Use earliest available
+    
+    if past_7d and latest_snap["tvl_usd"] and past_7d["tvl_usd"]:
+        tvl_delta_7d = latest_snap["tvl_usd"] - past_7d["tvl_usd"]
+        # Simple approach: 7d flow ≈ TVL delta (PnL is usually small relative to flows)
+        result["net_flow_7d"] = tvl_delta_7d
+        
+        # Whale outflow: flag if significant negative flow
+        whale_threshold = 50000  # $50k
+        if equity_usd and equity_usd > 0:
+            whale_threshold = max(50000, equity_usd * 0.05)  # 5% of equity or $50k
+        
+        if tvl_delta_7d < -whale_threshold:
+            result["whale_outflow_7d"] = tvl_delta_7d  # Negative number
+        else:
+            result["whale_outflow_7d"] = 0.0
+    
+    return result
+
+
+def compute_hl_realized_pnl(vault_id: str) -> dict:
+    """Compute realized PnL from pnl_history if available.
+    
+    Returns:
+        realized_pnl_7d, realized_pnl_30d (or None if unavailable)
+    """
+    conn = get_db()
+    c = conn.cursor()
+    now = int(time.time())
+    
+    # Check if we have real PnL data
+    c.execute("""
+        SELECT ts, pnl_usd, account_value FROM pnl_history
+        WHERE vault_pk = ? AND ts >= ?
+        ORDER BY ts ASC
+    """, (vault_id, now - 31 * 86400))
+    
+    rows = c.fetchall()
+    conn.close()
+    
+    result = {"realized_pnl_7d": None, "realized_pnl_30d": None}
+    
+    if len(rows) < 2:
+        return result
+    
+    latest_pnl = rows[-1]["pnl_usd"]
+    
+    # Find 7d ago PnL
+    cutoff_7d = now - 7 * 86400
+    past_7d_pnl = None
+    for r in rows:
+        if r["ts"] <= cutoff_7d:
+            past_7d_pnl = r["pnl_usd"]
+    
+    # Find 30d ago PnL
+    cutoff_30d = now - 30 * 86400
+    past_30d_pnl = None
+    for r in rows:
+        if r["ts"] <= cutoff_30d:
+            past_30d_pnl = r["pnl_usd"]
+    
+    if past_7d_pnl is not None and latest_pnl is not None:
+        result["realized_pnl_7d"] = latest_pnl - past_7d_pnl
+    
+    if past_30d_pnl is not None and latest_pnl is not None:
+        result["realized_pnl_30d"] = latest_pnl - past_30d_pnl
+    
+    return result
+
+
+def compute_entry_score(
+    upnl_pct: Optional[float],
+    leverage_effective: Optional[float],
+    concentration_top1: Optional[float],
+    net_flow_7d: Optional[float],
+    whale_outflow_7d: Optional[float],
+    realized_pnl_30d: Optional[float],
+    equity_usd: Optional[float],
+    liq_risk: str = "unknown"
+) -> tuple:
+    """Compute Entry Score (0-100) from available real signals.
+    
+    Score starts at 50, adjusted by:
+    - Stress block: uPnL, leverage, concentration, liq_risk
+    - Flow block: net outflows, whale outflows
+    - Edge block: realized PnL bonus
+    
+    Returns:
+        (entry_score, entry_label, reasons_list)
+    """
+    score = 50.0
+    reasons = []
+    
+    # =========================================
+    # STRESS BLOCK (penalize risky conditions)
+    # =========================================
+    
+    # uPnL penalty/bonus
+    if upnl_pct is not None:
+        if upnl_pct < -0.05:  # Losing >5%
+            penalty = min(20, abs(upnl_pct) * 200)  # Up to -20 pts
+            score -= penalty
+            reasons.append(f"Drawdown: uPnL {upnl_pct*100:+.1f}%")
+        elif upnl_pct < -0.02:  # Losing 2-5%
+            penalty = abs(upnl_pct) * 100
+            score -= penalty
+            reasons.append(f"Mild drawdown: uPnL {upnl_pct*100:+.1f}%")
+        elif upnl_pct > 0.02:  # Winning >2%
+            bonus = min(10, upnl_pct * 100)
+            score += bonus
+            reasons.append(f"Positive uPnL: {upnl_pct*100:+.1f}%")
+    
+    # Leverage penalty
+    if leverage_effective is not None:
+        if leverage_effective > 5:
+            penalty = min(15, (leverage_effective - 5) * 3)
+            score -= penalty
+            reasons.append(f"High leverage: {leverage_effective:.1f}x")
+        elif leverage_effective > 3:
+            penalty = (leverage_effective - 3) * 2
+            score -= penalty
+            reasons.append(f"Leverage elevated: {leverage_effective:.1f}x")
+        elif leverage_effective < 2:
+            score += 5
+            reasons.append(f"Conservative leverage: {leverage_effective:.1f}x")
+    
+    # Concentration penalty
+    if concentration_top1 is not None:
+        if concentration_top1 > 0.8:
+            score -= 10
+            reasons.append(f"Concentrated: top position {concentration_top1*100:.0f}% of book")
+        elif concentration_top1 > 0.5:
+            score -= 5
+            reasons.append(f"Somewhat concentrated: top pos {concentration_top1*100:.0f}%")
+    
+    # Liq risk
+    if liq_risk == "elevated":
+        score -= 10
+        reasons.append("Liquidation risk elevated")
+    
+    # =========================================
+    # FLOW BLOCK (penalize outflows)
+    # =========================================
+    
+    if net_flow_7d is not None and equity_usd and equity_usd > 0:
+        flow_pct = net_flow_7d / equity_usd
+        if flow_pct < -0.1:  # >10% outflow
+            penalty = min(15, abs(flow_pct) * 50)
+            score -= penalty
+            reasons.append(f"Outflows: {net_flow_7d/1000:+.0f}k (7d)")
+        elif flow_pct < -0.03:
+            score -= 5
+            reasons.append(f"Mild outflows: {net_flow_7d/1000:+.0f}k (7d)")
+        elif flow_pct > 0.05:
+            score += 5
+            reasons.append(f"Inflows: +{net_flow_7d/1000:.0f}k (7d)")
+    
+    if whale_outflow_7d is not None and whale_outflow_7d < -50000:
+        score -= 5
+        reasons.append(f"Whale outflow: {whale_outflow_7d/1000:.0f}k (7d)")
+    
+    # =========================================
+    # EDGE BLOCK (bonus for proven returns)
+    # =========================================
+    
+    if realized_pnl_30d is not None and equity_usd and equity_usd > 0:
+        rpnl_pct = realized_pnl_30d / equity_usd
+        if rpnl_pct > 0.05:
+            bonus = min(15, rpnl_pct * 100)
+            score += bonus
+            reasons.append(f"Strong realized PnL: +{rpnl_pct*100:.1f}% (30d)")
+        elif rpnl_pct > 0:
+            score += 5
+            reasons.append(f"Positive realized PnL: +{rpnl_pct*100:.1f}% (30d)")
+        elif rpnl_pct < -0.05:
+            score -= 10
+            reasons.append(f"Negative realized PnL: {rpnl_pct*100:.1f}% (30d)")
+    
+    # Clamp
+    entry_score = max(0, min(100, int(round(score))))
+    
+    # Label
+    if entry_score >= 70:
+        entry_label = "Good Entry"
+    elif entry_score >= 40:
+        entry_label = "Neutral"
+    else:
+        entry_label = "Avoid"
+    
+    # Sanity
+    assert 0 <= entry_score <= 100, f"entry_score out of range: {entry_score}"
+    
+    # Pick top 3 reasons, sorted by significance (order added)
+    top_reasons = reasons[:3] if reasons else ["Insufficient data for detailed analysis"]
+    
+    return entry_score, entry_label, top_reasons
+
+
+def run_hl_entry_intelligence(hl_vaults: Optional[List[dict]] = None) -> dict:
+    """Run Entry Intelligence engine for all HL vaults.
+    
+    Fetches positions, computes flows, scores each vault, stores in hl_vault_state.
+    Designed to run as part of fetch pipeline, NOT on request path.
+    
+    Args:
+        hl_vaults: Optional list of HL vault dicts. If None, reads from DB.
+    
+    Returns:
+        Summary with counts.
+    """
+    import time as _time
+    start_time = _time.time()
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # If no vaults provided, get HL vaults from DB
+    if hl_vaults is None:
+        c.execute("SELECT pk, tvl_usd, apr FROM vaults WHERE protocol = 'hyperliquid' AND status = 'active'")
+        hl_vaults = [{"pk": r["pk"], "vault_id": r["pk"].replace("hyperliquid:", ""), "tvl_usd": r["tvl_usd"], "apr": r["apr"]} for r in c.fetchall()]
+    
+    conn.close()
+    
+    now_ts = int(_time.time())
+    ts_bucket = (now_ts // 3600) * 3600  # Hourly buckets
+    
+    computed = 0
+    skipped = 0
+    errors = []
+    
+    print(f"[HL-ENTRY] Computing entry intelligence for {len(hl_vaults)} vaults...")
+    
+    for vault in hl_vaults:
+        vault_pk = vault.get("pk") or f"hyperliquid:{vault.get('vault_id', '')}"
+        vault_address = vault.get("vault_id") or vault_pk.replace("hyperliquid:", "")
+        equity_from_vault = vault.get("tvl_usd")
+        
+        try:
+            # 1. Fetch positions via clearinghouseState
+            clearing_state = fetch_hl_clearinghouse_state(vault_address)
+            pos_data = parse_hl_positions(clearing_state)
+            
+            equity_usd = pos_data["equity_usd"] or equity_from_vault
+            
+            # 2. Compute flow proxy from snapshot deltas
+            flows = compute_hl_flow_proxy(vault_pk, equity_usd)
+            
+            # 3. Compute realized PnL from pnl_history
+            rpnl = compute_hl_realized_pnl(vault_pk)
+            
+            # 4. Build data coverage
+            coverage = {
+                "positions": "real" if clearing_state and pos_data["positions"] else "unavailable",
+                "flows": "proxy" if flows["net_flow_7d"] is not None else "unavailable",
+                "realized_pnl": "real" if rpnl["realized_pnl_30d"] is not None else "unavailable"
+            }
+            
+            # 5. Compute entry score
+            entry_score, entry_label, reasons = compute_entry_score(
+                upnl_pct=pos_data["upnl_pct"],
+                leverage_effective=pos_data["leverage_effective"],
+                concentration_top1=pos_data["concentration_top1"],
+                net_flow_7d=flows["net_flow_7d"],
+                whale_outflow_7d=flows["whale_outflow_7d"],
+                realized_pnl_30d=rpnl["realized_pnl_30d"],
+                equity_usd=equity_usd,
+                liq_risk=pos_data["liq_risk"]
+            )
+            
+            # 6. Store in hl_vault_state
+            conn2 = get_db()
+            c2 = conn2.cursor()
+            c2.execute("""
+                INSERT INTO hl_vault_state (
+                    ts, vault_id, equity_usd, gross_exposure_usd, net_exposure_usd,
+                    upnl_usd, upnl_pct, concentration_top1, concentration_top3,
+                    leverage_effective, liq_risk, realized_pnl_7d, realized_pnl_30d,
+                    net_flow_24h, net_flow_7d, whale_outflow_7d,
+                    data_coverage, entry_score, entry_label, reasons
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ts, vault_id) DO UPDATE SET
+                    equity_usd=excluded.equity_usd,
+                    gross_exposure_usd=excluded.gross_exposure_usd,
+                    net_exposure_usd=excluded.net_exposure_usd,
+                    upnl_usd=excluded.upnl_usd, upnl_pct=excluded.upnl_pct,
+                    concentration_top1=excluded.concentration_top1,
+                    concentration_top3=excluded.concentration_top3,
+                    leverage_effective=excluded.leverage_effective,
+                    liq_risk=excluded.liq_risk,
+                    realized_pnl_7d=excluded.realized_pnl_7d,
+                    realized_pnl_30d=excluded.realized_pnl_30d,
+                    net_flow_24h=excluded.net_flow_24h,
+                    net_flow_7d=excluded.net_flow_7d,
+                    whale_outflow_7d=excluded.whale_outflow_7d,
+                    data_coverage=excluded.data_coverage,
+                    entry_score=excluded.entry_score,
+                    entry_label=excluded.entry_label,
+                    reasons=excluded.reasons
+            """, (
+                ts_bucket, vault_pk, equity_usd,
+                pos_data["gross_exposure_usd"], pos_data["net_exposure_usd"],
+                pos_data["upnl_usd"], pos_data["upnl_pct"],
+                pos_data["concentration_top1"], pos_data["concentration_top3"],
+                pos_data["leverage_effective"], pos_data["liq_risk"],
+                rpnl["realized_pnl_7d"], rpnl["realized_pnl_30d"],
+                flows["net_flow_24h"], flows["net_flow_7d"], flows["whale_outflow_7d"],
+                json.dumps(coverage), entry_score, entry_label, json.dumps(reasons)
+            ))
+            conn2.commit()
+            conn2.close()
+            
+            computed += 1
+            print(f"[HL-ENTRY] {vault_pk}: score={entry_score} ({entry_label}), "
+                  f"lev={pos_data['leverage_effective']:.1f}x, "
+                  f"upnl={pos_data['upnl_pct']*100:.1f}%" if pos_data['upnl_pct'] else f"[HL-ENTRY] {vault_pk}: score={entry_score} ({entry_label}), no positions")
+            
+            _time.sleep(0.5)  # Rate limit clearinghouseState calls
+            
+        except Exception as e:
+            errors.append(f"{vault_pk}: {str(e)}")
+            print(f"[HL-ENTRY] Error for {vault_pk}: {e}")
+            skipped += 1
+    
+    elapsed = _time.time() - start_time
+    
+    result = {
+        "computed": computed,
+        "skipped": skipped,
+        "errors": errors[:5],
+        "elapsed_sec": elapsed
+    }
+    
+    print(f"[HL-ENTRY] Done: {computed} computed, {skipped} skipped in {elapsed:.1f}s")
+    return result
+
+
+def get_hl_entry_intel(vault_id: str) -> Optional[dict]:
+    """Get latest entry intelligence for an HL vault.
+    
+    Args:
+        vault_id: Vault PK (e.g. "hyperliquid:0x...")
+    
+    Returns:
+        Dict with entry intel data or None.
+    """
+    conn = get_db()
+    c = conn.cursor()
+    
+    c.execute("""
+        SELECT * FROM hl_vault_state
+        WHERE vault_id = ?
+        ORDER BY ts DESC
+        LIMIT 1
+    """, (vault_id,))
+    
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        return None
+    
+    try:
+        coverage = json.loads(row["data_coverage"]) if row["data_coverage"] else {}
+    except:
+        coverage = {}
+    
+    try:
+        reasons = json.loads(row["reasons"]) if row["reasons"] else []
+    except:
+        reasons = []
+    
+    return {
+        "entry_score": row["entry_score"],
+        "entry_label": row["entry_label"],
+        "reasons": reasons,
+        "coverage": coverage,
+        "equity_usd": row["equity_usd"],
+        "gross_exposure_usd": row["gross_exposure_usd"],
+        "net_exposure_usd": row["net_exposure_usd"],
+        "upnl_usd": row["upnl_usd"],
+        "upnl_pct": row["upnl_pct"],
+        "concentration_top1": row["concentration_top1"],
+        "concentration_top3": row["concentration_top3"],
+        "leverage_effective": row["leverage_effective"],
+        "liq_risk": row["liq_risk"],
+        "realized_pnl_7d": row["realized_pnl_7d"],
+        "realized_pnl_30d": row["realized_pnl_30d"],
+        "net_flow_24h": row["net_flow_24h"],
+        "net_flow_7d": row["net_flow_7d"],
+        "whale_outflow_7d": row["whale_outflow_7d"],
+        "ts": row["ts"]
+    }
+
+
+# =============================================================================
 # OTHER PROTOCOLS - REAL DISCOVERY (NO PLACEHOLDERS)
 # =============================================================================
 # DISCOVERY METHODS:
@@ -4971,6 +5629,13 @@ def run_fetch_job():
     expect_result = run_expectation_engine(target_date_ts=None)
     print(f"[FETCH] Expectations: {expect_result['computed']} computed, {expect_result['skipped']} skipped in {expect_result['elapsed_sec']:.1f}s")
     
+    # =============================================================================
+    # STEP 8: HL ENTRY INTELLIGENCE
+    # =============================================================================
+    print("[FETCH] Step 8: Computing HL Entry Intelligence...")
+    hl_entry_result = run_hl_entry_intelligence()
+    print(f"[FETCH] HL Entry: {hl_entry_result['computed']} computed, {hl_entry_result['skipped']} skipped in {hl_entry_result['elapsed_sec']:.1f}s")
+    
     # Summary
     if validation_errors:
         print(f"[FETCH] Validation errors: {sum(len(v) for v in validation_errors.values())} total")
@@ -4987,8 +5652,18 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
+    
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests."""
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
     
     def _validate_vault(self, vault: dict) -> List[str]:
         """Validate vault data and return list of warnings."""
@@ -5397,6 +6072,52 @@ class APIHandler(BaseHTTPRequestHandler):
             else:
                 self.send_json({"error": "Invalid vault ID"}, 404)
         
+        elif path.startswith("/api/vault/") and "/entry" in path:
+            # GET /api/vault/<vault_id>/entry — Entry Intelligence endpoint
+            parts = path.split("/")
+            vault_id = parts[3] if len(parts) > 3 else None
+            
+            if vault_id:
+                entry_intel = get_hl_entry_intel(vault_id)
+                if entry_intel:
+                    self.send_json(entry_intel)
+                else:
+                    self.send_json({"error": "No entry intel data. Only available for Hyperliquid vaults."}, 404)
+            else:
+                self.send_json({"error": "Invalid vault ID"}, 400)
+        
+        elif path == "/api/debug/hl_entry":
+            # Debug endpoint: show entry intel for sample HL vaults
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("""
+                SELECT DISTINCT vault_id FROM hl_vault_state
+                ORDER BY ts DESC
+                LIMIT 5
+            """)
+            vault_ids = [r["vault_id"] for r in c.fetchall()]
+            conn.close()
+            
+            samples = []
+            for vid in vault_ids:
+                intel = get_hl_entry_intel(vid)
+                if intel:
+                    samples.append({"vault_id": vid, **intel})
+            
+            # Verify acceptance: scores differ across vaults
+            scores = [s["entry_score"] for s in samples]
+            all_identical = len(set(scores)) <= 1 if scores else True
+            
+            self.send_json({
+                "samples": samples,
+                "total_hl_vaults_with_data": len(vault_ids),
+                "acceptance": {
+                    "scores_differ": not all_identical,
+                    "all_scores_valid": all(0 <= s["entry_score"] <= 100 for s in samples),
+                    "has_reasons": all(len(s.get("reasons", [])) > 0 for s in samples),
+                }
+            })
+        
         elif path.startswith("/api/vault/"):
             vault_id = path.split("/")[-1]
             vaults = get_all_vaults()
@@ -5406,6 +6127,11 @@ class APIHandler(BaseHTTPRequestHandler):
                 expectation = get_vault_expectation(vault_id)
                 if expectation:
                     vault["expectation"] = expectation
+                # Add entry intelligence for HL vaults
+                if vault.get("protocol") == "hyperliquid":
+                    entry_intel = get_hl_entry_intel(vault_id)
+                    if entry_intel:
+                        vault["entry_intel"] = entry_intel
                 self.send_json(vault)
             else:
                 self.send_json({"error": "Vault not found"}, 404)
@@ -5904,13 +6630,18 @@ class APIHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         
+        print(f"[HTTP POST] {path}")
+        
         # Read request body
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
         
+        print(f"[HTTP POST] Body: {body[:200]}")
+        
         try:
             data = json.loads(body)
         except json.JSONDecodeError:
+            print(f"[HTTP POST] Invalid JSON")
             self.send_json({"error": "Invalid JSON"}, 400)
             return
         
@@ -5945,6 +6676,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 ip_address=ip_address
             )
             
+            print(f"[CLICK] Recorded: {vault_id} / {protocol} = {success}")
             self.send_json({"ok": success})
         
         else:

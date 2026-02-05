@@ -1,0 +1,1120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>ILYA & ANNA</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Mono:wght@400&display=swap" rel="stylesheet">
+    
+    <style>
+        /* ═══════════════════════════════════════════════════════════════
+           DOLCE VITA FILM PALETTE
+           ═══════════════════════════════════════════════════════════════ */
+        :root {
+            --milk: #F5F3ED;
+            --cream: #EBE7DD;
+            --film-black: #1A1915;
+            --film-warm: #2C2820;
+            --sprocket: #3D3830;
+            
+            /* Kodak-inspired colors */
+            --kodak-gold: #D4A853;
+            --kodak-orange: #E07B4C;
+            --kodak-red: #C4504A;
+            --kodak-green: #6B8F71;
+            --kodak-blue: #4A6B8A;
+            --kodak-cyan: #5B9A9A;
+            
+            --text: #1A1915;
+            --text-soft: #4A4840;
+            --text-muted: #8A8878;
+            
+            --mono: 'Space Mono', monospace;
+            --serif: 'Instrument Serif', Georgia, serif;
+            
+            --ease-film: cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           RESET
+           ═══════════════════════════════════════════════════════════════ */
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            font-family: var(--mono);
+            background: var(--milk);
+            color: var(--text);
+            overflow: hidden;
+            min-height: 100vh;
+            min-height: 100dvh;
+        }
+
+        body.unlocked {
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+
+        img {
+            display: block;
+            max-width: 100%;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           FILM GRAIN & LIGHT LEAKS
+           ═══════════════════════════════════════════════════════════════ */
+        .grain {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10000;
+            opacity: 0.06;
+            mix-blend-mode: multiply;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%' height='100%' filter='url(%23noise)'/%3E%3C/svg%3E");
+            animation: grainDrift 0.3s steps(1) infinite;
+        }
+
+        @keyframes grainDrift {
+            0% { transform: translate(0, 0); }
+            25% { transform: translate(-1%, -1%); }
+            50% { transform: translate(1%, 1%); }
+            75% { transform: translate(-0.5%, 0.5%); }
+            100% { transform: translate(0.5%, -0.5%); }
+        }
+
+        .light-leak {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 9999;
+            opacity: 0;
+            transition: opacity 2s var(--ease-film);
+            background: radial-gradient(
+                ellipse at 20% 0%,
+                rgba(224, 123, 76, 0.15) 0%,
+                transparent 50%
+            ),
+            radial-gradient(
+                ellipse at 80% 100%,
+                rgba(212, 168, 83, 0.1) 0%,
+                transparent 40%
+            );
+        }
+
+        .light-leak.active {
+            opacity: 1;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           ENTRY SCREEN — The Film Box
+           ═══════════════════════════════════════════════════════════════ */
+        .entry {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--milk);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            transition: 
+                opacity 1.2s var(--ease-film),
+                transform 1.2s var(--ease-film);
+        }
+
+        .entry.opening {
+            opacity: 0;
+            transform: scale(1.05);
+            pointer-events: none;
+        }
+
+        .entry-content {
+            text-align: center;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: fadeUp 1.5s var(--ease-film) 0.3s forwards;
+        }
+
+        .entry-label {
+            font-family: var(--mono);
+            font-size: 0.6rem;
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 30px;
+        }
+
+        .entry-title {
+            font-family: var(--serif);
+            font-size: clamp(2.5rem, 8vw, 5rem);
+            font-weight: 400;
+            letter-spacing: 0.1em;
+            color: var(--text);
+            margin-bottom: 10px;
+        }
+
+        .entry-subtitle {
+            font-family: var(--serif);
+            font-size: clamp(2rem, 6vw, 4rem);
+            font-weight: 400;
+            font-style: italic;
+            letter-spacing: 0.05em;
+            color: var(--text-soft);
+            margin-bottom: 60px;
+        }
+
+        .entry-action {
+            font-family: var(--mono);
+            font-size: 0.65rem;
+            letter-spacing: 0.2em;
+            text-transform: lowercase;
+            color: var(--text);
+            background: transparent;
+            border: 1px solid var(--sprocket);
+            padding: 16px 40px;
+            cursor: pointer;
+            transition: all 0.5s var(--ease-film);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .entry-action::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: var(--kodak-gold);
+            opacity: 0.2;
+            transition: left 0.5s var(--ease-film);
+        }
+
+        .entry-action:hover {
+            border-color: var(--kodak-gold);
+            color: var(--film-black);
+        }
+
+        .entry-action:hover::before {
+            left: 0;
+        }
+
+        .entry-note {
+            position: absolute;
+            bottom: 40px;
+            font-family: var(--mono);
+            font-size: 0.55rem;
+            letter-spacing: 0.15em;
+            color: var(--text-muted);
+            opacity: 0;
+            animation: fadeIn 1s var(--ease-film) 1.5s forwards;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           MAIN CONTENT
+           ═══════════════════════════════════════════════════════════════ */
+        .content {
+            opacity: 0;
+            visibility: hidden;
+            transition: 
+                opacity 1.5s var(--ease-film) 0.5s,
+                visibility 1.5s;
+        }
+
+        .content.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           CONTACT SHEET — Film Grid
+           ═══════════════════════════════════════════════════════════════ */
+        .contact-sheet {
+            min-height: 100vh;
+            padding: clamp(40px, 8vw, 100px) 0;
+            background: var(--film-black);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .contact-sheet .contact-header,
+        .contact-sheet .contact-footer {
+            padding: 0 clamp(40px, 8vw, 100px);
+        }
+
+        .contact-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--sprocket);
+        }
+
+        .contact-title {
+            font-family: var(--serif);
+            font-size: clamp(3rem, 10vw, 7rem);
+            font-weight: 400;
+            color: var(--milk);
+            line-height: 0.9;
+            letter-spacing: 0.05em;
+        }
+
+        .contact-title span {
+            display: block;
+            font-style: italic;
+            color: var(--kodak-gold);
+        }
+
+        .contact-meta {
+            text-align: right;
+            color: var(--text-muted);
+        }
+
+        .contact-meta p {
+            font-size: 0.6rem;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           FILMSTRIP — Continuous Horizontal Scroll
+           ═══════════════════════════════════════════════════════════════ */
+        .filmstrip-container {
+            position: relative;
+            overflow: hidden;
+            margin: 40px 0;
+            padding: 0;
+        }
+
+        .filmstrip {
+            display: flex;
+            gap: 0;
+            animation: filmScroll 40s linear infinite;
+            width: max-content;
+        }
+
+        .filmstrip:hover {
+            animation-play-state: paused;
+        }
+
+        @keyframes filmScroll {
+            0% {
+                transform: translateX(0);
+            }
+            100% {
+                transform: translateX(-50%);
+            }
+        }
+
+        .film-frame {
+            flex-shrink: 0;
+            width: clamp(280px, 25vw, 400px);
+            height: clamp(200px, 18vw, 280px);
+            position: relative;
+            background: var(--film-black);
+            padding: 20px 8px;
+        }
+
+        /* Sprocket holes */
+        .film-frame::before,
+        .film-frame::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 14px;
+            background-image: repeating-linear-gradient(
+                90deg,
+                transparent 0px,
+                transparent 8px,
+                var(--sprocket) 8px,
+                var(--sprocket) 20px,
+                transparent 20px,
+                transparent 28px
+            );
+            z-index: 3;
+        }
+
+        .film-frame::before {
+            top: 3px;
+        }
+
+        .film-frame::after {
+            bottom: 3px;
+            content: '';
+        }
+
+        .film-frame-inner {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            background: var(--film-warm);
+        }
+
+        .film-frame-number {
+            position: absolute;
+            bottom: 4px;
+            right: 6px;
+            font-family: var(--mono);
+            font-size: 0.45rem;
+            color: var(--kodak-gold);
+            opacity: 0.8;
+            z-index: 4;
+            letter-spacing: 0.1em;
+        }
+
+        .film-frame img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.8s var(--ease-film);
+        }
+
+        .film-frame:hover img {
+            transform: scale(1.05);
+        }
+
+        .film-frame:hover img {
+            transform: scale(1.05);
+        }
+
+        /* Color temperature variations */
+        .film-frame.warm .film-frame-inner img { filter: saturate(1.1) sepia(0.1) contrast(1.05); }
+        .film-frame.cool .film-frame-inner img { filter: saturate(0.95) hue-rotate(-5deg) contrast(1.02); }
+        .film-frame.golden .film-frame-inner img { filter: saturate(1.15) sepia(0.15) brightness(1.05); }
+        .film-frame.faded .film-frame-inner img { filter: saturate(0.85) contrast(0.95) brightness(1.1); }
+        .film-frame.vivid .film-frame-inner img { filter: saturate(1.25) contrast(1.1); }
+        .film-frame.dusk .film-frame-inner img { filter: saturate(1.05) hue-rotate(10deg) contrast(1.08); }
+
+        .contact-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 20px;
+            border-top: 1px solid var(--sprocket);
+            color: var(--text-muted);
+            font-size: 0.55rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           CHAPTERS — Film Scenes
+           ═══════════════════════════════════════════════════════════════ */
+        .chapters {
+            background: var(--milk);
+        }
+
+        .chapter {
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            position: relative;
+            overflow: hidden;
+        }
+
+        @media (max-width: 900px) {
+            .chapter {
+                grid-template-columns: 1fr;
+                min-height: auto;
+            }
+        }
+
+        .chapter-image {
+            position: relative;
+            overflow: hidden;
+            min-height: 60vh;
+        }
+
+        .chapter-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scale(1.1);
+            transition: transform 1.5s var(--ease-film);
+        }
+
+        .chapter.visible .chapter-image img {
+            transform: scale(1);
+        }
+
+        .chapter-image::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(
+                90deg,
+                transparent 0%,
+                rgba(245, 243, 237, 0.3) 100%
+            );
+            pointer-events: none;
+        }
+
+        .chapter:nth-child(even) .chapter-image {
+            order: 2;
+        }
+
+        .chapter:nth-child(even) .chapter-image::after {
+            background: linear-gradient(
+                -90deg,
+                transparent 0%,
+                rgba(245, 243, 237, 0.3) 100%
+            );
+        }
+
+        .chapter-content {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: clamp(40px, 8vw, 100px);
+            position: relative;
+        }
+
+        .chapter-number {
+            font-family: var(--mono);
+            font-size: 0.55rem;
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 30px;
+            opacity: 0;
+            transform: translateX(-20px);
+            transition: all 0.8s var(--ease-film) 0.3s;
+        }
+
+        .chapter.visible .chapter-number {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .chapter-title {
+            font-family: var(--serif);
+            font-size: clamp(2.5rem, 6vw, 4.5rem);
+            font-weight: 400;
+            line-height: 1;
+            margin-bottom: 30px;
+            opacity: 0;
+            transform: translateY(30px);
+            transition: all 1s var(--ease-film) 0.5s;
+        }
+
+        .chapter.visible .chapter-title {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .chapter-title .italian {
+            display: block;
+            font-style: italic;
+            font-size: 0.5em;
+            color: var(--kodak-orange);
+            margin-top: 10px;
+        }
+
+        .chapter-text {
+            font-family: var(--serif);
+            font-size: clamp(1rem, 2vw, 1.25rem);
+            font-style: italic;
+            line-height: 1.7;
+            color: var(--text-soft);
+            max-width: 400px;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.8s var(--ease-film) 0.7s;
+        }
+
+        .chapter.visible .chapter-text {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .chapter-pause {
+            width: 40px;
+            height: 1px;
+            background: var(--kodak-gold);
+            margin-top: 40px;
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform 1s var(--ease-film) 1s;
+        }
+
+        .chapter.visible .chapter-pause {
+            transform: scaleX(1);
+        }
+
+        /* Chapter color treatments */
+        .chapter[data-chapter="arrival"] .chapter-image img {
+            filter: saturate(1.1) sepia(0.08) brightness(1.05);
+        }
+
+        .chapter[data-chapter="wedding"] .chapter-image img {
+            filter: saturate(1.3) contrast(1.1);
+        }
+
+        .chapter[data-chapter="daytwo"] .chapter-image img {
+            filter: saturate(0.9) brightness(1.1) contrast(0.95);
+        }
+
+        .chapter[data-chapter="leaving"] .chapter-image img {
+            filter: saturate(1.1) contrast(1.15) hue-rotate(5deg);
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           HIDDEN FRAME — Final Reveal
+           ═══════════════════════════════════════════════════════════════ */
+        .hidden-frame {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--film-black);
+            padding: clamp(40px, 8vw, 100px);
+            opacity: 0;
+            visibility: hidden;
+            transition: all 1.5s var(--ease-film);
+        }
+
+        .hidden-frame.revealed {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .hidden-frame-inner {
+            position: relative;
+            max-width: 800px;
+            width: 100%;
+        }
+
+        .hidden-frame-image {
+            aspect-ratio: 4/3;
+            overflow: hidden;
+            position: relative;
+            transform: scale(0.95);
+            opacity: 0;
+            transition: all 1.5s var(--ease-film) 0.5s;
+        }
+
+        .hidden-frame.revealed .hidden-frame-image {
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        .hidden-frame-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            filter: saturate(1.4) contrast(1.15) brightness(1.05);
+        }
+
+        .hidden-frame-image::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border: 4px solid var(--kodak-gold);
+            z-index: 2;
+        }
+
+        .hidden-frame-label {
+            position: absolute;
+            bottom: -30px;
+            right: 0;
+            font-family: var(--mono);
+            font-size: 0.55rem;
+            letter-spacing: 0.2em;
+            color: var(--kodak-gold);
+            opacity: 0;
+            transition: opacity 1s var(--ease-film) 1.5s;
+        }
+
+        .hidden-frame.revealed .hidden-frame-label {
+            opacity: 1;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           ENDING — Rest
+           ═══════════════════════════════════════════════════════════════ */
+        .ending {
+            min-height: 50vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: var(--milk);
+            text-align: center;
+            padding: 80px 40px;
+        }
+
+        .ending-names {
+            font-family: var(--serif);
+            font-size: clamp(1.5rem, 4vw, 2.5rem);
+            font-weight: 400;
+            color: var(--text);
+            letter-spacing: 0.1em;
+            margin-bottom: 20px;
+        }
+
+        .ending-note {
+            font-family: var(--mono);
+            font-size: 0.55rem;
+            letter-spacing: 0.2em;
+            text-transform: lowercase;
+            color: var(--text-muted);
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           ANIMATIONS
+           ═══════════════════════════════════════════════════════════════ */
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* ═══════════════════════════════════════════════════════════════
+           SCROLLBAR
+           ═══════════════════════════════════════════════════════════════ */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--film-black);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--sprocket);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--kodak-gold);
+        }
+    </style>
+</head>
+<body>
+    <!-- Film grain overlay -->
+    <div class="grain"></div>
+    <div class="light-leak" id="lightLeak"></div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         ENTRY SCREEN
+         ═══════════════════════════════════════════════════════════════ -->
+    <div class="entry" id="entry">
+        <div class="entry-content">
+            <p class="entry-label">personal invitation</p>
+            <h1 class="entry-title">ILYA</h1>
+            <h2 class="entry-subtitle">& Anna</h2>
+            <button class="entry-action" id="openBox">open the box</button>
+        </div>
+        <p class="entry-note">estate 2026</p>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         MAIN CONTENT
+         ═══════════════════════════════════════════════════════════════ -->
+    <div class="content" id="content">
+        
+        <!-- CONTACT SHEET -->
+        <section class="contact-sheet">
+            <div class="contact-header">
+                <h2 class="contact-title">
+                    ILYA
+                    <span>Anna</span>
+                </h2>
+                <div class="contact-meta">
+                    <p>Roll 001</p>
+                    <p>Kodak Portra 400</p>
+                    <p>Estate 2026</p>
+                </div>
+            </div>
+            
+            <div class="filmstrip-container">
+                <div class="filmstrip" id="filmstrip">
+                    <!-- First set -->
+                    <div class="film-frame warm">
+                        <div class="film-frame-inner"><img src="images/kiss.png" alt=""></div>
+                        <span class="film-frame-number">01</span>
+                    </div>
+                    <div class="film-frame cool">
+                        <div class="film-frame-inner"><img src="images/blur1.png" alt=""></div>
+                        <span class="film-frame-number">02</span>
+                    </div>
+                    <div class="film-frame golden">
+                        <div class="film-frame-inner"><img src="images/field1.png" alt=""></div>
+                        <span class="film-frame-number">03</span>
+                    </div>
+                    <div class="film-frame faded">
+                        <div class="film-frame-inner"><img src="images/camera.png" alt=""></div>
+                        <span class="film-frame-number">04</span>
+                    </div>
+                    <div class="film-frame vivid">
+                        <div class="film-frame-inner"><img src="images/together.png" alt=""></div>
+                        <span class="film-frame-number">05</span>
+                    </div>
+                    <div class="film-frame dusk">
+                        <div class="film-frame-inner"><img src="images/sunglasses.png" alt=""></div>
+                        <span class="film-frame-number">06</span>
+                    </div>
+                    <div class="film-frame warm">
+                        <div class="film-frame-inner"><img src="images/walk.png" alt=""></div>
+                        <span class="film-frame-number">07</span>
+                    </div>
+                    <div class="film-frame cool">
+                        <div class="film-frame-inner"><img src="images/red.png" alt=""></div>
+                        <span class="film-frame-number">08</span>
+                    </div>
+                    <div class="film-frame golden">
+                        <div class="film-frame-inner"><img src="images/venue.png" alt=""></div>
+                        <span class="film-frame-number">09</span>
+                    </div>
+                    <div class="film-frame vivid">
+                        <div class="film-frame-inner"><img src="images/blur1.png" alt=""></div>
+                        <span class="film-frame-number">10</span>
+                    </div>
+                    <div class="film-frame faded">
+                        <div class="film-frame-inner"><img src="images/field1.png" alt=""></div>
+                        <span class="film-frame-number">11</span>
+                    </div>
+                    <div class="film-frame dusk">
+                        <div class="film-frame-inner"><img src="images/kiss.png" alt=""></div>
+                        <span class="film-frame-number">12</span>
+                    </div>
+                    <!-- Duplicate set for infinite loop -->
+                    <div class="film-frame warm">
+                        <div class="film-frame-inner"><img src="images/kiss.png" alt=""></div>
+                        <span class="film-frame-number">01</span>
+                    </div>
+                    <div class="film-frame cool">
+                        <div class="film-frame-inner"><img src="images/blur1.png" alt=""></div>
+                        <span class="film-frame-number">02</span>
+                    </div>
+                    <div class="film-frame golden">
+                        <div class="film-frame-inner"><img src="images/field1.png" alt=""></div>
+                        <span class="film-frame-number">03</span>
+                    </div>
+                    <div class="film-frame faded">
+                        <div class="film-frame-inner"><img src="images/camera.png" alt=""></div>
+                        <span class="film-frame-number">04</span>
+                    </div>
+                    <div class="film-frame vivid">
+                        <div class="film-frame-inner"><img src="images/together.png" alt=""></div>
+                        <span class="film-frame-number">05</span>
+                    </div>
+                    <div class="film-frame dusk">
+                        <div class="film-frame-inner"><img src="images/sunglasses.png" alt=""></div>
+                        <span class="film-frame-number">06</span>
+                    </div>
+                    <div class="film-frame warm">
+                        <div class="film-frame-inner"><img src="images/walk.png" alt=""></div>
+                        <span class="film-frame-number">07</span>
+                    </div>
+                    <div class="film-frame cool">
+                        <div class="film-frame-inner"><img src="images/red.png" alt=""></div>
+                        <span class="film-frame-number">08</span>
+                    </div>
+                    <div class="film-frame golden">
+                        <div class="film-frame-inner"><img src="images/venue.png" alt=""></div>
+                        <span class="film-frame-number">09</span>
+                    </div>
+                    <div class="film-frame vivid">
+                        <div class="film-frame-inner"><img src="images/blur1.png" alt=""></div>
+                        <span class="film-frame-number">10</span>
+                    </div>
+                    <div class="film-frame faded">
+                        <div class="film-frame-inner"><img src="images/field1.png" alt=""></div>
+                        <span class="film-frame-number">11</span>
+                    </div>
+                    <div class="film-frame dusk">
+                        <div class="film-frame-inner"><img src="images/kiss.png" alt=""></div>
+                        <span class="film-frame-number">12</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="contact-footer">
+                <span>San Pietroburgo</span>
+                <span>Quattro giorni</span>
+                <span>Aperitivo</span>
+            </div>
+        </section>
+
+        <!-- CHAPTERS -->
+        <section class="chapters">
+            
+            <!-- Chapter 1: Arrival -->
+            <article class="chapter" data-chapter="arrival" id="chapter1">
+                <div class="chapter-image">
+                    <img src="images/field1.png" alt="">
+                </div>
+                <div class="chapter-content">
+                    <p class="chapter-number">Chapter 01</p>
+                    <h3 class="chapter-title">
+                        Arrival
+                        <span class="italian">l'arrivo</span>
+                    </h3>
+                    <p class="chapter-text">
+                        The light is soft.<br>
+                        Everyone is arriving slowly.
+                    </p>
+                    <div class="chapter-pause"></div>
+                </div>
+            </article>
+
+            <!-- Chapter 2: Wedding -->
+            <article class="chapter" data-chapter="wedding" id="chapter2">
+                <div class="chapter-image">
+                    <img src="images/kiss.png" alt="">
+                </div>
+                <div class="chapter-content">
+                    <p class="chapter-number">Chapter 02</p>
+                    <h3 class="chapter-title">
+                        The Day
+                        <span class="italian">aperitivo</span>
+                    </h3>
+                    <p class="chapter-text">
+                        Color everywhere.<br>
+                        Movement, laughter, warmth.
+                    </p>
+                    <div class="chapter-pause"></div>
+                </div>
+            </article>
+
+            <!-- Chapter 3: Day Two -->
+            <article class="chapter" data-chapter="daytwo" id="chapter3">
+                <div class="chapter-image">
+                    <img src="images/sunglasses.png" alt="">
+                </div>
+                <div class="chapter-content">
+                    <p class="chapter-number">Chapter 03</p>
+                    <h3 class="chapter-title">
+                        Day Two
+                        <span class="italian">senza fretta</span>
+                    </h3>
+                    <p class="chapter-text">
+                        Morning after.<br>
+                        Slow, washed, perfect.
+                    </p>
+                    <div class="chapter-pause"></div>
+                </div>
+            </article>
+
+            <!-- Chapter 4: Leaving -->
+            <article class="chapter" data-chapter="leaving" id="chapter4">
+                <div class="chapter-image">
+                    <img src="images/walk.png" alt="">
+                </div>
+                <div class="chapter-content">
+                    <p class="chapter-number">Chapter 04</p>
+                    <h3 class="chapter-title">
+                        Leaving
+                        <span class="italian">a presto</span>
+                    </h3>
+                    <p class="chapter-text">
+                        Dusk.<br>
+                        But not an ending.
+                    </p>
+                    <div class="chapter-pause"></div>
+                </div>
+            </article>
+
+        </section>
+
+        <!-- HIDDEN FRAME -->
+        <section class="hidden-frame" id="hiddenFrame">
+            <div class="hidden-frame-inner">
+                <div class="hidden-frame-image">
+                    <img src="images/together.png" alt="">
+                </div>
+                <p class="hidden-frame-label">frame 37 / the one we kept</p>
+            </div>
+        </section>
+
+        <!-- ENDING -->
+        <section class="ending">
+            <p class="ending-names">ILYA & ANNA</p>
+            <p class="ending-note">estate 2026</p>
+        </section>
+
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         JAVASCRIPT
+         ═══════════════════════════════════════════════════════════════ -->
+    <script>
+        // ═══════════════════════════════════════════════════════════════
+        // STATE
+        // ═══════════════════════════════════════════════════════════════
+        const state = {
+            boxOpened: false,
+            chaptersViewed: new Set(),
+            hiddenRevealed: false
+        };
+
+        // ═══════════════════════════════════════════════════════════════
+        // ELEMENTS
+        // ═══════════════════════════════════════════════════════════════
+        const entry = document.getElementById('entry');
+        const openBox = document.getElementById('openBox');
+        const content = document.getElementById('content');
+        const lightLeak = document.getElementById('lightLeak');
+        const chapters = document.querySelectorAll('.chapter');
+        const hiddenFrame = document.getElementById('hiddenFrame');
+
+        // ═══════════════════════════════════════════════════════════════
+        // OPEN THE BOX
+        // ═══════════════════════════════════════════════════════════════
+        openBox.addEventListener('click', () => {
+            state.boxOpened = true;
+            
+            // Animate entry away
+            entry.classList.add('opening');
+            
+            // Show content
+            setTimeout(() => {
+                document.body.classList.add('unlocked');
+                content.classList.add('visible');
+                lightLeak.classList.add('active');
+                
+                // Hide entry completely
+                setTimeout(() => {
+                    entry.style.display = 'none';
+                }, 1500);
+            }, 800);
+        });
+
+        // ═══════════════════════════════════════════════════════════════
+        // CHAPTER OBSERVER
+        // ═══════════════════════════════════════════════════════════════
+        const chapterObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const chapter = entry.target;
+                    chapter.classList.add('visible');
+                    
+                    // Track viewed chapters
+                    const chapterId = chapter.id;
+                    state.chaptersViewed.add(chapterId);
+                    
+                    // Check if all chapters viewed
+                    checkAllChaptersViewed();
+                }
+            });
+        }, {
+            threshold: 0.4,
+            rootMargin: '-50px'
+        });
+
+        chapters.forEach(chapter => {
+            chapterObserver.observe(chapter);
+        });
+
+        // ═══════════════════════════════════════════════════════════════
+        // HIDDEN FRAME REVEAL
+        // ═══════════════════════════════════════════════════════════════
+        function checkAllChaptersViewed() {
+            if (state.chaptersViewed.size >= 4 && !state.hiddenRevealed) {
+                state.hiddenRevealed = true;
+                
+                // Reveal hidden frame after a pause
+                setTimeout(() => {
+                    hiddenFrame.classList.add('revealed');
+                }, 1500);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // CONTACT SHEET HOVER EFFECTS
+        // ═══════════════════════════════════════════════════════════════
+        const filmFrames = document.querySelectorAll('.film-frame');
+        
+        filmFrames.forEach(frame => {
+            frame.addEventListener('mouseenter', () => {
+                // Subtle light leak pulse
+                lightLeak.style.opacity = '0.8';
+            });
+            
+            frame.addEventListener('mouseleave', () => {
+                lightLeak.style.opacity = '1';
+            });
+        });
+
+        // ═══════════════════════════════════════════════════════════════
+        // SUBTLE PARALLAX ON CHAPTER IMAGES
+        // ═══════════════════════════════════════════════════════════════
+        let ticking = false;
+
+        function updateParallax() {
+            chapters.forEach(chapter => {
+                const rect = chapter.getBoundingClientRect();
+                const inView = rect.top < window.innerHeight && rect.bottom > 0;
+                
+                if (inView) {
+                    const img = chapter.querySelector('.chapter-image img');
+                    const progress = (window.innerHeight - rect.top) / (window.innerHeight + rect.height);
+                    const offset = (progress - 0.5) * 40;
+                    img.style.transform = `scale(1) translateY(${offset}px)`;
+                }
+            });
+            
+            ticking = false;
+        }
+
+        window.addEventListener('scroll', () => {
+            if (!ticking) {
+                requestAnimationFrame(updateParallax);
+                ticking = true;
+            }
+        });
+
+        // ═══════════════════════════════════════════════════════════════
+        // RANDOM LIGHT LEAK FLICKER
+        // ═══════════════════════════════════════════════════════════════
+        setInterval(() => {
+            if (state.boxOpened && Math.random() > 0.7) {
+                lightLeak.style.opacity = String(0.5 + Math.random() * 0.5);
+            }
+        }, 3000);
+    </script>
+
+</body>
+</html>
