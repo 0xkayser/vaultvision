@@ -3141,7 +3141,7 @@ def check_gating_risk_adjusted(
     Rules:
     - quality_label NOT in ("demo")
     - data_points_30d >= 10
-    - tvl_usd >= 1,000,000 (stricter)
+    - tvl_usd >= 500,000
     - risk_score exists
     - cum_return_30d exists OR apr exists (fallback)
     
@@ -3152,8 +3152,8 @@ def check_gating_risk_adjusted(
         return False, "quality_label=demo (excluded)"
     if data_points_30d is None or data_points_30d < 10:
         return False, f"data_points_30d={data_points_30d} (need >=10)"
-    if tvl_usd is None or tvl_usd < 1_000_000:
-        return False, f"tvl_usd={tvl_usd} (need >=1M)"
+    if tvl_usd is None or tvl_usd < 500_000:
+        return False, f"tvl_usd={tvl_usd} (need >=500K)"
     if risk_score is None:
         return False, "risk_score missing"
     if cum_return_30d is None and (apr is None or apr <= 0):

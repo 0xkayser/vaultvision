@@ -1138,18 +1138,13 @@ function renderAna(){
   vaults=vaults.filter(v=>!v.exclude_from_rankings);
   vaults.sort((a,b)=>{
     const gv=(v,k)=>{
-      if(k==='rank'){
-        // Get verified or estimated rank, unranked vaults go to end (999)
-        return v.rankings?.verified_top?.rank || v.rankings?.estimated_top?.rank || 999;
-      }
+      if(k==='rank') return v.rankings?.verified_top?.rank || 999;
       if(k==='r30')return v.r30??-Infinity;
       if(k==='risk_score')return v.risk_score??-Infinity;
       return v[k]??-Infinity;
     };
     const av=gv(a,sortK),bv=gv(b,sortK);
     if(av===bv)return(b.tvl_usd||0)-(a.tvl_usd||0);
-    // For rank: ascending means 1,2,3... (lower is better), descending means 999,998...
-    if(sortK==='rank') return sortD==='desc'?bv-av:av-bv;
     return sortD==='desc'?bv-av:av-bv;
   });
   document.querySelectorAll('#anaTable th[data-s]').forEach(th=>{
@@ -1158,13 +1153,11 @@ function renderAna(){
   });
   const riskColor=r=>r<=30?'positive':r>=70?'negative':'';
   document.getElementById('anaTbody').innerHTML=vaults.map((v,i)=>{
-    // Show verified_top rank if available, otherwise estimated_top, otherwise display order
+    // Display sequential number + verified badge if vault is in verified_top
     const vRank=v.rankings?.verified_top?.rank;
-    const eRank=v.rankings?.estimated_top?.rank;
-    const displayRank=vRank||eRank||(i+1);
-    const rankBadge=vRank?'<span title="Verified Rank" style="color:#10b981">✓</span>':'';
+    const rankBadge=vRank?`<span title="Verified #${vRank}" style="color:#10b981;font-size:10px;margin-left:2px">✓</span>`:'';
     return `<tr>
-    <td>${displayRank}${rankBadge}</td>
+    <td>${i+1}${rankBadge}</td>
     <td class="name-link" onclick="nav('vault',{id:'${v.id}'})">${v.vault_name}</td>
     <td><span class="card-proto ${v.protocol}">${v.protocol}</span></td>
     <td>${dataQualityBadge(v.data_quality)}</td>
