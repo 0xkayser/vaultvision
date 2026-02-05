@@ -4081,22 +4081,73 @@ def fetch_hyperliquid() -> List[dict]:
 # HL ENTRY INTELLIGENCE ENGINE
 # =============================================================================
 
-def fetch_hl_clearinghouse_state(vault_address: str) -> Optional[dict]:
-    """Fetch positions/margin state for an HL vault via clearinghouseState."""
+def _fetch_hl_clearinghouse_raw(address: str) -> Optional[dict]:
+    """Low-level fetch of clearinghouseState for a single address."""
     try:
-        payload = json.dumps({"type": "clearinghouseState", "user": vault_address}).encode()
+        payload = json.dumps({"type": "clearinghouseState", "user": address}).encode()
         req = urllib.request.Request(HL_API_URL, data=payload,
                                       headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-            # Log what we got
-            n_pos = len(data.get("assetPositions", []))
-            equity = data.get("marginSummary", {}).get("accountValue", "?")
-            print(f"[HL-ENTRY] clearinghouseState {vault_address[:10]}...: {n_pos} positions, equity={equity}")
-            return data
+            return json.loads(resp.read().decode())
     except Exception as e:
-        print(f"[HL-ENTRY] clearinghouseState error for {vault_address[:10]}...: {e}")
+        print(f"[HL-ENTRY] clearinghouseState error for {address[:10]}...: {e}")
         return None
+
+
+def fetch_hl_clearinghouse_state(vault_address: str) -> Optional[dict]:
+    """Fetch positions/margin state for an HL vault.
+    
+    For parent vaults (e.g. HLP), aggregates positions from all child sub-accounts.
+    """
+    # First get the vault's own state
+    state = _fetch_hl_clearinghouse_raw(vault_address)
+    if not state:
+        return None
+    
+    n_pos = len(state.get("assetPositions", []))
+    equity = state.get("marginSummary", {}).get("accountValue", "?")
+    
+    # If vault has positions, use them directly
+    if n_pos > 0:
+        print(f"[HL-ENTRY] {vault_address[:10]}...: {n_pos} direct positions, equity={equity}")
+        return state
+    
+    # No direct positions — check if it's a parent vault with children
+    try:
+        details = fetch_hl_vault_details(vault_address)
+        if not details:
+            print(f"[HL-ENTRY] {vault_address[:10]}...: 0 positions, no children, equity={equity}")
+            return state
+        
+        rel = details.get("relationship", {})
+        if rel.get("type") != "parent":
+            print(f"[HL-ENTRY] {vault_address[:10]}...: 0 positions (not parent vault), equity={equity}")
+            return state
+        
+        child_addresses = rel.get("data", {}).get("childAddresses", [])
+        if not child_addresses:
+            return state
+        
+        print(f"[HL-ENTRY] {vault_address[:10]}...: parent vault with {len(child_addresses)} children, fetching...")
+        
+        # Aggregate positions from all children
+        all_positions = []
+        for child_addr in child_addresses:
+            child_state = _fetch_hl_clearinghouse_raw(child_addr)
+            if child_state:
+                child_pos = child_state.get("assetPositions", [])
+                all_positions.extend(child_pos)
+            time.sleep(0.3)  # Rate limit
+        
+        # Merge into parent state
+        state["assetPositions"] = all_positions
+        print(f"[HL-ENTRY] {vault_address[:10]}...: aggregated {len(all_positions)} positions from {len(child_addresses)} children, equity={equity}")
+        
+        return state
+    
+    except Exception as e:
+        print(f"[HL-ENTRY] Error fetching children for {vault_address[:10]}...: {e}")
+        return state
 
 
 def parse_hl_positions(clearing_state: dict) -> dict:
