@@ -4088,7 +4088,12 @@ def fetch_hl_clearinghouse_state(vault_address: str) -> Optional[dict]:
         req = urllib.request.Request(HL_API_URL, data=payload,
                                       headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode())
+            data = json.loads(resp.read().decode())
+            # Log what we got
+            n_pos = len(data.get("assetPositions", []))
+            equity = data.get("marginSummary", {}).get("accountValue", "?")
+            print(f"[HL-ENTRY] clearinghouseState {vault_address[:10]}...: {n_pos} positions, equity={equity}")
+            return data
     except Exception as e:
         print(f"[HL-ENTRY] clearinghouseState error for {vault_address[:10]}...: {e}")
         return None

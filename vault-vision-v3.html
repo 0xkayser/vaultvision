@@ -765,9 +765,17 @@ function renderEntryIntel(v) {
   };
   
   // Format helpers
-  const fmtK = (v) => { if (v == null) return 'N/A'; return (v >= 0 ? '+' : '') + (v/1000).toFixed(0) + 'k'; };
+  const fmtFlow = (v) => {
+    if (v == null) return 'N/A';
+    const sign = v >= 0 ? '+' : '-';
+    const a = Math.abs(v);
+    if (a >= 1e9) return sign + '$' + (a/1e9).toFixed(1) + 'B';
+    if (a >= 1e6) return sign + '$' + (a/1e6).toFixed(1) + 'M';
+    if (a >= 1e3) return sign + '$' + (a/1e3).toFixed(0) + 'K';
+    return sign + '$' + a.toFixed(0);
+  };
   const fmtPctE = (v) => { if (v == null) return 'N/A'; return (v >= 0 ? '+' : '') + (v*100).toFixed(2) + '%'; };
-  const fmtUsdE = (v) => { if (v == null) return 'N/A'; const a=Math.abs(v); if(a>=1e9) return (v>=0?'':'-')+'$'+(a/1e9).toFixed(2)+'B'; if(a>=1e6) return (v>=0?'':'-')+'$'+(a/1e6).toFixed(2)+'M'; if(a>=1e3) return (v>=0?'':'-')+'$'+(a/1e3).toFixed(0)+'K'; return '$'+v.toFixed(0); };
+  const fmtUsdE = (v) => { if (v == null) return 'N/A'; const a=Math.abs(v); if(a>=1e9) return '$'+(a/1e9).toFixed(2)+'B'; if(a>=1e6) return '$'+(a/1e6).toFixed(2)+'M'; if(a>=1e3) return '$'+(a/1e3).toFixed(0)+'K'; return '$'+a.toFixed(0); };
   
   // Leverage color
   const levVal = ei.leverage_effective;
@@ -808,26 +816,34 @@ function renderEntryIntel(v) {
     <!-- POSITION HEALTH -->
     <div class="entry-card">
       <h4>📊 Position Health</h4>
+      ${coverage.positions === 'real' ? `
       <div class="pos-health-row">
         <span class="pos-health-label">Gross Exposure</span>
         <span class="pos-health-val">${fmtUsdE(ei.gross_exposure_usd)}</span>
       </div>
       <div class="pos-health-row">
         <span class="pos-health-label">Eff. Leverage</span>
-        <span class="pos-health-val ${levClass}">${levVal != null ? levVal.toFixed(1) + 'x' : 'N/A'}</span>
+        <span class="pos-health-val ${levClass}">${levVal != null && levVal > 0 ? levVal.toFixed(1) + 'x' : 'N/A'}</span>
       </div>
       <div class="pos-health-row">
         <span class="pos-health-label">Top Position</span>
-        <span class="pos-health-val ${c1Class}">${c1 != null ? (c1 * 100).toFixed(0) + '% of book' : 'N/A'}</span>
+        <span class="pos-health-val ${c1Class}">${c1 != null && c1 > 0 ? (c1 * 100).toFixed(0) + '% of book' : 'N/A'}</span>
       </div>
       <div class="pos-health-row">
         <span class="pos-health-label">uPnL</span>
-        <span class="pos-health-val ${upnlClass}">${fmtUsdE(ei.upnl_usd)} ${upnlPct != null ? '(' + fmtPctE(upnlPct) + ')' : ''}</span>
+        <span class="pos-health-val ${upnlClass}">${ei.upnl_usd != null && ei.upnl_usd !== 0 ? fmtUsdE(ei.upnl_usd) + ' (' + fmtPctE(upnlPct) + ')' : 'N/A'}</span>
       </div>
       <div class="pos-health-row">
         <span class="pos-health-label">Liq Risk</span>
         <span class="pos-health-val ${ei.liq_risk === 'elevated' ? 'danger' : ei.liq_risk === 'low' ? 'ok' : ''}">${ei.liq_risk || 'N/A'}</span>
       </div>
+      ` : `
+      <div style="text-align:center;padding:24px 0;color:var(--text-secondary)">
+        <div style="font-size:28px;margin-bottom:8px;opacity:0.4">📊</div>
+        <div style="font-size:13px">Position data not available for this vault type</div>
+        <div style="font-size:11px;margin-top:4px;opacity:0.6">Protocol/LP vaults don't expose individual positions</div>
+      </div>
+      `}
     </div>
     
     <!-- FLOW TAPE -->
@@ -835,19 +851,19 @@ function renderEntryIntel(v) {
       <h4>💧 Flow Tape</h4>
       <div class="flow-tape-row">
         <span class="flow-tape-label">Net Flow (24h)</span>
-        <span class="flow-tape-val ${f24Class}">${f24 != null ? fmtK(f24) : 'N/A'}</span>
+        <span class="flow-tape-val ${f24Class}">${fmtFlow(f24)}</span>
       </div>
       <div class="flow-tape-row">
         <span class="flow-tape-label">Net Flow (7d)</span>
-        <span class="flow-tape-val ${f7Class}">${f7 != null ? fmtK(f7) : 'N/A'}</span>
+        <span class="flow-tape-val ${f7Class}">${fmtFlow(f7)}</span>
       </div>
       <div class="flow-tape-row">
         <span class="flow-tape-label">Whale Outflow (7d)</span>
-        <span class="flow-tape-val ${whaleClass}">${ei.whale_outflow_7d != null ? fmtK(ei.whale_outflow_7d) : 'N/A'}</span>
+        <span class="flow-tape-val ${whaleClass}">${fmtFlow(ei.whale_outflow_7d)}</span>
       </div>
       <div class="flow-tape-row">
         <span class="flow-tape-label">Realized PnL (30d)</span>
-        <span class="flow-tape-val ${ei.realized_pnl_30d != null && ei.realized_pnl_30d > 0 ? 'inflow' : ei.realized_pnl_30d != null && ei.realized_pnl_30d < 0 ? 'outflow' : 'neutral'}">${ei.realized_pnl_30d != null ? fmtK(ei.realized_pnl_30d) : 'N/A'}</span>
+        <span class="flow-tape-val ${ei.realized_pnl_30d != null && ei.realized_pnl_30d > 0 ? 'inflow' : ei.realized_pnl_30d != null && ei.realized_pnl_30d < 0 ? 'outflow' : 'neutral'}">${fmtFlow(ei.realized_pnl_30d)}</span>
       </div>
       <div style="margin-top:12px;font-size:11px;color:var(--text-secondary)">
         Last updated: ${ei.ts ? new Date(ei.ts * 1000).toLocaleString() : 'N/A'}
