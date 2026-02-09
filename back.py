@@ -917,7 +917,8 @@ def normalize_snapshot(vault_pk: str, raw_data: dict, data_freshness_sec: int = 
 
 
 def add_snapshot(pk: str, tvl: float, apr: float, source: str = "api", 
-                 returns: dict = None, pnl: dict = None, data_freshness_sec: int = None):
+                 returns: dict = None, pnl: dict = None, data_freshness_sec: int = None,
+                 ts_override: int = None):
     """Add daily snapshot with canonical model (deduplicated by day bucket).
     
     Args:
@@ -928,6 +929,7 @@ def add_snapshot(pk: str, tvl: float, apr: float, source: str = "api",
         returns: Dict with return_7d, return_30d, return_90d
         pnl: Dict with pnl_7d, pnl_30d, pnl_90d
         data_freshness_sec: Seconds since last successful update
+        ts_override: Override timestamp (day bucket). If set, uses this instead of today.
     """
     raw_data = {
         "tvl_usd": tvl,
@@ -940,6 +942,9 @@ def add_snapshot(pk: str, tvl: float, apr: float, source: str = "api",
         "pnl_30d": pnl.get("30d") if pnl else None,
         "pnl_90d": pnl.get("90d") if pnl else None,
     }
+    
+    if ts_override is not None:
+        raw_data["ts"] = int(ts_override) // 86400 * 86400  # Ensure day bucket
     
     snapshot = normalize_snapshot(pk, raw_data, data_freshness_sec)
     
@@ -4077,7 +4082,7 @@ def enrich_hl_vaults(vaults: List[dict], max_enrich: int = 30) -> List[dict]:
                     ts = ts / 1000  # ms to s
                 
                 if val > 0:
-                    add_snapshot(vault["pk"], val, vault.get("apr", 0))
+                    add_snapshot(vault["pk"], val, vault.get("apr", 0), ts_override=int(ts))
                     snapshot_count += 1
             
             if snapshot_count > 0:
