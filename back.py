@@ -4341,50 +4341,55 @@ def compute_hl_flow_proxy(vault_id: str, equity_usd: Optional[float]) -> dict:
     
     # Net flow = TVL change - PnL change (i.e., what's left is deposits/withdrawals)
     latest_snap = snapshots[-1]
+    earliest_snap = snapshots[0]
+    
+    # Skip if earliest and latest are the same snapshot (no delta possible)
+    if latest_snap["ts"] == earliest_snap["ts"]:
+        return result
     
     # Determine flow quality: if we have PnL data we can subtract it → "estimated"
     # (True "real" requires deposit/withdrawal event stream which HL doesn't expose)
     has_pnl = len(pnl_rows) > 0
     
-    # 24h flow
+    # Helper: compute PnL change between two timestamps
+    def pnl_change_between(since_ts):
+        if not pnl_rows:
+            return 0
+        past_pnl = 0
+        for pr in pnl_rows:
+            if pr["ts"] <= since_ts:
+                past_pnl = pr["pnl_usd"] or 0
+        latest_pnl = pnl_rows[-1]["pnl_usd"] or 0
+        return latest_pnl - past_pnl
+    
+    # 24h flow — with fallback to earliest available snapshot
     cutoff_24h = now - 86400
     past_24h = None
     for s in snapshots:
         if s["ts"] <= cutoff_24h:
             past_24h = s
     
+    if not past_24h:
+        past_24h = earliest_snap  # Fallback: use earliest available
+    
     if past_24h and latest_snap["tvl_usd"] and past_24h["tvl_usd"]:
         tvl_delta = latest_snap["tvl_usd"] - past_24h["tvl_usd"]
-        # Approximate PnL delta in the same period
-        pnl_delta = 0
-        for pr in pnl_rows:
-            if pr["ts"] >= cutoff_24h:
-                pnl_delta = (pr["pnl_usd"] or 0)
-                break
-        # If we have the latest PnL, compute delta
-        if pnl_rows:
-            latest_pnl = pnl_rows[-1]["pnl_usd"] or 0
-            past_pnl = pnl_delta
-            pnl_change = latest_pnl - past_pnl
-        else:
-            pnl_change = 0
-        
+        pnl_change = pnl_change_between(past_24h["ts"]) if has_pnl else 0
         result["net_flow_24h"] = tvl_delta - pnl_change
-        result["flow_state"] = "estimated" if has_pnl else "estimated"  # TVL-proxy is always estimated
+        result["flow_state"] = "estimated"
     
-    # 7d flow
+    # 7d flow — with fallback to earliest available snapshot
     cutoff_7d = now - 7 * 86400
     past_7d = None
     for s in snapshots:
         if s["ts"] <= cutoff_7d:
             past_7d = s
     
-    if not past_7d and snapshots:
-        past_7d = snapshots[0]  # Use earliest available
+    if not past_7d:
+        past_7d = earliest_snap  # Fallback: use earliest available
     
     if past_7d and latest_snap["tvl_usd"] and past_7d["tvl_usd"]:
         tvl_delta_7d = latest_snap["tvl_usd"] - past_7d["tvl_usd"]
-        # Simple approach: 7d flow ≈ TVL delta (PnL is usually small relative to flows)
         result["net_flow_7d"] = tvl_delta_7d
         result["flow_state"] = "estimated"
         
