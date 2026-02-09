@@ -219,8 +219,17 @@ tbody tr:last-child td{border-bottom:none}
 .coverage-badges{display:flex;gap:6px;flex-wrap:wrap}
 .coverage-badge{font-size:10px;padding:3px 8px;border-radius:6px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
 .coverage-badge.real{background:rgba(16,185,129,0.15);color:#10b981}
-.coverage-badge.proxy{background:rgba(251,191,36,0.15);color:#fbbf24}
+.coverage-badge.proxy,.coverage-badge.estimated{background:rgba(251,191,36,0.15);color:#fbbf24}
 .coverage-badge.unavailable{background:rgba(148,163,184,0.15);color:#94a3b8}
+.flow-state-tag{display:inline-block;font-size:9px;padding:1px 5px;border-radius:4px;margin-left:6px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;vertical-align:middle}
+.flow-state-tag.estimated{background:rgba(251,191,36,0.15);color:#fbbf24}
+.flow-state-tag.unavailable{background:rgba(148,163,184,0.15);color:#94a3b8}
+.flow-state-tag.real{background:rgba(16,185,129,0.15);color:#10b981}
+.entry-unavailable{text-align:center;padding:32px 16px;color:var(--text-secondary)}
+.entry-unavailable .entry-unavailable-icon{font-size:36px;margin-bottom:10px;opacity:.35}
+.entry-unavailable .entry-unavailable-msg{font-size:13px;margin-bottom:4px}
+.entry-unavailable .entry-unavailable-sub{font-size:11px;opacity:.55}
+.greyed{opacity:.45}
 .pos-health-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border-light)}
 .pos-health-row:last-child{border-bottom:none}
 .pos-health-label{font-size:12px;color:var(--text-secondary);text-transform:uppercase}
@@ -686,7 +695,6 @@ function renderExpectationBlock(v) {
   const expected = exp.expected_30d;
   const observed = exp.observed_30d;
   const deviation = exp.deviation_30d;
-  const confidence = exp.confidence;
   
   if (expected == null) return '';
   
@@ -700,9 +708,11 @@ function renderExpectationBlock(v) {
     else if (deviation < -0.02) { devStatus = 'negative'; devLabel = 'Underperforming'; }
   }
   
-  // Confidence bar width and color
-  const confPct = Math.round((confidence || 0) * 100);
-  const confColor = confidence >= 0.7 ? '#10b981' : confidence >= 0.4 ? '#fbbf24' : '#f43f5e';
+  // Data Risk: invert confidence → risk (low risk = good)
+  const dataRisk = exp.data_risk != null ? exp.data_risk : (1.0 - (exp.confidence || 0));
+  const dataRiskPct = Math.round(dataRisk * 100);
+  const dataRiskColor = dataRiskPct <= 33 ? '#10b981' : dataRiskPct <= 66 ? '#fbbf24' : '#f43f5e';
+  const dataRiskLabel = exp.data_risk_label || (dataRiskPct <= 33 ? 'Low' : dataRiskPct <= 66 ? 'Moderate' : 'High');
   
   return `
   <div class="calc-card fade-in" style="animation-delay:.12s">
@@ -724,11 +734,11 @@ function renderExpectationBlock(v) {
         <div class="expect-sub">${devLabel}</div>
       </div>
       <div class="expect-item">
-        <div class="expect-label">Data Confidence</div>
-        <div class="expect-confidence">
-          <div class="expect-conf-bar" style="width:${confPct}%;background:${confColor}"></div>
+        <div class="expect-label">Data Risk</div>
+        <div class="expect-confidence" title="Data Risk reflects uncertainty due to short history or estimated metrics.">
+          <div class="expect-conf-bar" style="width:${dataRiskPct}%;background:${dataRiskColor}"></div>
         </div>
-        <div class="expect-sub">${confPct}% (${exp.quality_label || 'unknown'})</div>
+        <div class="expect-sub">${dataRiskLabel} (${exp.quality_label || 'unknown'})</div>
       </div>
     </div>
   </div>`;
@@ -740,22 +750,62 @@ function renderExpectationBlock(v) {
 function renderEntryIntel(v) {
   if (v.protocol !== 'hyperliquid') return '';
   const ei = v.entry_intel;
-  if (!ei) return '';
+  
+  // ALWAYS render cards for HL vaults — never hide sections
+  if (!ei) {
+    return `
+    <div class="entry-intel-grid fade-in" style="animation-delay:.18s">
+      <div class="entry-card" id="entryMeterCard">
+        <h4>🎯 Entry Meter</h4>
+        <div class="entry-unavailable">
+          <div class="entry-unavailable-icon">🎯</div>
+          <div class="entry-unavailable-msg">Entry data not yet available</div>
+          <div class="entry-unavailable-sub">Data will appear after the next fetch cycle</div>
+        </div>
+      </div>
+      <div class="entry-card">
+        <h4>📊 Position Health</h4>
+        <div class="entry-unavailable">
+          <div class="entry-unavailable-icon">📊</div>
+          <div class="entry-unavailable-msg">Position data not yet available</div>
+          <div class="entry-unavailable-sub">Waiting for clearinghouse data</div>
+        </div>
+      </div>
+      <div class="entry-card">
+        <h4>💧 Flow Tape</h4>
+        <div class="entry-unavailable">
+          <div class="entry-unavailable-icon">💧</div>
+          <div class="entry-unavailable-msg">Flow data not yet available</div>
+          <div class="entry-unavailable-sub">Waiting for snapshot history</div>
+        </div>
+      </div>
+    </div>`;
+  }
   
   const score = ei.entry_score;
   const label = ei.entry_label || 'N/A';
   const reasons = ei.reasons || [];
   const coverage = ei.coverage || {};
+  const ms = ei.metric_state || {};
   
   // Score color
   const scoreColor = score >= 70 ? '#10b981' : score >= 40 ? '#fbbf24' : '#f43f5e';
   const labelClass = score >= 70 ? 'good' : score >= 40 ? 'neutral' : 'avoid';
   
-  // Coverage badge helper
+  // Coverage badge helper — shows UPPERCASE state
   const covBadge = (key, lbl) => {
-    const val = coverage[key] || 'unavailable';
-    return `<span class="coverage-badge ${val}">${lbl}: ${val}</span>`;
+    const val = coverage[key] || ms[key] || 'unavailable';
+    const displayVal = val === 'proxy' ? 'estimated' : val;
+    return `<span class="coverage-badge ${displayVal}" title="${lbl} data is ${displayVal}">${lbl}: ${displayVal}</span>`;
   };
+  
+  // Flow state tag (small inline label)
+  const flowState = coverage.flows || ms.flow || 'unavailable';
+  const flowStateDisplay = flowState === 'proxy' ? 'estimated' : flowState;
+  const flowTag = flowState !== 'real' ? `<span class="flow-state-tag ${flowStateDisplay}" title="Flow data is ${flowStateDisplay}">${flowStateDisplay}</span>` : '';
+  
+  // Whale state
+  const whaleState = coverage.whales || ms.whales || 'unavailable';
   
   // Reason sentiment
   const reasonClass = (r) => {
@@ -766,7 +816,7 @@ function renderEntryIntel(v) {
   
   // Format helpers
   const fmtFlow = (v) => {
-    if (v == null) return 'N/A';
+    if (v == null) return '<span class="greyed">Data unavailable</span>';
     const sign = v >= 0 ? '+' : '-';
     const a = Math.abs(v);
     if (a >= 1e9) return sign + '$' + (a/1e9).toFixed(1) + 'B';
@@ -777,46 +827,35 @@ function renderEntryIntel(v) {
   const fmtPctE = (v) => { if (v == null) return 'N/A'; return (v >= 0 ? '+' : '') + (v*100).toFixed(2) + '%'; };
   const fmtUsdE = (v) => { if (v == null) return 'N/A'; const a=Math.abs(v); if(a>=1e9) return '$'+(a/1e9).toFixed(2)+'B'; if(a>=1e6) return '$'+(a/1e6).toFixed(2)+'M'; if(a>=1e3) return '$'+(a/1e3).toFixed(0)+'K'; return '$'+a.toFixed(0); };
   
+  // Whale display — never show bare "$0", show descriptive label
+  const fmtWhale = (v) => {
+    if (v == null) return '<span class="greyed">Data unavailable</span>';
+    if (v === 0 || Math.abs(v) < 100) return '<span style="color:var(--text-secondary)">$0 — No whale activity</span>';
+    return fmtFlow(v);
+  };
+  
   // Leverage color
   const levVal = ei.leverage_effective;
-  const levClass = levVal == null ? '' : levVal > 5 ? 'danger' : levVal > 3 ? 'warn' : 'ok';
+  const levClass = levVal == null ? 'greyed' : levVal > 5 ? 'danger' : levVal > 3 ? 'warn' : 'ok';
   
   // uPnL color
   const upnlPct = ei.upnl_pct;
-  const upnlClass = upnlPct == null ? '' : upnlPct < -0.02 ? 'danger' : upnlPct > 0.02 ? 'ok' : 'warn';
+  const upnlClass = upnlPct == null ? 'greyed' : upnlPct < -0.02 ? 'danger' : upnlPct > 0.02 ? 'ok' : 'warn';
   
   // Concentration color
   const c1 = ei.concentration_top1;
-  const c1Class = c1 == null ? '' : c1 > 0.8 ? 'danger' : c1 > 0.5 ? 'warn' : 'ok';
+  const c1Class = c1 == null ? 'greyed' : c1 > 0.8 ? 'danger' : c1 > 0.5 ? 'warn' : 'ok';
   
-  // Flow colors
+  // Flow colors — grey out if unavailable
   const f24 = ei.net_flow_24h;
   const f7 = ei.net_flow_7d;
-  const f24Class = f24 == null ? 'neutral' : f24 > 0 ? 'inflow' : 'outflow';
-  const f7Class = f7 == null ? 'neutral' : f7 > 0 ? 'inflow' : 'outflow';
+  const f24Class = f24 == null ? 'neutral greyed' : f24 > 0 ? 'inflow' : 'outflow';
+  const f7Class = f7 == null ? 'neutral greyed' : f7 > 0 ? 'inflow' : 'outflow';
   const whaleClass = (ei.whale_outflow_7d && ei.whale_outflow_7d < -50000) ? 'outflow' : 'neutral';
   
-  return `
-  <div class="entry-intel-grid fade-in" style="animation-delay:.18s">
-    <!-- ENTRY METER -->
-    <div class="entry-card" id="entryMeterCard">
-      <h4>🎯 Entry Meter</h4>
-      <div class="entry-meter-score" id="entryScoreNum" style="color:${scoreColor}">${score}</div>
-      <div class="entry-meter-label ${labelClass}">${label}</div>
-      <ul class="entry-reasons">
-        ${reasons.map(r => `<li class="${reasonClass(r)}">${r}</li>`).join('')}
-      </ul>
-      <div class="coverage-badges">
-        ${covBadge('positions','Positions')}
-        ${covBadge('flows','Flows')}
-        ${covBadge('realized_pnl','Realized')}
-      </div>
-    </div>
-    
-    <!-- POSITION HEALTH -->
-    <div class="entry-card">
-      <h4>📊 Position Health</h4>
-      ${coverage.positions === 'real' ? `
+  // Position Health — always render card, content depends on state
+  const posState = coverage.positions || ms.positions || 'unavailable';
+  const posContent = posState === 'real' ? `
       <div class="pos-health-row">
         <span class="pos-health-label">Gross Exposure</span>
         <span class="pos-health-val">${fmtUsdE(ei.gross_exposure_usd)}</span>
@@ -837,18 +876,43 @@ function renderEntryIntel(v) {
         <span class="pos-health-label">Liq Risk</span>
         <span class="pos-health-val ${ei.liq_risk === 'elevated' ? 'danger' : ei.liq_risk === 'low' ? 'ok' : ''}">${ei.liq_risk || 'N/A'}</span>
       </div>
-      ` : `
-      <div style="text-align:center;padding:24px 0;color:var(--text-secondary)">
-        <div style="font-size:28px;margin-bottom:8px;opacity:0.4">📊</div>
-        <div style="font-size:13px">Position data not available for this vault type</div>
-        <div style="font-size:11px;margin-top:4px;opacity:0.6">Protocol/LP vaults don't expose individual positions</div>
+      <div style="margin-top:8px"><span class="flow-state-tag real">POSITIONS: REAL</span></div>
+  ` : `
+      <div class="entry-unavailable">
+        <div class="entry-unavailable-icon">📊</div>
+        <div class="entry-unavailable-msg">Position data not available for this vault type</div>
+        <div class="entry-unavailable-sub">Protocol/LP vaults don't expose individual positions</div>
       </div>
-      `}
+      <div style="text-align:center"><span class="flow-state-tag unavailable">POSITIONS: UNAVAILABLE</span></div>
+  `;
+  
+  return `
+  <div class="entry-intel-grid fade-in" style="animation-delay:.18s">
+    <!-- ENTRY METER -->
+    <div class="entry-card" id="entryMeterCard">
+      <h4>🎯 Entry Meter</h4>
+      <div class="entry-meter-score" id="entryScoreNum" style="color:${scoreColor}">${score}</div>
+      <div class="entry-meter-label ${labelClass}">${label}</div>
+      <ul class="entry-reasons">
+        ${reasons.map(r => `<li class="${reasonClass(r)}">${r}</li>`).join('')}
+      </ul>
+      <div class="coverage-badges">
+        ${covBadge('positions','Positions')}
+        ${covBadge('flows','Flows')}
+        ${covBadge('whales','Whales')}
+        ${covBadge('realized_pnl','PnL')}
+      </div>
     </div>
     
-    <!-- FLOW TAPE -->
+    <!-- POSITION HEALTH -->
     <div class="entry-card">
-      <h4>💧 Flow Tape</h4>
+      <h4>📊 Position Health</h4>
+      ${posContent}
+    </div>
+    
+    <!-- FLOW TAPE — ALWAYS rendered, never hidden -->
+    <div class="entry-card">
+      <h4>💧 Flow Tape ${flowTag}</h4>
       <div class="flow-tape-row">
         <span class="flow-tape-label">Net Flow (24h)</span>
         <span class="flow-tape-val ${f24Class}">${fmtFlow(f24)}</span>
@@ -859,7 +923,7 @@ function renderEntryIntel(v) {
       </div>
       <div class="flow-tape-row">
         <span class="flow-tape-label">Whale Outflow (7d)</span>
-        <span class="flow-tape-val ${whaleClass}">${fmtFlow(ei.whale_outflow_7d)}</span>
+        <span class="flow-tape-val ${whaleClass}">${fmtWhale(ei.whale_outflow_7d)}</span>
       </div>
       <div class="flow-tape-row">
         <span class="flow-tape-label">Realized PnL (30d)</span>
@@ -898,7 +962,7 @@ function renderRiskBreakdown(vault, riskScore) {
       perf: { score: rc.perf ?? null, label: getLabel(rc.perf), color: getColor(rc.perf) },
       drawdown: { score: rc.drawdown ?? null, label: getLabel(rc.drawdown), color: getColor(rc.drawdown) },
       liquidity: { score: rc.liquidity ?? null, label: getLabel(rc.liquidity), color: getColor(rc.liquidity) },
-      confidence: { score: rc.confidence ?? null, label: getLabel(rc.confidence), color: getColor(rc.confidence) }
+      data_risk: { score: rc.data_risk ?? rc.confidence ?? null, label: getLabel(rc.data_risk ?? rc.confidence), color: getColor(rc.data_risk ?? rc.confidence) }
     };
   } else {
     // Fallback to legacy client-side computation
@@ -907,7 +971,7 @@ function renderRiskBreakdown(vault, riskScore) {
       perf: { score: 50, label: 'N/A', color: '#94a3b8' }, // Not available in legacy
       drawdown: { score: 50, label: 'N/A', color: '#94a3b8' }, // Not available in legacy
       liquidity: rc.tvl,
-      confidence: rc.quality
+      data_risk: rc.quality
     };
   }
   
@@ -917,7 +981,7 @@ function renderRiskBreakdown(vault, riskScore) {
     perf: reasons.volatility_30d != null ? `Volatility: ${(reasons.volatility_30d * 100).toFixed(2)}%, Worst day: ${(reasons.worst_day_30d * 100).toFixed(2)}%` : 'Performance risk based on volatility and worst day returns',
     drawdown: reasons.max_drawdown_30d != null ? `Max drawdown: ${(reasons.max_drawdown_30d * 100).toFixed(2)}%` : 'Drawdown risk based on maximum peak-to-trough decline',
     liquidity: reasons.tvl_usd != null ? `TVL: $${(reasons.tvl_usd / 1e6).toFixed(2)}M, TVL volatility: ${(reasons.tvl_volatility_30d * 100).toFixed(2)}%` : 'Liquidity risk based on TVL size and stability',
-    confidence: reasons.quality_label ? `Data quality: ${reasons.quality_label}, History: ${reasons.data_points_30d || 0} points` : 'Confidence risk based on data quality and history'
+    data_risk: reasons.quality_label ? `Data Risk reflects uncertainty due to short history or estimated metrics. Quality: ${reasons.quality_label}, History: ${reasons.data_points_30d || 0} points` : 'Data Risk reflects uncertainty due to short history or estimated metrics.'
   };
   
   return `
@@ -944,11 +1008,11 @@ function renderRiskBreakdown(vault, riskScore) {
         <span class="risk-breakdown-val" style="color:${components.liquidity.color}">${components.liquidity.label}</span>
       </div>
       <div class="risk-breakdown-row">
-        <span class="risk-breakdown-label" tabindex="0">Data Confidence<span class="info-icon">?</span>
-          <span class="risk-tooltip">${tooltips.confidence}</span>
+        <span class="risk-breakdown-label" tabindex="0">Data Risk<span class="info-icon">?</span>
+          <span class="risk-tooltip">${tooltips.data_risk}</span>
         </span>
-        <div class="risk-breakdown-bar"><div class="risk-breakdown-fill" style="width:${components.confidence.score != null ? components.confidence.score : 0}%;background:${components.confidence.color}"></div></div>
-        <span class="risk-breakdown-val" style="color:${components.confidence.color}">${components.confidence.label}</span>
+        <div class="risk-breakdown-bar"><div class="risk-breakdown-fill" style="width:${components.data_risk.score != null ? components.data_risk.score : 0}%;background:${components.data_risk.color}"></div></div>
+        <span class="risk-breakdown-val" style="color:${components.data_risk.color}">${components.data_risk.label}</span>
       </div>
     </div>
     <div class="risk-takeaway">${getRiskTakeaway(riskScore)}</div>
@@ -1107,7 +1171,13 @@ function renderDash(){
 }
 
 function renderBestRisk(){
-  const vaults=all().filter(v=>v.rankings?.risk_adjusted?.rank>0).sort((a,b)=>(a.rankings?.risk_adjusted?.rank||999)-(b.rankings?.risk_adjusted?.rank||999)).slice(0,10);
+  // Sort by rank (no duplicates possible — backend enforces strict i+1 ranking with stable sort)
+  const vaults=all().filter(v=>v.rankings?.risk_adjusted?.rank>0)
+    .sort((a,b)=>{
+      const ra=a.rankings?.risk_adjusted?.rank||999, rb=b.rankings?.risk_adjusted?.rank||999;
+      if(ra!==rb) return ra-rb;
+      return (b.tvl_usd||0)-(a.tvl_usd||0); // TVL tiebreaker
+    }).slice(0,10);
   const riskColor=r=>r<=30?'positive':r>=70?'negative':'';
   if(vaults.length===0){
     document.getElementById('bestRiskTbody').innerHTML='<tr><td colspan="7" style="text-align:center;opacity:0.6">No risk-adjusted rankings yet. Run fetch job.</td></tr>';
@@ -1116,10 +1186,14 @@ function renderBestRisk(){
   document.getElementById('bestRiskTbody').innerHTML=vaults.map(v=>{
     const rank=v.rankings?.risk_adjusted?.rank||'-';
     const score=v.rankings?.risk_adjusted?.score;
+    const badge=v.rankings?.risk_adjusted?.data_badge||'estimated';
+    const badgeHtml=badge==='verified'
+      ?'<span style="font-size:10px;background:#10b981;color:#fff;padding:1px 5px;border-radius:4px;margin-left:4px">Verified</span>'
+      :'<span style="font-size:10px;background:#94a3b8;color:#fff;padding:1px 5px;border-radius:4px;margin-left:4px">Estimated</span>';
     const ret=v.r30!=null?fmtPctS(v.r30):(v.apy!=null?fmtPct(v.apy):'N/A');
     return `<tr>
       <td><strong>${rank}</strong></td>
-      <td class="name-link" onclick="nav('vault',{id:'${v.id}'})">${v.vault_name}</td>
+      <td class="name-link" onclick="nav('vault',{id:'${v.id}'})">${v.vault_name}${badgeHtml}</td>
       <td><span class="card-proto ${v.protocol}">${v.protocol}</span></td>
       <td>${score!=null?score.toFixed(3):'N/A'}</td>
       <td class="${riskColor(v.risk_score)}">${v.risk_score!=null?v.risk_score+'/100':'N/A'}</td>
@@ -1500,21 +1574,24 @@ function renderVault(id){
   updateCalc();
 
   // Load entry intelligence for HL vaults (async, non-blocking)
-  if (v.protocol === 'hyperliquid' && !v.entry_intel) {
-    fetch(API_BASE + '/api/vault/' + id + '/entry').then(r => r.json()).then(ei => {
+  if (v.protocol === 'hyperliquid') {
+    fetch(API_BASE + '/api/vault/' + id + '/entry').then(r => r.ok ? r.json() : null).then(ei => {
       if (ei && ei.entry_score != null) {
         v.entry_intel = ei;
-        // Re-render entry intel block
+        // Re-render entry intel block (replace placeholder or insert new)
         const grid = document.querySelector('.entry-intel-grid');
-        if (!grid) {
+        if (grid) {
+          // Replace existing placeholder with real data
+          grid.outerHTML = renderEntryIntel(v);
+        } else {
           // Insert before charts-grid
           const chartsGrid = document.querySelector('.charts-grid');
           if (chartsGrid) {
             chartsGrid.insertAdjacentHTML('beforebegin', renderEntryIntel(v));
-            // Animate score count-up
-            animateNumber('entryScoreNum', ei.entry_score, {format:'int'});
           }
         }
+        // Animate score count-up
+        animateNumber('entryScoreNum', ei.entry_score, {format:'int'});
       }
     }).catch(() => {});
   }

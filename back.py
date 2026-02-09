@@ -2309,7 +2309,7 @@ def get_all_vaults() -> List[dict]:
                 "perf": risk_row["component_perf"],
                 "drawdown": risk_row["component_drawdown"],
                 "liquidity": risk_row["component_liquidity"],
-                "confidence": risk_row["component_confidence"]
+                "data_risk": risk_row["component_confidence"]
             }
             if risk_row["reasons_json"]:
                 try:
@@ -2406,7 +2406,7 @@ def get_all_vaults() -> List[dict]:
                 "perf": comp_perf,
                 "drawdown": comp_dd,
                 "liquidity": comp_liq,
-                "confidence": comp_conf
+                "data_risk": comp_conf
             }
         
         # Data Quality Contract: Get latest snapshot for freshness/confidence
@@ -2479,24 +2479,28 @@ def get_all_vaults() -> List[dict]:
             )
             vault.update(url_info)
         
-        # Get rankings from vault_rank_daily
+        # Get rankings from vault_rank_daily (ONLY global latest date — ranks are batch-computed)
         conn4 = get_db()
         c4 = conn4.cursor()
         c4.execute("""
             SELECT rank_type, rank, score, included
             FROM vault_rank_daily
             WHERE vault_pk = ? AND included = 1
-            ORDER BY date_ts DESC
+              AND date_ts = (SELECT MAX(date_ts) FROM vault_rank_daily WHERE rank_type = vault_rank_daily.rank_type)
         """, (pk,))
         rank_rows = c4.fetchall()
         conn4.close()
         
         if rank_rows:
             vault["rankings"] = {}
+            # Determine data badge from quality info
+            v_quality = vault.get("data_quality", "derived")
+            v_badge = "verified" if v_quality in ("real", "full", "verified") else "estimated"
             for rrow in rank_rows:
                 vault["rankings"][rrow["rank_type"]] = {
                     "rank": rrow["rank"],
-                    "score": round(rrow["score"], 4)
+                    "score": round(rrow["score"], 4),
+                    "data_badge": v_badge
                 }
         
         vaults.append(vault)
@@ -3086,17 +3090,18 @@ def check_gating_verified_top(
     
     Rules:
     - quality_label IN ("real", "derived")
-    - data_points_30d >= 10
+    - data_points_30d >= 2 (configurable)
     - tvl_usd >= 500,000
     - apr > 0
     
     Returns:
         (included, exclude_reason)
     """
+    MIN_DATA_POINTS = 2  # Configurable: minimum data points needed
     if quality_label not in ("real", "derived"):
         return False, f"quality_label={quality_label} (need real/derived)"
-    if data_points_30d is None or data_points_30d < 10:
-        return False, f"data_points_30d={data_points_30d} (need >=10)"
+    if data_points_30d is None or data_points_30d < MIN_DATA_POINTS:
+        return False, f"data_points_30d={data_points_30d} (need >={MIN_DATA_POINTS})"
     if tvl_usd is None or tvl_usd < 500_000:
         return False, f"tvl_usd={tvl_usd} (need >=500K)"
     if apr is None or apr <= 0:
@@ -3140,7 +3145,7 @@ def check_gating_risk_adjusted(
     
     Rules:
     - quality_label NOT in ("demo")
-    - data_points_30d >= 10
+    - data_points_30d >= 2 (configurable, minimum for return computation)
     - tvl_usd >= 500,000
     - risk_score exists
     - cum_return_30d exists OR apr exists (fallback)
@@ -3148,10 +3153,11 @@ def check_gating_risk_adjusted(
     Returns:
         (included, exclude_reason)
     """
+    MIN_DATA_POINTS = 2  # Configurable: minimum data points needed
     if quality_label == "demo":
         return False, "quality_label=demo (excluded)"
-    if data_points_30d is None or data_points_30d < 10:
-        return False, f"data_points_30d={data_points_30d} (need >=10)"
+    if data_points_30d is None or data_points_30d < MIN_DATA_POINTS:
+        return False, f"data_points_30d={data_points_30d} (need >={MIN_DATA_POINTS})"
     if tvl_usd is None or tvl_usd < 500_000:
         return False, f"tvl_usd={tvl_usd} (need >=500K)"
     if risk_score is None:
@@ -3327,6 +3333,9 @@ def run_rank_engine(target_date_ts: Optional[int] = None) -> dict:
         elif quality_label in ("mock"):
             quality_label = "demo"
         
+        # Determine data badge: "verified" if all inputs are real, else "estimated"
+        data_badge = "verified" if quality_label == "real" and (data_points_30d or 0) >= 20 else "estimated"
+        
         # Check gating for each rank type
         # 1. VERIFIED_TOP
         included, reason = check_gating_verified_top(quality_label, data_points_30d, tvl_usd, apr)
@@ -3336,6 +3345,8 @@ def run_rank_engine(target_date_ts: Optional[int] = None) -> dict:
                 "vault_pk": vault_pk,
                 "protocol": protocol,
                 "score": score,
+                "tvl_usd": tvl_usd or 0,
+                "data_badge": data_badge,
                 "included": 1,
                 "exclude_reason": None
             })
@@ -3345,6 +3356,8 @@ def run_rank_engine(target_date_ts: Optional[int] = None) -> dict:
                 "vault_pk": vault_pk,
                 "protocol": protocol,
                 "score": 0.0,
+                "tvl_usd": tvl_usd or 0,
+                "data_badge": data_badge,
                 "included": 0,
                 "exclude_reason": reason
             })
@@ -3360,6 +3373,8 @@ def run_rank_engine(target_date_ts: Optional[int] = None) -> dict:
                 "vault_pk": vault_pk,
                 "protocol": protocol,
                 "score": score,
+                "tvl_usd": tvl_usd or 0,
+                "data_badge": data_badge,
                 "included": 1,
                 "exclude_reason": None
             })
@@ -3369,6 +3384,8 @@ def run_rank_engine(target_date_ts: Optional[int] = None) -> dict:
                 "vault_pk": vault_pk,
                 "protocol": protocol,
                 "score": 0.0,
+                "tvl_usd": tvl_usd or 0,
+                "data_badge": data_badge,
                 "included": 0,
                 "exclude_reason": reason
             })
@@ -3384,6 +3401,8 @@ def run_rank_engine(target_date_ts: Optional[int] = None) -> dict:
                 "vault_pk": vault_pk,
                 "protocol": protocol,
                 "score": score,
+                "tvl_usd": tvl_usd or 0,
+                "data_badge": data_badge,
                 "included": 1,
                 "exclude_reason": None
             })
@@ -3393,6 +3412,8 @@ def run_rank_engine(target_date_ts: Optional[int] = None) -> dict:
                 "vault_pk": vault_pk,
                 "protocol": protocol,
                 "score": 0.0,
+                "tvl_usd": tvl_usd or 0,
+                "data_badge": data_badge,
                 "included": 0,
                 "exclude_reason": reason
             })
@@ -3402,9 +3423,9 @@ def run_rank_engine(target_date_ts: Optional[int] = None) -> dict:
     
     # Sort and assign ranks for each type
     for rank_type in rank_data:
-        # Sort included vaults by score descending
+        # Sort included vaults: score DESC, tvl_usd DESC (stable tiebreaker)
         included_vaults = [v for v in rank_data[rank_type] if v["included"] == 1]
-        included_vaults.sort(key=lambda x: x["score"], reverse=True)
+        included_vaults.sort(key=lambda x: (x["score"], x.get("tvl_usd", 0)), reverse=True)
         
         # Assign ranks
         for i, vault in enumerate(included_vaults):
@@ -3729,11 +3750,18 @@ def get_vault_expectation(vault_id: str) -> Optional[dict]:
     if not row:
         return None
     
+    # Rename: confidence → data_risk (inverted semantics: low value = low risk = good)
+    confidence_val = row["confidence"]
+    data_risk_score = int(round((1.0 - (confidence_val or 0)) * 100))  # Invert: high confidence → low data risk
+    data_risk_label = "low" if data_risk_score <= 33 else ("moderate" if data_risk_score <= 66 else "high")
+    
     return {
         "expected_30d": row["expected_return_30d"],
         "observed_30d": row["observed_return_30d"],
         "deviation_30d": row["deviation"],
-        "confidence": row["confidence"],
+        "data_risk": 1.0 - (confidence_val or 0),  # Inverted: 0 = no risk, 1 = high risk
+        "data_risk_score": data_risk_score,
+        "data_risk_label": data_risk_label,
         "quality_label": row["quality_label"]
     }
 
@@ -4279,7 +4307,11 @@ def compute_hl_flow_proxy(vault_id: str, equity_usd: Optional[float]) -> dict:
     Returns:
         net_flow_24h, net_flow_7d, whale_outflow_7d
     """
-    result = {"net_flow_24h": None, "net_flow_7d": None, "whale_outflow_7d": None}
+    result = {
+        "net_flow_24h": None, "net_flow_7d": None, "whale_outflow_7d": None,
+        "flow_state": "unavailable",   # "real" | "estimated" | "unavailable"
+        "whale_state": "unavailable"    # "real" | "unavailable"
+    }
     
     conn = get_db()
     c = conn.cursor()
@@ -4310,6 +4342,10 @@ def compute_hl_flow_proxy(vault_id: str, equity_usd: Optional[float]) -> dict:
     # Net flow = TVL change - PnL change (i.e., what's left is deposits/withdrawals)
     latest_snap = snapshots[-1]
     
+    # Determine flow quality: if we have PnL data we can subtract it → "estimated"
+    # (True "real" requires deposit/withdrawal event stream which HL doesn't expose)
+    has_pnl = len(pnl_rows) > 0
+    
     # 24h flow
     cutoff_24h = now - 86400
     past_24h = None
@@ -4334,6 +4370,7 @@ def compute_hl_flow_proxy(vault_id: str, equity_usd: Optional[float]) -> dict:
             pnl_change = 0
         
         result["net_flow_24h"] = tvl_delta - pnl_change
+        result["flow_state"] = "estimated" if has_pnl else "estimated"  # TVL-proxy is always estimated
     
     # 7d flow
     cutoff_7d = now - 7 * 86400
@@ -4349,16 +4386,21 @@ def compute_hl_flow_proxy(vault_id: str, equity_usd: Optional[float]) -> dict:
         tvl_delta_7d = latest_snap["tvl_usd"] - past_7d["tvl_usd"]
         # Simple approach: 7d flow ≈ TVL delta (PnL is usually small relative to flows)
         result["net_flow_7d"] = tvl_delta_7d
+        result["flow_state"] = "estimated"
         
-        # Whale outflow: flag if significant negative flow
-        whale_threshold = 50000  # $50k
+        # Whale outflow: flag if significant negative flow (>5% of TVL, configurable)
+        whale_pct_threshold = 0.05  # 5% of equity (configurable)
+        whale_min_usd = 50000  # $50k floor
+        whale_threshold = whale_min_usd
         if equity_usd and equity_usd > 0:
-            whale_threshold = max(50000, equity_usd * 0.05)  # 5% of equity or $50k
+            whale_threshold = max(whale_min_usd, equity_usd * whale_pct_threshold)
         
         if tvl_delta_7d < -whale_threshold:
             result["whale_outflow_7d"] = tvl_delta_7d  # Negative number
+            result["whale_state"] = "estimated"
         else:
             result["whale_outflow_7d"] = 0.0
+            result["whale_state"] = "real"  # We checked, no whale activity found
     
     return result
 
@@ -4593,11 +4635,26 @@ def run_hl_entry_intelligence(hl_vaults: Optional[List[dict]] = None) -> dict:
             # 3. Compute realized PnL from pnl_history
             rpnl = compute_hl_realized_pnl(vault_pk)
             
-            # 4. Build data coverage
+            # 4. Build data coverage + unified metric_state
+            pos_state = "real" if clearing_state and pos_data["positions"] else "unavailable"
+            flow_st = flows.get("flow_state", "unavailable")
+            whale_st = flows.get("whale_state", "unavailable")
+            rpnl_state = "real" if rpnl["realized_pnl_30d"] is not None else "unavailable"
+            
             coverage = {
-                "positions": "real" if clearing_state and pos_data["positions"] else "unavailable",
-                "flows": "proxy" if flows["net_flow_7d"] is not None else "unavailable",
-                "realized_pnl": "real" if rpnl["realized_pnl_30d"] is not None else "unavailable"
+                "positions": pos_state,
+                "flows": flow_st,  # "real" | "estimated" | "unavailable"
+                "realized_pnl": rpnl_state,
+                "whales": whale_st
+            }
+            
+            # Unified data contract (Section E)
+            metric_state = {
+                "pnl": rpnl_state,
+                "flow": flow_st,
+                "whales": whale_st,
+                "risk": "real" if pos_state == "real" else "estimated",
+                "positions": pos_state
             }
             
             # 5. Compute entry score
@@ -4649,7 +4706,7 @@ def run_hl_entry_intelligence(hl_vaults: Optional[List[dict]] = None) -> dict:
                 pos_data["leverage_effective"], pos_data["liq_risk"],
                 rpnl["realized_pnl_7d"], rpnl["realized_pnl_30d"],
                 flows["net_flow_24h"], flows["net_flow_7d"], flows["whale_outflow_7d"],
-                json.dumps(coverage), entry_score, entry_label, json.dumps(reasons)
+                json.dumps({**coverage, "metric_state": metric_state}), entry_score, entry_label, json.dumps(reasons)
             ))
             conn2.commit()
             conn2.close()
@@ -4714,11 +4771,21 @@ def get_hl_entry_intel(vault_id: str) -> Optional[dict]:
     except:
         reasons = []
     
+    # Extract metric_state from coverage if present
+    metric_state = coverage.pop("metric_state", {
+        "pnl": "real" if row["realized_pnl_30d"] is not None else "unavailable",
+        "flow": coverage.get("flows", "unavailable"),
+        "whales": coverage.get("whales", "unavailable"),
+        "risk": "real" if coverage.get("positions") == "real" else "estimated",
+        "positions": coverage.get("positions", "unavailable")
+    })
+    
     return {
         "entry_score": row["entry_score"],
         "entry_label": row["entry_label"],
         "reasons": reasons,
         "coverage": coverage,
+        "metric_state": metric_state,
         "equity_usd": row["equity_usd"],
         "gross_exposure_usd": row["gross_exposure_usd"],
         "net_exposure_usd": row["net_exposure_usd"],
@@ -5920,7 +5987,7 @@ class APIHandler(BaseHTTPRequestHandler):
                                 "perf": row["component_perf"],
                                 "drawdown": row["component_drawdown"],
                                 "liquidity": row["component_liquidity"],
-                                "confidence": row["component_confidence"]
+                                "data_risk": row["component_confidence"]
                             },
                             "reasons": json.loads(row["reasons_json"]) if row["reasons_json"] else None
                         }
@@ -6423,13 +6490,13 @@ class APIHandler(BaseHTTPRequestHandler):
                             "perf": row["component_perf"],
                             "drawdown": row["component_drawdown"],
                             "liquidity": row["component_liquidity"],
-                            "confidence": row["component_confidence"]
+                            "data_risk": row["component_confidence"]
                         },
                         "recomputed": {
                             "perf": recomputed_perf,
                             "drawdown": recomputed_dd,
                             "liquidity": recomputed_liq,
-                            "confidence": recomputed_conf
+                            "data_risk": recomputed_conf
                         }
                     }
                 }
