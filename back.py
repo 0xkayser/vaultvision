@@ -5775,6 +5775,542 @@ def run_fetch_job():
 
 
 # =============================================================================
+# V1 API HELPERS (stable, read-only, for external consumers like OpenClaw bot)
+# =============================================================================
+
+_v1_rate_limits: dict = {}
+V1_RATE_LIMIT_MAX = 60
+V1_RATE_LIMIT_REFILL = 1.0
+_v1_rate_limit_last_cleanup = 0
+
+
+def v1_check_rate_limit(ip: str) -> bool:
+    now = time.time()
+    if ip not in _v1_rate_limits:
+        _v1_rate_limits[ip] = (V1_RATE_LIMIT_MAX - 1, now)
+        return True
+    tokens, last_ts = _v1_rate_limits[ip]
+    tokens = min(V1_RATE_LIMIT_MAX, tokens + (now - last_ts) * V1_RATE_LIMIT_REFILL)
+    if tokens < 1:
+        _v1_rate_limits[ip] = (tokens, now)
+        return False
+    _v1_rate_limits[ip] = (tokens - 1, now)
+    return True
+
+
+def v1_cleanup_rate_limits():
+    global _v1_rate_limit_last_cleanup
+    now = time.time()
+    if now - _v1_rate_limit_last_cleanup < 300:
+        return
+    _v1_rate_limit_last_cleanup = now
+    stale = [ip for ip, (_, ts) in _v1_rate_limits.items() if now - ts > 120]
+    for ip in stale:
+        del _v1_rate_limits[ip]
+
+
+def _v1_quality_label(source_kind: str) -> str:
+    return {"real": "real", "scrape": "real", "api": "real", "official_api": "real",
+            "derived": "derived", "simulated": "simulated", "demo": "demo"}.get(
+        source_kind or "simulated", "derived")
+
+
+def _v1_data_risk_label(raw_score) -> Optional[str]:
+    if raw_score is None:
+        return None
+    if raw_score <= 33:
+        return "low"
+    return "moderate" if raw_score <= 66 else "high"
+
+
+def v1_get_health() -> dict:
+    conn = get_db()
+    c = conn.cursor()
+    protocols = {}
+    c.execute("""
+        SELECT protocol, MAX(updated_ts) as last_update, COUNT(*) as cnt
+        FROM vaults WHERE status = 'active' GROUP BY protocol
+    """)
+    for row in c.fetchall():
+        last_up = row["last_update"]
+        now = int(time.time())
+        protocols[row["protocol"]] = {
+            "ok": last_up is not None and (now - (last_up or 0)) < 7200,
+            "last_update_ts": last_up,
+            "vault_count": row["cnt"]
+        }
+    conn.close()
+    return {
+        "ok": True,
+        "server_time": int(time.time()),
+        "db_path": DB_PATH,
+        "protocol_status": protocols
+    }
+
+
+def v1_get_vault_cards(protocol: str = None, limit: int = 200) -> list:
+    limit = min(max(1, limit), 500)
+    conn = get_db()
+    c = conn.cursor()
+
+    where_parts = ["v.status = 'active'"]
+    params: list = []
+    if protocol:
+        where_parts.append("v.protocol = ?")
+        params.append(protocol)
+    where_sql = " AND ".join(where_parts)
+
+    c.execute(f"""
+        SELECT v.*,
+               r.risk_score, r.risk_band, r.component_confidence AS data_risk_raw,
+               ra.rank AS rank_risk_adjusted,
+               rv.rank AS rank_verified,
+               hl.entry_score, hl.entry_label
+        FROM vaults v
+        LEFT JOIN (
+            SELECT vault_pk, risk_score, risk_band, component_confidence,
+                   ROW_NUMBER() OVER (PARTITION BY vault_pk ORDER BY date_ts DESC) AS rn
+            FROM vault_risk_daily
+        ) r ON r.vault_pk = v.pk AND r.rn = 1
+        LEFT JOIN (
+            SELECT vault_pk, rank,
+                   ROW_NUMBER() OVER (PARTITION BY vault_pk ORDER BY date_ts DESC) AS rn
+            FROM vault_rank_daily WHERE rank_type = 'risk_adjusted' AND included = 1
+        ) ra ON ra.vault_pk = v.pk AND ra.rn = 1
+        LEFT JOIN (
+            SELECT vault_pk, rank,
+                   ROW_NUMBER() OVER (PARTITION BY vault_pk ORDER BY date_ts DESC) AS rn
+            FROM vault_rank_daily WHERE rank_type = 'verified_top' AND included = 1
+        ) rv ON rv.vault_pk = v.pk AND rv.rn = 1
+        LEFT JOIN (
+            SELECT vault_id, entry_score, entry_label,
+                   ROW_NUMBER() OVER (PARTITION BY vault_id ORDER BY ts DESC) AS rn
+            FROM hl_vault_state
+        ) hl ON hl.vault_id = v.pk AND hl.rn = 1
+        WHERE {where_sql}
+        ORDER BY v.tvl_usd DESC NULLS LAST
+        LIMIT ?
+    """, params + [limit])
+
+    rows = c.fetchall()
+    conn.close()
+
+    now = int(time.time())
+    cards = []
+    for row in rows:
+        tvl = row["tvl_usd"]
+        sk = row["source_kind"] or ""
+        if sk != "demo" and (tvl is None or tvl < 500000):
+            continue
+        first_seen = row["first_seen_ts"]
+        age_days = ((now - first_seen) // 86400) if first_seen and first_seen > 0 else None
+        vault_name = ""
+        try:
+            vault_name = row["vault_name"] or ""
+        except (KeyError, IndexError):
+            pass
+        if not vault_name:
+            try:
+                vault_name = row["name"] or ""
+            except (KeyError, IndexError):
+                pass
+
+        cards.append({
+            "vault_id": row["pk"],
+            "protocol": row["protocol"],
+            "vault_name": vault_name,
+            "vault_type": (row["vault_type"] if row["vault_type"] else "user"),
+            "deposit_asset": (row["deposit_asset"] if row["deposit_asset"] else "USDC"),
+            "tvl_usd": float(tvl) if tvl else None,
+            "apr": float(row["apr"]) if row["apr"] else None,
+            "age_days": age_days,
+            "quality_label": _v1_quality_label(sk),
+            "risk_score": row["risk_score"],
+            "risk_band": row["risk_band"],
+            "entry_score": row["entry_score"],
+            "entry_label": row["entry_label"],
+            "data_risk_label": _v1_data_risk_label(row["data_risk_raw"]),
+            "rank_verified": row["rank_verified"],
+            "rank_risk_adjusted": row["rank_risk_adjusted"],
+            "external_url": row["external_url"] or "",
+            "vaultvision_url": f"https://vaultvision.tech/#vault/{row['pk']}",
+            "updated_ts": row["updated_ts"],
+        })
+    return cards
+
+
+def v1_get_vault_detail(vault_id: str) -> Optional[dict]:
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT * FROM vaults WHERE pk = ?", (vault_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return None
+
+    now = int(time.time())
+    pk = row["pk"]
+    first_seen = row["first_seen_ts"]
+    age_days = ((now - first_seen) // 86400) if first_seen and first_seen > 0 else None
+    vault_name = ""
+    try:
+        vault_name = row["vault_name"] or ""
+    except (KeyError, IndexError):
+        pass
+    if not vault_name:
+        try:
+            vault_name = row["name"] or ""
+        except (KeyError, IndexError):
+            pass
+
+    card: dict = {
+        "vault_id": pk,
+        "protocol": row["protocol"],
+        "vault_name": vault_name,
+        "vault_type": (row["vault_type"] if row["vault_type"] else "user"),
+        "deposit_asset": (row["deposit_asset"] if row["deposit_asset"] else "USDC"),
+        "tvl_usd": float(row["tvl_usd"]) if row["tvl_usd"] else None,
+        "apr": float(row["apr"]) if row["apr"] else None,
+        "age_days": age_days,
+        "quality_label": _v1_quality_label(row["source_kind"] or ""),
+        "external_url": row["external_url"] or "",
+        "vaultvision_url": f"https://vaultvision.tech/#vault/{pk}",
+        "updated_ts": row["updated_ts"],
+    }
+
+    # Risk
+    c.execute("""
+        SELECT risk_score, risk_band, component_perf, component_drawdown,
+               component_liquidity, component_confidence, reasons_json
+        FROM vault_risk_daily WHERE vault_pk = ? ORDER BY date_ts DESC LIMIT 1
+    """, (pk,))
+    risk = c.fetchone()
+    if risk:
+        card["risk_score"] = risk["risk_score"]
+        card["risk_band"] = risk["risk_band"]
+        card["data_risk_label"] = _v1_data_risk_label(risk["component_confidence"])
+        card["risk_components"] = {
+            "perf": risk["component_perf"],
+            "drawdown": risk["component_drawdown"],
+            "liquidity": risk["component_liquidity"],
+            "data_risk": risk["component_confidence"],
+        }
+
+    # Rankings
+    c.execute("""
+        SELECT rank_type, rank, score FROM vault_rank_daily
+        WHERE vault_pk = ? AND included = 1
+          AND date_ts = (SELECT MAX(date_ts) FROM vault_rank_daily
+                         WHERE rank_type = vault_rank_daily.rank_type)
+    """, (pk,))
+    for rr in c.fetchall():
+        rt = rr["rank_type"]
+        if rt == "verified_top":
+            card["rank_verified"] = rr["rank"]
+        elif rt == "risk_adjusted":
+            card["rank_risk_adjusted"] = rr["rank"]
+        elif rt == "estimated_top":
+            card["rank_estimated"] = rr["rank"]
+
+    # Entry intel (HL only)
+    if row["protocol"] == "hyperliquid":
+        c.execute("""
+            SELECT * FROM hl_vault_state WHERE vault_id = ?
+            ORDER BY ts DESC LIMIT 1
+        """, (pk,))
+        hl = c.fetchone()
+        if hl:
+            reasons = []
+            if hl["reasons"]:
+                try:
+                    reasons = json.loads(hl["reasons"])
+                except Exception:
+                    reasons = [hl["reasons"]]
+            coverage = {}
+            if hl["data_coverage"]:
+                try:
+                    coverage = json.loads(hl["data_coverage"])
+                except Exception:
+                    pass
+            card["entry_score"] = hl["entry_score"]
+            card["entry_label"] = hl["entry_label"]
+            card["entry_intel"] = {
+                "entry_score": hl["entry_score"],
+                "entry_label": hl["entry_label"],
+                "reasons": reasons,
+                "coverage": coverage,
+                "equity_usd": hl["equity_usd"],
+                "gross_exposure_usd": hl["gross_exposure_usd"],
+                "leverage_effective": hl["leverage_effective"],
+                "upnl_usd": hl["upnl_usd"],
+                "upnl_pct": hl["upnl_pct"],
+                "concentration_top1": hl["concentration_top1"],
+                "liq_risk": hl["liq_risk"],
+                "net_flow_24h": hl["net_flow_24h"],
+                "net_flow_7d": hl["net_flow_7d"],
+                "whale_outflow_7d": hl["whale_outflow_7d"],
+                "realized_pnl_30d": hl["realized_pnl_30d"],
+                "ts": hl["ts"],
+            }
+
+    # Expectation
+    try:
+        c.execute("""
+            SELECT expected_return_30d, observed_return_30d, deviation, confidence,
+                   quality_label, date_ts
+            FROM vault_expectation_daily WHERE vault_id = ?
+            ORDER BY date_ts DESC LIMIT 1
+        """, (pk,))
+        exp = c.fetchone()
+        if exp:
+            conf_val = exp["confidence"] or 0
+            card["expectation"] = {
+                "expected_30d": exp["expected_return_30d"],
+                "observed_30d": exp["observed_return_30d"],
+                "deviation": exp["deviation"],
+                "data_risk": round(1.0 - conf_val, 3),
+                "date_ts": exp["date_ts"],
+            }
+    except Exception:
+        pass
+
+    # Last 30 daily snapshots for sparkline
+    c.execute("""
+        SELECT ts, tvl_usd, apr FROM snapshots
+        WHERE vault_pk = ? ORDER BY ts DESC LIMIT 30
+    """, (pk,))
+    card["snapshots_30d"] = [
+        {"ts": s["ts"], "tvl_usd": s["tvl_usd"], "apr": s["apr"]}
+        for s in reversed(c.fetchall())
+    ]
+
+    conn.close()
+    return card
+
+
+def v1_get_rankings(rank_type: str, limit: int = 50) -> dict:
+    valid_types = {
+        "verified_top": "verified",
+        "estimated_top": "estimated",
+        "risk_adjusted": "risk-adjusted",
+    }
+    if rank_type not in valid_types:
+        return {"error": f"Unknown rank type. Use: {list(valid_types.values())}"}
+
+    limit = min(max(1, limit), 200)
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT MAX(date_ts) AS max_dt FROM vault_rank_daily
+        WHERE rank_type = ? AND included = 1
+    """, (rank_type,))
+    dr = c.fetchone()
+    if not dr or not dr["max_dt"]:
+        conn.close()
+        return {"rank_type": valid_types[rank_type], "generated_ts": None, "items": []}
+    max_dt = dr["max_dt"]
+
+    c.execute("""
+        SELECT rd.rank, rd.score, rd.vault_pk,
+               v.protocol, v.vault_name, v.name, v.tvl_usd, v.apr,
+               v.external_url, v.source_kind,
+               r.risk_score, r.risk_band,
+               hl.entry_score
+        FROM vault_rank_daily rd
+        JOIN vaults v ON v.pk = rd.vault_pk
+        LEFT JOIN (
+            SELECT vault_pk, risk_score, risk_band,
+                   ROW_NUMBER() OVER (PARTITION BY vault_pk ORDER BY date_ts DESC) AS rn
+            FROM vault_risk_daily
+        ) r ON r.vault_pk = rd.vault_pk AND r.rn = 1
+        LEFT JOIN (
+            SELECT vault_id, entry_score,
+                   ROW_NUMBER() OVER (PARTITION BY vault_id ORDER BY ts DESC) AS rn
+            FROM hl_vault_state
+        ) hl ON hl.vault_id = rd.vault_pk AND hl.rn = 1
+        WHERE rd.rank_type = ? AND rd.date_ts = ? AND rd.included = 1
+        ORDER BY rd.rank ASC
+        LIMIT ?
+    """, (rank_type, max_dt, limit))
+
+    items = []
+    for row in c.fetchall():
+        vn = ""
+        try:
+            vn = row["vault_name"] or ""
+        except (KeyError, IndexError):
+            pass
+        if not vn:
+            try:
+                vn = row["name"] or ""
+            except (KeyError, IndexError):
+                pass
+        items.append({
+            "rank": row["rank"],
+            "score": round(row["score"], 4),
+            "vault_id": row["vault_pk"],
+            "protocol": row["protocol"],
+            "vault_name": vn,
+            "tvl_usd": float(row["tvl_usd"]) if row["tvl_usd"] else None,
+            "apr": float(row["apr"]) if row["apr"] else None,
+            "risk_score": row["risk_score"],
+            "risk_band": row["risk_band"],
+            "quality_label": _v1_quality_label(row["source_kind"] or ""),
+            "entry_score": row["entry_score"],
+            "vaultvision_url": f"https://vaultvision.tech/#vault/{row['vault_pk']}",
+            "external_url": row["external_url"] or "",
+        })
+    conn.close()
+    return {"rank_type": valid_types[rank_type], "generated_ts": max_dt, "items": items}
+
+
+def v1_compute_signals(since_ts: int = None, limit: int = 500) -> list:
+    limit = min(max(1, limit), 1000)
+    now = int(time.time())
+    if since_ts is None:
+        since_ts = now - 86400
+
+    conn = get_db()
+    c = conn.cursor()
+
+    today_bucket = (now // 86400) * 86400
+    yesterday_bucket = today_bucket - 86400
+
+    # Snapshot pairs (today vs yesterday)
+    c.execute("""
+        SELECT s1.vault_pk,
+               s1.tvl_usd AS tvl_today, s1.apr AS apr_today, s1.ts AS ts_today,
+               s0.tvl_usd AS tvl_yest, s0.apr AS apr_yest,
+               v.protocol, v.vault_name, v.name, v.external_url
+        FROM snapshots s1
+        JOIN vaults v ON v.pk = s1.vault_pk
+        LEFT JOIN snapshots s0 ON s0.vault_pk = s1.vault_pk AND s0.ts = ?
+        WHERE s1.ts = ? AND v.status = 'active'
+    """, (yesterday_bucket, today_bucket))
+    snap_rows = c.fetchall()
+
+    # Risk deltas
+    c.execute("""
+        SELECT r1.vault_pk, r1.risk_score AS risk_today, r2.risk_score AS risk_yesterday
+        FROM vault_risk_daily r1
+        LEFT JOIN vault_risk_daily r2 ON r2.vault_pk = r1.vault_pk AND r2.date_ts = ?
+        WHERE r1.date_ts = ?
+    """, (yesterday_bucket, today_bucket))
+    risk_map = {row["vault_pk"]: row for row in c.fetchall()}
+
+    # Entry score deltas (HL, latest two per vault)
+    c.execute("""
+        SELECT h1.vault_id, h1.entry_score AS entry_now, h1.entry_label AS label_now,
+               h2.entry_score AS entry_prev
+        FROM (
+            SELECT vault_id, entry_score, entry_label,
+                   ROW_NUMBER() OVER (PARTITION BY vault_id ORDER BY ts DESC) AS rn
+            FROM hl_vault_state
+        ) h1
+        LEFT JOIN (
+            SELECT vault_id, entry_score,
+                   ROW_NUMBER() OVER (PARTITION BY vault_id ORDER BY ts DESC) AS rn
+            FROM hl_vault_state
+        ) h2 ON h2.vault_id = h1.vault_id AND h2.rn = 2
+        WHERE h1.rn = 1
+    """)
+    entry_map = {row["vault_id"]: row for row in c.fetchall()}
+
+    conn.close()
+
+    signals: list = []
+
+    for row in snap_rows:
+        pk = row["vault_pk"]
+        vn = ""
+        try:
+            vn = row["vault_name"] or ""
+        except (KeyError, IndexError):
+            pass
+        if not vn:
+            try:
+                vn = row["name"] or ""
+            except (KeyError, IndexError):
+                pass
+        vault_name = vn or pk[:16]
+        protocol = row["protocol"]
+        ext_url = row["external_url"] or ""
+
+        tvl_t = row["tvl_today"]
+        tvl_y = row["tvl_yest"]
+        apr_t = row["apr_today"]
+        apr_y = row["apr_yest"]
+
+        if not tvl_t or not tvl_y or tvl_y == 0:
+            continue
+        if apr_y is None:
+            continue
+
+        tvl_ch = (tvl_t - tvl_y) / tvl_y
+        apr_ch = (apr_t - apr_y) / abs(apr_y) if apr_y != 0 else None
+
+        rc = risk_map.get(pk)
+        ec = entry_map.get(pk)
+
+        metrics = {
+            "apr": apr_t,
+            "tvl_usd": tvl_t,
+            "apr_change_6h": None,
+            "tvl_change_6h": None,
+            "apr_change_24h": round(apr_ch, 4) if apr_ch is not None else None,
+            "tvl_change_24h": round(tvl_ch, 4),
+            "risk_score": rc["risk_today"] if rc else None,
+            "entry_score": ec["entry_now"] if ec else None,
+        }
+
+        vv_url = f"https://vaultvision.tech/#vault/{pk}"
+
+        def _emit(sig_type, sev, why, m=metrics):
+            signals.append({
+                "ts": row["ts_today"], "signal_type": sig_type,
+                "vault_id": pk, "protocol": protocol, "vault_name": vault_name,
+                "severity": sev, "metrics": dict(m), "why": why,
+                "vaultvision_url": vv_url, "external_url": ext_url,
+            })
+
+        # APR_SPIKE (24h proxy — 6h unavailable with daily buckets)
+        if apr_ch is not None and apr_ch >= 0.25 and tvl_ch <= 0.05:
+            _emit("APR_SPIKE", 2 if apr_ch >= 0.5 else 1,
+                  f"APR up {apr_ch*100:+.0f}% (24h) while TVL flat — early window before crowding")
+        # APR_DROP
+        if apr_ch is not None and apr_ch <= -0.25:
+            _emit("APR_DROP", 2 if apr_ch <= -0.5 else 1,
+                  f"APR dropped {apr_ch*100:+.0f}% (24h) — yield compression or strategy shift")
+        # TVL_SPIKE
+        if tvl_ch >= 0.15 and apr_ch is not None and apr_ch <= 0:
+            _emit("TVL_SPIKE", 2 if tvl_ch >= 0.3 else 1,
+                  f"TVL surged {tvl_ch*100:+.0f}% (24h) while APR declining — dilution risk")
+        # OUTFLOW
+        if tvl_ch <= -0.10:
+            sev = 3 if tvl_ch <= -0.25 else (2 if tvl_ch <= -0.15 else 1)
+            _emit("OUTFLOW", sev, f"TVL dropped {tvl_ch*100:+.0f}% (24h) — capital flight")
+        # RISK_JUMP
+        if rc and rc["risk_yesterday"] is not None:
+            rd = rc["risk_today"] - rc["risk_yesterday"]
+            if rd >= 15:
+                sev = 3 if rd >= 30 else (2 if rd >= 20 else 1)
+                _emit("RISK_JUMP", sev,
+                      f"Risk score jumped +{rd} (24h): {rc['risk_yesterday']}→{rc['risk_today']}")
+        # ENTRY_GOOD / ENTRY_BAD
+        if ec and ec["entry_prev"] is not None and ec["entry_now"] is not None:
+            prev, curr = ec["entry_prev"], ec["entry_now"]
+            if curr >= 70 and prev < 70:
+                _emit("ENTRY_GOOD", 2, f"Entry score crossed above 70: {prev}→{curr} — conditions favorable")
+            if curr < 40 and prev >= 40:
+                _emit("ENTRY_BAD", 2, f"Entry score dropped below 40: {prev}→{curr} — deteriorating conditions")
+
+    signals.sort(key=lambda s: (s["ts"], s["severity"]), reverse=True)
+    signals = [s for s in signals if s["ts"] >= since_ts]
+    return signals[:limit]
+
+
+# =============================================================================
 # HTTP API
 # =============================================================================
 class APIHandler(BaseHTTPRequestHandler):
@@ -5869,6 +6405,97 @@ class APIHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_error(500, f"Error serving HTML: {e}")
                 return
+        
+        # =====================================================================
+        # V1 API — stable, versioned, read-only endpoints for external consumers
+        # =====================================================================
+        if path.startswith("/api/v1/"):
+            v1_cleanup_rate_limits()
+            client_ip = self.client_address[0] if self.client_address else "unknown"
+            if not v1_check_rate_limit(client_ip):
+                self.send_json({"error": "Rate limit exceeded. Max 60 req/min."}, 429)
+                return
+
+            # GET /api/v1/health
+            if path == "/api/v1/health":
+                self.send_json(v1_get_health())
+                return
+
+            # GET /api/v1/vaults
+            if path == "/api/v1/vaults":
+                protocol = query.get("protocol", [None])[0]
+                limit = int(query.get("limit", [200])[0])
+                result = v1_get_vault_cards(protocol=protocol, limit=limit)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "public, max-age=30")
+                self.end_headers()
+                self.wfile.write(json.dumps(result).encode())
+                return
+
+            # GET /api/v1/vaults/<vault_id>
+            if path.startswith("/api/v1/vaults/") and path.count("/") == 4:
+                vault_id = path.split("/")[4]
+                if vault_id:
+                    detail = v1_get_vault_detail(vault_id)
+                    if detail:
+                        self.send_json(detail)
+                    else:
+                        self.send_json({"error": "Vault not found"}, 404)
+                else:
+                    self.send_json({"error": "Missing vault_id"}, 400)
+                return
+
+            # GET /api/v1/rankings/{type}
+            if path.startswith("/api/v1/rankings/"):
+                slug = path.split("/")[-1]
+                slug_map = {
+                    "verified": "verified_top",
+                    "estimated": "estimated_top",
+                    "risk-adjusted": "risk_adjusted",
+                }
+                rank_type = slug_map.get(slug)
+                if not rank_type:
+                    self.send_json({"error": f"Unknown ranking type '{slug}'. Use: verified, estimated, risk-adjusted"}, 400)
+                    return
+                limit = int(query.get("limit", [50])[0])
+                result = v1_get_rankings(rank_type, limit)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "public, max-age=30")
+                self.end_headers()
+                self.wfile.write(json.dumps(result).encode())
+                return
+
+            # GET /api/v1/signals
+            if path == "/api/v1/signals":
+                since_ts = None
+                if query.get("since_ts"):
+                    try:
+                        since_ts = int(query["since_ts"][0])
+                    except (ValueError, IndexError):
+                        pass
+                limit = int(query.get("limit", [500])[0])
+                result = v1_compute_signals(since_ts=since_ts, limit=limit)
+                self.send_json(result)
+                return
+
+            # Fallback for unknown v1 routes
+            self.send_json({
+                "error": "Unknown v1 endpoint",
+                "available": [
+                    "GET /api/v1/health",
+                    "GET /api/v1/vaults",
+                    "GET /api/v1/vaults/<vault_id>",
+                    "GET /api/v1/rankings/verified",
+                    "GET /api/v1/rankings/estimated",
+                    "GET /api/v1/rankings/risk-adjusted",
+                    "GET /api/v1/signals",
+                ]
+            }, 404)
+            return
         
         if path == "/api/vaults":
             # TASK C: Fast response from DB
