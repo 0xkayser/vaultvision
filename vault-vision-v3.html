@@ -16,6 +16,7 @@
 <meta property="og:description" content="Compare on-chain vaults across perp DEX protocols. Track TVL, APR, and performance for Hyperliquid, Drift, Lighter, and Nado vaults.">
 <meta property="og:type" content="website">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='grad' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%2300d4ff;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%2300ff88;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='20' fill='url(%23grad)'/%3E%3Ctext x='50' y='70' font-family='-apple-system,BlinkMacSystemFont,SF Pro Display,system-ui,sans-serif' font-size='60' font-weight='700' fill='white' text-anchor='middle'%3EVV%3C/text%3E%3C/svg%3E">
+<script src="https://d3js.org/d3.v7.min.js"></script>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='grad' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%2300d4ff;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%2300ff88;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='20' fill='url(%23grad)'/%3E%3Ctext x='50' y='70' font-family='-apple-system,BlinkMacSystemFont,SF Pro Display,system-ui,sans-serif' font-size='60' font-weight='700' fill='white' text-anchor='middle'%3EVV%3C/text%3E%3C/svg%3E">
 <style>
 :root{
@@ -491,21 +492,559 @@ tbody tr:last-child td{border-bottom:none}
   .stat-label{font-size:11px}
   .chart-wrap{height:150px}
 }
+/* ═══════════════════════════════════════════════
+   LANDING PAGE
+═══════════════════════════════════════════════ */
+#lp{position:fixed;inset:0;z-index:2000;background:#040710;overflow-y:auto;overflow-x:hidden;
+  transition:opacity .48s cubic-bezier(.4,0,.2,1),transform .48s cubic-bezier(.4,0,.2,1);}
+#lp.lp-out{opacity:0;transform:translateY(-20px);pointer-events:none;}
+.lp-bg{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0;}
+.lp-orb{position:absolute;border-radius:50%;filter:blur(100px);opacity:.16;}
+.lp-orb-1{width:700px;height:700px;background:#00e96b;top:-250px;left:-250px;animation:lpOrb1 16s ease-in-out infinite;}
+.lp-orb-2{width:550px;height:550px;background:#A78BFA;top:20%;right:-220px;animation:lpOrb2 20s ease-in-out infinite;}
+.lp-orb-3{width:450px;height:450px;background:#FFB020;bottom:-150px;left:35%;animation:lpOrb3 18s ease-in-out infinite;}
+.lp-orb-4{width:350px;height:350px;background:#00d4ff;top:55%;left:20%;animation:lpOrb1 22s ease-in-out infinite reverse;opacity:.1;}
+@keyframes lpOrb1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(70px,-50px) scale(1.12)}}
+@keyframes lpOrb2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-60px,70px) scale(1.08)}}
+@keyframes lpOrb3{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(50px,-40px) scale(1.15)}}
+.lp-grid{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background-image:linear-gradient(rgba(0,212,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.025) 1px,transparent 1px);
+  background-size:72px 72px;}
+.lp-wrap{position:relative;z-index:10;min-height:100vh;display:flex;flex-direction:column;}
+/* NAV */
+.lp-nav{display:flex;align-items:center;justify-content:space-between;padding:20px 44px;
+  border-bottom:1px solid rgba(255,255,255,.05);}
+.lp-logo-mark{display:flex;align-items:center;gap:10px;cursor:pointer;}
+.lp-logo-icon{width:36px;height:36px;background:linear-gradient(135deg,#00d4ff,#00ff88);
+  border-radius:10px;display:flex;align-items:center;justify-content:center;
+  font-weight:900;font-size:13px;color:#040710;letter-spacing:-.3px;}
+.lp-logo-text{font-size:17px;font-weight:800;letter-spacing:-.4px;
+  background:linear-gradient(135deg,#00d4ff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.lp-nav-links{display:flex;align-items:center;gap:4px;}
+.lp-nav-link{padding:7px 14px;border-radius:8px;color:rgba(255,255,255,.45);font-size:13px;font-weight:500;
+  cursor:pointer;transition:color .18s;background:none;border:none;font-family:inherit;}
+.lp-nav-link:hover{color:rgba(255,255,255,.85);}
+.lp-nav-open{padding:8px 20px;border-radius:10px;border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.07);color:rgba(255,255,255,.9);font-size:13px;font-weight:700;
+  cursor:pointer;transition:all .2s;font-family:inherit;backdrop-filter:blur(8px);}
+.lp-nav-open:hover{background:rgba(255,255,255,.13);transform:translateY(-1px);}
+/* HERO */
+.lp-hero{display:grid;grid-template-columns:1fr 1fr;gap:60px;align-items:center;
+  padding:56px 44px 44px;max-width:1340px;margin:0 auto;width:100%;}
+.lp-hero-left{display:flex;flex-direction:column;gap:26px;animation:lpFadeUp .65s ease backwards;}
+@keyframes lpFadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.lp-tag{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:20px;
+  border:1px solid rgba(0,255,136,.22);background:rgba(0,255,136,.06);
+  color:rgba(0,255,136,.9);font-size:12px;font-weight:600;width:fit-content;}
+.lp-live-dot{width:6px;height:6px;border-radius:50%;background:#00ff88;animation:lpDot 1.8s ease-in-out infinite;}
+@keyframes lpDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.75)}}
+.lp-h1{font-size:clamp(34px,4vw,58px);font-weight:900;letter-spacing:-1.8px;line-height:1.07;color:#f1f5f9;}
+.lp-h1 em{font-style:normal;background:linear-gradient(135deg,#00d4ff,#00ff88);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.lp-sub{font-size:17px;color:rgba(255,255,255,.5);line-height:1.68;max-width:480px;}
+.lp-stats{display:flex;align-items:center;background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:14px 0;width:fit-content;}
+.lp-stat{display:flex;flex-direction:column;align-items:center;gap:3px;padding:0 20px;}
+.lp-stat-val{font-size:19px;font-weight:800;background:linear-gradient(135deg,#00d4ff,#00ff88);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.lp-stat-lbl{font-size:9px;color:rgba(255,255,255,.3);text-transform:uppercase;letter-spacing:.5px;}
+.lp-stat-div{width:1px;height:30px;background:rgba(255,255,255,.1);}
+.lp-ctas{display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+.lp-cta-p{padding:13px 26px;border-radius:12px;border:none;cursor:pointer;
+  background:linear-gradient(135deg,#00d4ff,#00ff88);color:#040710;
+  font-size:14px;font-weight:800;font-family:inherit;transition:all .2s;
+  box-shadow:0 0 30px rgba(0,212,255,.2),0 0 60px rgba(0,255,136,.1);}
+.lp-cta-p:hover{transform:translateY(-2px);box-shadow:0 8px 40px rgba(0,212,255,.3),0 0 80px rgba(0,255,136,.15);}
+.lp-cta-s{padding:13px 22px;border-radius:12px;cursor:pointer;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.13);color:rgba(255,255,255,.85);font-size:14px;
+  font-weight:700;font-family:inherit;transition:all .2s;}
+.lp-cta-s:hover{background:rgba(255,255,255,.1);transform:translateY(-1px);}
+.lp-cta-g{padding:13px 16px;border-radius:12px;cursor:pointer;background:none;
+  border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.45);
+  font-size:13px;font-weight:500;font-family:inherit;transition:all .2s;}
+.lp-cta-g:hover{color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.18);}
+/* RIGHT: vault stack */
+.lp-hero-right{animation:lpFadeUp .65s ease .15s backwards;}
+.lp-vault-stack{display:flex;flex-direction:column;gap:11px;}
+.lp-vc{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  border-radius:16px;padding:16px 20px;cursor:pointer;transition:all .25s;
+  backdrop-filter:blur(20px);animation:lpCardIn .6s ease backwards;}
+.lp-vc:nth-child(1){animation-delay:.1s}.lp-vc:nth-child(2){animation-delay:.25s}.lp-vc:nth-child(3){animation-delay:.4s}
+.lp-vc:hover{transform:translateX(-5px);border-color:rgba(255,255,255,.15);background:rgba(255,255,255,.06);}
+@keyframes lpCardIn{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:translateX(0)}}
+.lp-vc-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:9px;}
+.lp-vc-proto{font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.5px;}
+.lp-vc-apr{font-size:26px;font-weight:900;letter-spacing:-.5px;}
+.lp-vc-apr-lbl{font-size:9px;color:rgba(255,255,255,.3);text-transform:uppercase;letter-spacing:.4px;text-align:right;}
+.lp-vc-name{font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:9px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lp-vc-meta{display:flex;align-items:center;gap:14px;}
+.lp-vc-tvl{font-size:11px;color:rgba(255,255,255,.38);}
+.lp-vc-tvl b{color:rgba(255,255,255,.7);font-weight:600;}
+.lp-vc-entry{font-size:9px;font-weight:700;padding:3px 8px;border-radius:6px;white-space:nowrap;}
+/* FEATURES STRIP */
+.lp-feats{border-top:1px solid rgba(255,255,255,.05);padding:40px 44px;
+  max-width:1340px;margin:0 auto;width:100%;}
+.lp-feats-ttl{font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;
+  color:rgba(255,255,255,.2);margin-bottom:22px;}
+.lp-feats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+.lp-fc{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);
+  border-radius:16px;padding:20px;cursor:pointer;transition:all .22s;
+  display:flex;flex-direction:column;gap:9px;animation:lpFadeUp .6s ease backwards;}
+.lp-fc:nth-child(1){animation-delay:.05s}.lp-fc:nth-child(2){animation-delay:.12s}
+.lp-fc:nth-child(3){animation-delay:.19s}.lp-fc:nth-child(4){animation-delay:.26s}
+.lp-fc:hover{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.14);transform:translateY(-3px);}
+.lp-fc-icon{font-size:22px;}
+.lp-fc-title{font-size:15px;font-weight:800;color:#f1f5f9;letter-spacing:-.3px;}
+.lp-fc-desc{font-size:12px;color:rgba(255,255,255,.4);line-height:1.6;flex:1;}
+.lp-fc-link{font-size:11px;font-weight:700;margin-top:4px;}
+/* PROTO SECTION */
+.lp-protos{border-top:1px solid rgba(255,255,255,.05);padding:28px 44px;
+  max-width:1340px;margin:0 auto;width:100%;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;}
+.lp-protos-lbl{font-size:11px;color:rgba(255,255,255,.25);font-weight:600;letter-spacing:.5px;text-transform:uppercase;}
+.lp-proto-badges{display:flex;align-items:center;gap:10px;}
+.lp-proto-b{display:flex;align-items:center;gap:7px;padding:8px 16px;border-radius:10px;
+  border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);}
+.lp-proto-dot{width:8px;height:8px;border-radius:50%;}
+.lp-proto-name{font-size:12px;font-weight:600;color:rgba(255,255,255,.65);}
+.lp-proto-count{font-size:11px;color:rgba(255,255,255,.3);}
+/* FOOTER */
+.lp-footer{border-top:1px solid rgba(255,255,255,.05);padding:18px 44px;
+  display:flex;align-items:center;justify-content:space-between;
+  max-width:1340px;margin:0 auto;width:100%;}
+.lp-footer-links{display:flex;gap:6px;}
+.lp-footer-link{padding:5px 10px;font-size:12px;color:rgba(255,255,255,.3);
+  cursor:pointer;border:none;background:none;font-family:inherit;
+  transition:color .18s;border-radius:6px;}
+.lp-footer-link:hover{color:rgba(255,255,255,.7);}
+.lp-footer-copy{font-size:11px;color:rgba(255,255,255,.18);}
+@media(max-width:900px){
+  .lp-hero{grid-template-columns:1fr;gap:32px;padding:36px 20px 28px;}
+  .lp-feats-grid{grid-template-columns:repeat(2,1fr);}
+  .lp-nav{padding:16px 20px;}
+  .lp-feats{padding:32px 20px;}
+  .lp-protos{padding:20px;flex-direction:column;align-items:flex-start;}
+  .lp-footer{padding:16px 20px;}
+  .lp-stats{overflow-x:auto;}
+  .lp-h1{font-size:clamp(30px,7vw,48px);}
+}
+@media(max-width:600px){
+  .lp-feats-grid{grid-template-columns:1fr;}
+  .lp-nav-links{display:none;}
+  .lp-proto-badges{flex-wrap:wrap;}
+}
+/* ═══════════════════════════════════════════════
+   MINI MAP (Dashboard widget)
+═══════════════════════════════════════════════ */
+.mini-map-card{
+  background:linear-gradient(145deg, rgba(8,12,24,.95), rgba(12,16,28,.92));
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:20px;overflow:hidden;backdrop-filter:blur(16px);
+  position:relative;margin-bottom:32px;
+}
+[data-theme="light"] .mini-map-card{
+  background:linear-gradient(145deg, rgba(240,244,252,.95), rgba(230,236,248,.92));
+  border-color:rgba(0,0,0,.06);
+}
+.mini-map-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px 8px;}
+.mini-map-head-left{display:flex;align-items:center;gap:10px;}
+.mini-map-filters{display:flex;gap:4px;}
+.mini-map-filter{padding:4px 10px;border-radius:20px;border:1px solid rgba(255,255,255,.08);
+  background:none;color:rgba(255,255,255,.4);font-size:10px;font-weight:600;cursor:pointer;
+  transition:all .18s;font-family:inherit;letter-spacing:.3px;}
+[data-theme="light"] .mini-map-filter{border-color:rgba(0,0,0,.08);color:rgba(0,0,0,.4);}
+.mini-map-filter:hover{color:rgba(255,255,255,.7);}
+[data-theme="light"] .mini-map-filter:hover{color:rgba(0,0,0,.7);}
+.mini-map-filter.active{background:linear-gradient(135deg,rgba(0,212,255,.15),rgba(0,255,136,.15));
+  border-color:rgba(0,212,255,.3);color:#00d4ff;font-weight:700;}
+[data-theme="light"] .mini-map-filter.active{color:#0891b2;}
+.mini-map-open-btn{padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.08);
+  background:none;color:rgba(255,255,255,.4);font-size:11px;font-weight:600;cursor:pointer;
+  transition:all .18s;font-family:inherit;}
+[data-theme="light"] .mini-map-open-btn{border-color:rgba(0,0,0,.08);color:rgba(0,0,0,.4);}
+.mini-map-open-btn:hover{color:#00d4ff;border-color:rgba(0,212,255,.3);}
+#mini-map-svg{width:100%;height:220px;display:block;background:transparent;}
+.mini-map-gradient{position:absolute;bottom:0;left:0;right:0;height:50px;
+  background:linear-gradient(to top,rgba(8,12,24,.9),transparent);pointer-events:none;}
+[data-theme="light"] .mini-map-gradient{background:linear-gradient(to top,rgba(240,244,252,.9),transparent);}
+.mini-map-card .section-title{color:rgba(255,255,255,.85);}
+[data-theme="light"] .mini-map-card .section-title{color:rgba(0,0,0,.85);}
+/* ═══════════════════════════════════════════════
+   VAULT MAP PAGE
+═══════════════════════════════════════════════ */
+.page#pg-map{
+  position:fixed;top:73px;left:0;right:0;bottom:0;
+  z-index:50;background:#08090f;overflow:hidden;padding:0;
+}
+/* toolbar inside map */
+.map-tb{
+  position:absolute;top:0;left:0;right:0;z-index:20;height:50px;
+  display:flex;align-items:center;justify-content:space-between;padding:0 16px;gap:10px;
+  background:rgba(8,9,15,.88);backdrop-filter:blur(20px);
+  border-bottom:1px solid rgba(255,255,255,.06);
+}
+.map-mode-tabs{display:flex;gap:3px;background:rgba(255,255,255,.06);border-radius:10px;padding:3px;}
+.map-mode-tab{
+  padding:5px 13px;border-radius:7px;border:none;background:none;
+  color:rgba(255,255,255,.4);font-size:12px;font-weight:600;cursor:pointer;
+  transition:all .2s;font-family:inherit;
+}
+.map-mode-tab:hover{color:rgba(255,255,255,.8);}
+.map-mode-tab.active{background:rgba(255,255,255,.1);color:#f1f5f9;}
+.map-pills{display:flex;gap:4px;}
+.map-pill{
+  padding:4px 11px;border-radius:20px;border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);color:rgba(255,255,255,.4);
+  font-size:11px;font-weight:600;cursor:pointer;transition:all .18s;
+  display:flex;align-items:center;gap:4px;
+}
+.map-pill:hover{color:rgba(255,255,255,.8);border-color:rgba(255,255,255,.18);}
+.map-pill.active{color:#00d4ff;border-color:#00d4ff;background:rgba(0,212,255,.1);}
+.map-pill.active[data-mp="hyperliquid"]{color:#00b857;border-color:#00b857;background:rgba(0,184,87,.08);}
+.map-pill.active[data-mp="drift"]{color:#FFB020;border-color:#FFB020;background:rgba(255,176,32,.08);}
+.map-pill.active[data-mp="lighter"]{color:#A78BFA;border-color:#A78BFA;background:rgba(167,139,250,.08);}
+.map-pill.active[data-mp="nado"]{color:#8899bb;border-color:#8899bb;background:rgba(136,153,187,.08);}
+.map-pill-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.map-tb-right{display:flex;align-items:center;gap:6px;}
+.map-search-wrap{position:relative;display:flex;align-items:center;}
+.map-search-wrap svg{position:absolute;left:8px;pointer-events:none;}
+#map-search{
+  width:145px;padding:4px 9px 4px 25px;border-radius:20px;
+  border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05);
+  color:#f1f5f9;font-size:11px;outline:none;transition:border-color .2s;font-family:inherit;
+}
+#map-search:focus{border-color:#00d4ff;}
+#map-search::placeholder{color:rgba(255,255,255,.3);}
+.map-icon-btn{
+  width:30px;height:30px;border-radius:7px;border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);color:rgba(255,255,255,.4);font-size:12px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:all .18s;user-select:none;
+}
+.map-icon-btn:hover{color:#f1f5f9;border-color:rgba(255,255,255,.2);}
+.map-icon-btn.on{background:rgba(0,212,255,.12);border-color:#00d4ff;color:#00d4ff;}
+/* SVG */
+#map-svg{position:absolute;top:50px;left:0;right:0;bottom:0;width:100%;height:calc(100% - 50px);}
+/* axis labels (scatter) */
+.map-ax{
+  position:absolute;font-size:10px;color:rgba(255,255,255,.3);
+  text-transform:uppercase;letter-spacing:.6px;pointer-events:none;z-index:10;display:none;
+}
+#map-ax-x{bottom:62px;left:50%;transform:translateX(-50%);}
+#map-ax-y{top:50%;left:14px;transform:translateY(-50%) rotate(-90deg);}
+#map-ax-zone{
+  position:absolute;z-index:5;pointer-events:none;
+  border:1px dashed rgba(16,185,129,.2);border-radius:12px;
+  background:rgba(16,185,129,.04);display:none;
+}
+#map-ax-zone-lbl{
+  position:absolute;z-index:6;pointer-events:none;
+  font-size:9px;color:rgba(16,185,129,.5);font-weight:700;
+  text-transform:uppercase;letter-spacing:.5px;display:none;
+}
+/* legend */
+.map-legend{
+  position:absolute;bottom:16px;left:14px;z-index:20;
+  background:rgba(8,9,15,.88);backdrop-filter:blur(16px);
+  border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:11px 13px;
+  display:flex;flex-direction:column;gap:7px;
+}
+.map-leg-ttl{font-size:9px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:rgba(255,255,255,.3);}
+.map-leg-row{display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.75);}
+.map-leg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.map-leg-sep{height:1px;background:rgba(255,255,255,.07);margin:1px 0;}
+.map-leg-sig{display:flex;align-items:center;gap:6px;font-size:10px;color:rgba(255,255,255,.5);}
+/* stats bar */
+.map-stats{
+  position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:20;
+  background:rgba(8,9,15,.88);backdrop-filter:blur(16px);
+  border:1px solid rgba(255,255,255,.07);border-radius:12px;
+  padding:8px 18px;display:flex;gap:18px;
+}
+.map-si{display:flex;flex-direction:column;align-items:center;gap:1px;}
+.map-sv{font-size:14px;font-weight:800;background:linear-gradient(135deg,#00d4ff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.map-sl{font-size:9px;color:rgba(255,255,255,.3);text-transform:uppercase;letter-spacing:.4px;}
+/* zoom controls */
+.map-controls{
+  position:absolute;bottom:16px;right:14px;z-index:20;
+  display:flex;flex-direction:column;gap:4px;
+}
+.map-ctrl{
+  width:30px;height:30px;border-radius:7px;border:1px solid rgba(255,255,255,.08);
+  background:rgba(8,9,15,.88);backdrop-filter:blur(12px);
+  color:rgba(255,255,255,.4);font-size:13px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:all .18s;user-select:none;
+}
+.map-ctrl:hover{color:#f1f5f9;border-color:rgba(255,255,255,.2);}
+/* compare bar */
+.map-cbar{
+  position:absolute;bottom:70px;left:50%;transform:translateX(-50%);z-index:30;
+  background:rgba(8,9,15,.96);backdrop-filter:blur(20px);
+  border:1px solid rgba(0,212,255,.25);border-radius:14px;
+  padding:9px 14px;gap:10px;align-items:center;display:none;
+  box-shadow:0 8px 40px rgba(0,0,0,.6);white-space:nowrap;
+}
+.map-cbar.show{display:flex;}
+.map-cbar-item{
+  padding:3px 9px;border-radius:6px;
+  background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.2);
+  font-size:10px;color:#00d4ff;max-width:120px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.map-cbar-btn{
+  padding:5px 12px;border-radius:7px;border:none;
+  background:linear-gradient(135deg,#00d4ff,#00ff88);color:#08090f;
+  font-size:11px;font-weight:800;cursor:pointer;transition:opacity .18s;font-family:inherit;
+}
+.map-cbar-btn:hover{opacity:.88;}
+.map-cbar-x{color:rgba(255,255,255,.3);font-size:16px;cursor:pointer;transition:color .15s;}
+.map-cbar-x:hover{color:#f1f5f9;}
+/* opportunity panel */
+.map-opp{
+  position:absolute;top:60px;right:14px;z-index:20;width:195px;
+  background:rgba(8,9,15,.88);backdrop-filter:blur(16px);
+  border:1px solid rgba(16,185,129,.15);border-radius:12px;padding:11px 13px;
+  flex-direction:column;gap:7px;display:none;
+}
+.map-opp.show{display:flex;}
+.map-opp-ttl{font-size:9px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:rgba(16,185,129,.7);}
+.map-opp-item{
+  display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,.85);
+  cursor:pointer;padding:2px 0;
+}
+.map-opp-item:hover{color:#fff;}
+.map-opp-rk{font-size:9px;color:rgba(255,255,255,.3);width:12px;}
+.map-opp-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.map-opp-nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.map-opp-apr{font-size:10px;background:linear-gradient(135deg,#00d4ff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:700;}
+/* side panel */
+.map-panel{
+  position:absolute;top:50%;right:14px;transform:translateY(-50%);z-index:25;width:262px;
+  background:rgba(8,9,15,.97);backdrop-filter:blur(28px);
+  border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:17px;
+  flex-direction:column;gap:11px;display:none;
+  box-shadow:0 30px 80px rgba(0,0,0,.7);animation:mapPanelIn .22s ease;
+}
+@keyframes mapPanelIn{from{opacity:0;transform:translateY(-50%) translateX(18px)}to{opacity:1;transform:translateY(-50%) translateX(0)}}
+.map-panel.open{display:flex;}
+.map-panel-close{
+  position:absolute;top:11px;right:11px;width:21px;height:21px;
+  border-radius:6px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+  color:rgba(255,255,255,.4);font-size:11px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:all .15s;
+}
+.map-panel-close:hover{color:#f1f5f9;background:rgba(255,255,255,.1);}
+.map-p-entry{
+  display:flex;align-items:center;gap:7px;padding:7px 9px;
+  border-radius:9px;font-size:12px;font-weight:700;
+}
+.map-p-proto{font-size:9px;font-weight:700;padding:2px 7px;border-radius:5px;text-transform:uppercase;letter-spacing:.4px;}
+.map-p-name{font-size:13px;font-weight:800;color:#f1f5f9;line-height:1.3;}
+.map-p-metrics{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.map-pm{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:9px;padding:8px 10px;}
+.map-pm-val{font-size:14px;font-weight:700;color:#f1f5f9;}
+.map-pm-lbl{font-size:9px;color:rgba(255,255,255,.35);margin-top:2px;text-transform:uppercase;letter-spacing:.3px;}
+.map-pm.map-apr .map-pm-val{background:linear-gradient(135deg,#00d4ff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.map-risk-row{display:flex;flex-direction:column;gap:4px;}
+.map-risk-lbl{display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,.35);}
+.map-risk-track{height:4px;border-radius:2px;background:rgba(255,255,255,.06);overflow:hidden;}
+.map-risk-fill{height:100%;border-radius:2px;transition:width .5s;}
+.map-p-actions{display:flex;gap:5px;}
+.map-p-act{
+  flex:1;padding:6px 8px;border-radius:7px;
+  font-size:11px;font-weight:700;cursor:pointer;transition:all .18s;border:1px solid;
+  font-family:inherit;
+}
+.map-p-act.primary{background:rgba(0,212,255,.1);border-color:rgba(0,212,255,.25);color:#00d4ff;}
+.map-p-act.primary:hover{background:rgba(0,212,255,.18);}
+.map-p-act.secondary{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.08);color:rgba(255,255,255,.5);}
+.map-p-act.secondary:hover{color:#f1f5f9;border-color:rgba(255,255,255,.2);}
+.map-p-act.added{background:rgba(0,255,136,.08);border-color:rgba(0,255,136,.25);color:#00ff88;}
+.map-p-open{
+  display:block;text-align:center;padding:7px;border-radius:8px;
+  border:1px solid rgba(0,212,255,.2);background:rgba(0,212,255,.05);
+  color:#00d4ff;font-size:11px;font-weight:700;cursor:pointer;text-decoration:none;
+  transition:all .18s;
+}
+.map-p-open:hover{background:rgba(0,212,255,.1);border-color:rgba(0,212,255,.35);}
+.map-p-div-ttl{font-size:9px;color:rgba(255,255,255,.3);text-transform:uppercase;letter-spacing:.5px;}
+.map-p-div-list{display:flex;flex-direction:column;gap:3px;}
+.map-p-div-item{
+  display:flex;align-items:center;gap:6px;padding:5px 8px;
+  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:7px;
+  cursor:pointer;transition:all .18s;font-size:11px;
+}
+.map-p-div-item:hover{border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.06);}
+.map-p-div-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.map-p-div-nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,.8);}
+/* link tooltip */
+#map-link-tip{
+  position:fixed;pointer-events:none;z-index:400;
+  background:rgba(8,9,15,.95);backdrop-filter:blur(14px);
+  border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:9px 12px;
+  font-size:11px;color:#f1f5f9;display:none;max-width:220px;
+  box-shadow:0 8px 30px rgba(0,0,0,.5);
+}
+#map-node-tip{
+  position:fixed;pointer-events:none;z-index:300;
+  background:rgba(8,9,15,.94);backdrop-filter:blur(12px);
+  border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:6px 10px;
+  font-size:11px;color:#f1f5f9;display:none;white-space:nowrap;
+}
 </style>
 </head>
 <body>
 <div class="bg"></div>
+
+<!-- ══ LANDING PAGE ══════════════════════════════════════════════ -->
+<div id="lp">
+  <div class="lp-bg">
+    <div class="lp-orb lp-orb-1"></div>
+    <div class="lp-orb lp-orb-2"></div>
+    <div class="lp-orb lp-orb-3"></div>
+    <div class="lp-orb lp-orb-4"></div>
+  </div>
+  <div class="lp-grid"></div>
+  <div class="lp-wrap">
+
+    <!-- NAV -->
+    <nav class="lp-nav">
+      <div class="lp-logo-mark" onclick="dismissLanding('dashboard')">
+        <div class="lp-logo-icon">VV</div>
+        <div class="lp-logo-text">VaultVision</div>
+        <span style="font-size:10px;padding:2px 7px;border-radius:5px;background:linear-gradient(135deg,#f59e0b,#f97316);color:#fff;font-weight:700;margin-left:6px">BETA</span>
+      </div>
+      <div class="lp-nav-links">
+        <button class="lp-nav-link" onclick="dismissLanding('dashboard')">Dashboard</button>
+        <button class="lp-nav-link" onclick="dismissLanding('analytics')">Analytics</button>
+        <button class="lp-nav-link" onclick="dismissLanding('map')">Vault Map</button>
+        <button class="lp-nav-link" onclick="dismissLanding('compare')">Compare</button>
+      </div>
+      <button class="lp-nav-open" onclick="dismissLanding('dashboard')">Open App →</button>
+    </nav>
+
+    <!-- HERO -->
+    <div class="lp-hero">
+      <div class="lp-hero-left">
+        <div class="lp-tag">
+          <span class="lp-live-dot"></span>
+          Live · <span id="lp-vcount">—</span> vaults · 4 protocols
+        </div>
+        <h1 class="lp-h1">Find your edge<br>in <em>on-chain vaults.</em></h1>
+        <p class="lp-sub">Real-time comparison, risk analysis, and visual discovery across Hyperliquid, Drift, Lighter & Nado. Know where to invest — and when to wait.</p>
+        <div class="lp-stats">
+          <div class="lp-stat"><div class="lp-stat-val" id="lp-tvl">—</div><div class="lp-stat-lbl">Total TVL</div></div>
+          <div class="lp-stat-div"></div>
+          <div class="lp-stat"><div class="lp-stat-val" id="lp-bestapr">—</div><div class="lp-stat-lbl">Best APR</div></div>
+          <div class="lp-stat-div"></div>
+          <div class="lp-stat"><div class="lp-stat-val" id="lp-vcnt">—</div><div class="lp-stat-lbl">Active Vaults</div></div>
+          <div class="lp-stat-div"></div>
+          <div class="lp-stat"><div class="lp-stat-val">4</div><div class="lp-stat-lbl">Protocols</div></div>
+        </div>
+        <div class="lp-ctas">
+          <button class="lp-cta-p" onclick="dismissLanding('dashboard')">Open Dashboard →</button>
+          <button class="lp-cta-s" onclick="dismissLanding('map')">🗺 Vault Map</button>
+          <button class="lp-cta-g" onclick="dismissLanding('analytics')">Analytics</button>
+        </div>
+      </div>
+
+      <!-- RIGHT: top vault cards -->
+      <div class="lp-hero-right">
+        <div class="lp-vault-stack" id="lp-vault-stack">
+          <!-- skeleton cards while loading -->
+          <div class="lp-vc" style="height:100px;background:rgba(255,255,255,.03);animation:none"></div>
+          <div class="lp-vc" style="height:100px;background:rgba(255,255,255,.025);animation:none"></div>
+          <div class="lp-vc" style="height:100px;background:rgba(255,255,255,.02);animation:none"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FEATURES -->
+    <div class="lp-feats">
+      <div class="lp-feats-ttl">What you get</div>
+      <div class="lp-feats-grid">
+        <div class="lp-fc" onclick="dismissLanding('dashboard')">
+          <div class="lp-fc-icon">🔭</div>
+          <div class="lp-fc-title">Discover</div>
+          <div class="lp-fc-desc">Browse 50+ vaults across 4 protocols in one place. Filter by APR, TVL, risk score, and age.</div>
+          <div class="lp-fc-link" style="color:#00d4ff">Open Dashboard →</div>
+        </div>
+        <div class="lp-fc" onclick="dismissLanding('analytics')">
+          <div class="lp-fc-icon">📊</div>
+          <div class="lp-fc-title">Analyze</div>
+          <div class="lp-fc-desc">Risk Engine v2 scores every vault on performance, drawdown, liquidity, and data confidence.</div>
+          <div class="lp-fc-link" style="color:#A78BFA">View Analytics →</div>
+        </div>
+        <div class="lp-fc" onclick="dismissLanding('map')">
+          <div class="lp-fc-icon">🗺</div>
+          <div class="lp-fc-title">Map</div>
+          <div class="lp-fc-desc">See the full vault landscape. Explore by protocol clusters or scatter by Risk vs Return to find the best zone.</div>
+          <div class="lp-fc-link" style="color:#00ff88">Explore Map →</div>
+        </div>
+        <div class="lp-fc" onclick="dismissLanding('compare')">
+          <div class="lp-fc-icon">⚡</div>
+          <div class="lp-fc-title">Act</div>
+          <div class="lp-fc-desc">Entry Intelligence signals whether right now is a good time to deposit — or when to wait for a better window.</div>
+          <div class="lp-fc-link" style="color:#FFB020">Compare Vaults →</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROTOCOLS -->
+    <div class="lp-protos">
+      <div class="lp-protos-lbl">Supported protocols</div>
+      <div class="lp-proto-badges">
+        <div class="lp-proto-b"><div class="lp-proto-dot" style="background:#00b857"></div><span class="lp-proto-name">Hyperliquid</span><span class="lp-proto-count" id="lp-hl-cnt">—</span></div>
+        <div class="lp-proto-b"><div class="lp-proto-dot" style="background:#FFB020"></div><span class="lp-proto-name">Drift</span><span class="lp-proto-count" id="lp-dr-cnt">—</span></div>
+        <div class="lp-proto-b"><div class="lp-proto-dot" style="background:#A78BFA"></div><span class="lp-proto-name">Lighter</span><span class="lp-proto-count" id="lp-li-cnt">—</span></div>
+        <div class="lp-proto-b"><div class="lp-proto-dot" style="background:#8899bb"></div><span class="lp-proto-name">Nado</span><span class="lp-proto-count" id="lp-na-cnt">—</span></div>
+      </div>
+    </div>
+
+    <!-- FOOTER -->
+    <div class="lp-footer">
+      <div class="lp-footer-links">
+        <button class="lp-footer-link" onclick="dismissLanding('dashboard')">Dashboard</button>
+        <button class="lp-footer-link" onclick="dismissLanding('analytics')">Analytics</button>
+        <button class="lp-footer-link" onclick="dismissLanding('map')">Vault Map</button>
+        <button class="lp-footer-link" onclick="dismissLanding('compare')">Compare</button>
+      </div>
+      <div class="lp-footer-copy">VaultVision · Live on-chain data · Nado · Lighter · Hyperliquid · Drift</div>
+    </div>
+
+  </div><!-- /lp-wrap -->
+</div><!-- /lp -->
+
 <header class="header"><div class="header-inner">
-<div class="logo" onclick="nav('dashboard')"><div class="logo-icon">VV</div><div class="logo-text">Vault<span>Vision</span><span class="badge beta">BETA</span></div></div>
+<div class="logo" onclick="showLanding()"><div class="logo-icon">VV</div><div class="logo-text">Vault<span>Vision</span><span class="badge beta">BETA</span></div></div>
 <div class="header-tagline">Compare on-chain vaults across perp protocols</div>
 <div style="display:flex;align-items:center;gap:12px">
-<nav class="nav" id="mainNav"><button class="nav-btn active" data-p="dashboard">Dashboard</button><button class="nav-btn" data-p="analytics">Analytics</button><button class="nav-btn" data-p="compare">Compare</button></nav>
+<nav class="nav" id="mainNav"><button class="nav-btn active" data-p="dashboard">Dashboard</button><button class="nav-btn" data-p="analytics">Analytics</button><button class="nav-btn" data-p="compare">Compare</button><button class="nav-btn" data-p="map">Map</button></nav>
 <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
 </div>
 </div></header>
 <main class="main">
 <div class="page active" id="pg-dashboard">
 <section class="hero-stats"><div class="stat-card"><div class="stat-label">Total TVL</div><div class="stat-value highlight" id="sTvl">$0</div><div class="stat-sub">Across all protocols</div></div><div class="stat-card"><div class="stat-label">Best APR</div><div class="stat-value" id="sApr">0%</div><div class="stat-sub" id="sAprV">-</div></div><div class="stat-card"><div class="stat-label">Active Vaults</div><div class="stat-value" id="sCnt">0</div><div class="stat-sub" id="sCntS">-</div></div><div class="stat-card"><div class="stat-label">Protocols</div><div class="stat-value">4</div><div class="stat-sub">Nado · Lighter · HL · Drift</div></div></section>
+<!-- MINI MAP WIDGET -->
+<div class="mini-map-card section">
+  <div class="mini-map-head">
+    <div class="mini-map-head-left">
+      <h2 class="section-title" style="margin:0">Vault Map <span class="badge" style="margin-left:6px">Live</span></h2>
+      <div class="mini-map-filters" id="mm-filters">
+        <button class="mini-map-filter active" data-mm="all">All</button>
+        <button class="mini-map-filter" data-mm="hyperliquid">HL</button>
+        <button class="mini-map-filter" data-mm="drift">Drift</button>
+        <button class="mini-map-filter" data-mm="lighter">Lighter</button>
+      </div>
+    </div>
+    <button class="mini-map-open-btn" onclick="nav('map')">Explore full map →</button>
+  </div>
+  <svg id="mini-map-svg"></svg>
+  <div class="mini-map-gradient"></div>
+</div>
 <section class="section"><div class="section-header"><h2 class="section-title">Protocol Vaults<span class="badge">Official</span></h2></div><div class="grid" id="protoGrid"></div></section>
 <section class="section"><div class="section-header"><h2 class="section-title">User Vaults<span class="badge">Community</span></h2><div class="pills" id="dashPills"></div></div><div class="grid" id="userGrid"></div></section>
 <section class="section" id="bestRiskSection"><div class="section-header"><h2 class="section-title">Best Risk-Adjusted<span class="badge">Return/Risk</span></h2></div><div class="table-wrap"><table id="bestRiskTable"><thead><tr><th>#</th><th>Vault</th><th>Protocol</th><th>Score</th><th>Risk</th><th>Return</th><th>TVL</th></tr></thead><tbody id="bestRiskTbody"></tbody></table></div></section>
@@ -513,6 +1052,124 @@ tbody tr:last-child td{border-bottom:none}
 <div class="page" id="pg-analytics"><section class="section"><div class="section-header"><h2 class="section-title">Vault Analytics<span class="badge">Rankings</span></h2></div><div class="pills" id="anaPills" style="margin-bottom:24px"></div><div class="table-wrap"><table id="anaTable"><thead><tr><th data-s="rank">#</th><th data-s="vault_name">Vault</th><th data-s="protocol">Protocol</th><th>Data</th><th data-s="tvl_usd" class="sorted">TVL ↓</th><th data-s="apy">APR ↓</th><th data-s="age_days">Age ↓</th><th data-s="r30">30D ↓</th><th data-s="risk_score">Risk ↓</th><th>Action</th></tr></thead><tbody id="anaTbody"></tbody></table></div></section></div>
 <div class="page" id="pg-compare"><section class="section"><div class="section-header"><h2 class="section-title">Compare Vaults<span class="badge">Select 2-4</span></h2></div><div class="compare-sel" id="compSel"></div><div class="compare-grid" id="compGrid"></div></section></div>
 <div class="page" id="pg-vault"><button class="back-btn" onclick="nav('analytics')">← Back to Analytics</button><div id="vaultContent"></div></div>
+
+<!-- ══ MAP PAGE ══════════════════════════════════════════════ -->
+<div class="page" id="pg-map">
+  <!-- Toolbar -->
+  <div class="map-tb">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div class="map-mode-tabs">
+        <button class="map-mode-tab active" id="map-tab-explore" onclick="setMapMode('explore')">🔭 Explore</button>
+        <button class="map-mode-tab" id="map-tab-scatter" onclick="setMapMode('scatter')">📊 Risk / Return</button>
+      </div>
+      <div class="map-pills" id="map-proto-pills">
+        <div class="map-pill active" data-mp="all">All</div>
+        <div class="map-pill" data-mp="hyperliquid"><div class="map-pill-dot" style="background:#00b857"></div>HL</div>
+        <div class="map-pill" data-mp="drift"><div class="map-pill-dot" style="background:#FFB020"></div>Drift</div>
+        <div class="map-pill" data-mp="lighter"><div class="map-pill-dot" style="background:#A78BFA"></div>Lighter</div>
+        <div class="map-pill" data-mp="nado"><div class="map-pill-dot" style="background:#8899bb"></div>Nado</div>
+      </div>
+    </div>
+    <div class="map-tb-right">
+      <div class="map-search-wrap">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="map-search" type="text" placeholder="Search vault…">
+      </div>
+      <div class="map-icon-btn" id="map-btn-signals" title="Green signals only">⚡</div>
+      <div class="map-icon-btn" id="map-btn-resim" title="Reshuffle">⟳</div>
+    </div>
+  </div>
+
+  <!-- SVG canvas -->
+  <svg id="map-svg"></svg>
+
+  <!-- Scatter axis labels -->
+  <div class="map-ax" id="map-ax-x">← Lower risk &nbsp;&nbsp; Higher risk →</div>
+  <div class="map-ax" id="map-ax-y">↑ APR</div>
+  <div id="map-ax-zone"></div>
+  <div id="map-ax-zone-lbl">🏆 Best Zone</div>
+
+  <!-- Opportunity panel (scatter) -->
+  <div class="map-opp" id="map-opp">
+    <div class="map-opp-ttl">Best Opportunities</div>
+    <div id="map-opp-list"></div>
+  </div>
+
+  <!-- Legend -->
+  <div class="map-legend">
+    <div class="map-leg-ttl">Protocol</div>
+    <div class="map-leg-row"><div class="map-leg-dot" style="background:#00b857"></div>Hyperliquid</div>
+    <div class="map-leg-row"><div class="map-leg-dot" style="background:#FFB020"></div>Drift</div>
+    <div class="map-leg-row"><div class="map-leg-dot" style="background:#A78BFA"></div>Lighter</div>
+    <div class="map-leg-row"><div class="map-leg-dot" style="background:#8899bb"></div>Nado</div>
+    <div class="map-leg-sep"></div>
+    <div class="map-leg-ttl">Entry Signal</div>
+    <div class="map-leg-sig"><div class="map-leg-dot" style="background:#10b981"></div>Good entry</div>
+    <div class="map-leg-sig"><div class="map-leg-dot" style="background:#f59e0b"></div>Neutral</div>
+    <div class="map-leg-sig"><div class="map-leg-dot" style="background:#f43f5e"></div>Caution</div>
+    <div class="map-leg-sep"></div>
+    <div style="font-size:9px;color:rgba(255,255,255,.3)">Shift+click → Compare</div>
+  </div>
+
+  <!-- Stats bar -->
+  <div class="map-stats">
+    <div class="map-si"><div class="map-sv" id="msv">—</div><div class="map-sl">Vaults</div></div>
+    <div class="map-si"><div class="map-sv" id="mstvl">—</div><div class="map-sl">TVL</div></div>
+    <div class="map-si"><div class="map-sv" id="msapr">—</div><div class="map-sl">Best APR</div></div>
+    <div class="map-si"><div class="map-sv" id="msgreen">—</div><div class="map-sl">Green Signal</div></div>
+  </div>
+
+  <!-- Zoom controls -->
+  <div class="map-controls">
+    <div class="map-ctrl" id="map-zi">+</div>
+    <div class="map-ctrl" id="map-zo">−</div>
+    <div class="map-ctrl" id="map-reset">⌖</div>
+  </div>
+
+  <!-- Compare bar -->
+  <div class="map-cbar" id="map-cbar">
+    <div style="font-size:10px;color:rgba(255,255,255,.3)">Shift+click</div>
+    <div style="display:flex;gap:5px;" id="map-cbar-items"></div>
+    <button class="map-cbar-btn" id="map-cbar-go">Compare →</button>
+    <div class="map-cbar-x" id="map-cbar-x">✕</div>
+  </div>
+
+  <!-- Side panel -->
+  <div class="map-panel" id="map-panel">
+    <button class="map-panel-close" id="map-panel-close">✕</button>
+    <div class="map-p-entry" id="map-p-entry"></div>
+    <div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+        <div class="map-p-proto" id="map-p-proto"></div>
+      </div>
+      <div class="map-p-name" id="map-p-name"></div>
+      <div id="map-p-rank" style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;font-size:9px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:rgba(255,255,255,.32)"></div>
+    </div>
+    <div class="map-p-metrics">
+      <div class="map-pm map-apr"><div class="map-pm-val" id="map-p-apr"></div><div class="map-pm-lbl">APR</div></div>
+      <div class="map-pm"><div class="map-pm-val" id="map-p-tvl"></div><div class="map-pm-lbl">TVL</div></div>
+      <div class="map-pm"><div class="map-pm-val" id="map-p-30d"></div><div class="map-pm-lbl">30D Return</div></div>
+      <div class="map-pm"><div class="map-pm-val" id="map-p-age"></div><div class="map-pm-lbl">Age</div></div>
+    </div>
+    <div class="map-risk-row">
+      <div class="map-risk-lbl"><span id="map-p-rband"></span><span id="map-p-rscore"></span></div>
+      <div class="map-risk-track"><div class="map-risk-fill" id="map-p-rfill"></div></div>
+    </div>
+    <div class="map-p-actions">
+      <button class="map-p-act primary" id="map-p-compare">+ Compare</button>
+      <button class="map-p-act secondary" id="map-p-divbtn">🔀 Diversify</button>
+    </div>
+    <div id="map-p-div-section" style="display:none">
+      <div class="map-p-div-ttl" id="map-p-div-ttl" style="margin-bottom:5px"></div>
+      <div class="map-p-div-list" id="map-p-div-list"></div>
+    </div>
+    <a class="map-p-open" id="map-p-open" href="#">Open Detail →</a>
+  </div>
+
+  <!-- Tooltips -->
+  <div id="map-link-tip"></div>
+  <div id="map-node-tip"></div>
+</div>
 </main>
 <footer class="footer"><span class="live-dot"></span>Live Data — Nado · Lighter · Hyperliquid · Drift<br><span id="lastUpd" style="opacity:0.7"></span></footer>
 <script>
@@ -1088,10 +1745,11 @@ function nav(p,prm={}){
   else if(p==='analytics')renderAna();
   else if(p==='compare')renderComp();
   else if(p==='vault'&&prm.id)renderVault(prm.id);
+  else if(p==='map')renderMap();
   location.hash=p==='vault'?'vault/'+prm.id:p;
 }
 document.querySelectorAll('#mainNav .nav-btn').forEach(b=>b.onclick=()=>nav(b.dataset.p));
-window.onhashchange=()=>{const h=location.hash.slice(1);if(h.startsWith('vault/'))nav('vault',{id:h.split('/')[1]});else nav(h||'dashboard');};
+window.onhashchange=()=>{const h=location.hash.slice(1);if(h.startsWith('vault/'))nav('vault',{id:h.split('/')[1]});else nav(['dashboard','analytics','compare','map'].includes(h)?h:'dashboard');};
 
 function dataQualityBadge(dq){
   const labels={full:'Verified',partial:'Partial',mock:'Demo', demo:'Demo'};
@@ -1154,6 +1812,8 @@ function userCard(v){
     <div class="card-stat"><div class="card-stat-label">30D</div><div class="card-stat-val ${(v.r30||0)>=0?'positive':'negative'}">${v.r30!=null?fmtPctS(v.r30):'N/A'}</div></div></div></div>`;
 }
 function renderDash(){
+  // Render mini map widget
+  setTimeout(renderMiniMap, 80);
   const a=all(),tvl=a.reduce((s,v)=>s+(v.tvl_usd||0),0),best=a.reduce((b,v)=>(v.apy||0)>(b.apy||0)?v:b,a[0]);
   document.getElementById('sTvl').textContent=fmtUsd(tvl);
   document.getElementById('sApr').textContent=fmtPct(best?.apy);
@@ -1873,18 +2533,1209 @@ function formatNum(n) {
   return n.toFixed(0);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// LANDING PAGE
+// ═══════════════════════════════════════════════════════════════════
+const LP_PROTO_COLORS = {
+  hyperliquid:{ color:'#00b857', bg:'rgba(0,184,87,.12)',  border:'rgba(0,184,87,.3)'  },
+  drift:      { color:'#FFB020', bg:'rgba(255,176,32,.12)', border:'rgba(255,176,32,.3)' },
+  lighter:    { color:'#A78BFA', bg:'rgba(167,139,250,.12)',border:'rgba(167,139,250,.3)'},
+  nado:       { color:'#8899bb', bg:'rgba(136,153,187,.12)',border:'rgba(136,153,187,.3)'},
+};
+const LP_ENTRY = {
+  good:    { color:'#10b981', bg:'rgba(16,185,129,.12)',  label:'Green signal' },
+  neutral: { color:'#f59e0b', bg:'rgba(245,158,11,.12)',  label:'Neutral'      },
+  caution: { color:'#f43f5e', bg:'rgba(244,63,94,.12)',   label:'Caution'      },
+};
+
+function initLanding(){
+  const lp = document.getElementById('lp');
+  if(!lp) return;
+  // Skip landing if deep-linking to a specific page
+  const h = location.hash.slice(1);
+  if(h && h !== 'home' && ['dashboard','analytics','compare','map'].includes(h)){
+    lp.style.display='none'; return;
+  }
+  // Skip if same session
+  if(sessionStorage.getItem('vv-visited')){
+    lp.style.display='none'; return;
+  }
+}
+
+function fillLandingStats(){
+  const lp = document.getElementById('lp');
+  if(!lp || lp.style.display==='none') return;
+  const all = [...PV,...UV];
+  if(!all.length) return;
+  const tvl = all.reduce((s,v)=>s+(v.tvl_usd||0),0);
+  const bestApr = Math.max(...all.map(v=>v.apy||v.apr||0));
+  const el = id => document.getElementById(id);
+  if(el('lp-tvl'))   el('lp-tvl').textContent   = fmtUsd(tvl);
+  if(el('lp-bestapr'))el('lp-bestapr').textContent= fmtPct(bestApr);
+  if(el('lp-vcnt')) el('lp-vcnt').textContent  = all.length;
+  if(el('lp-vcount'))el('lp-vcount').textContent = all.length;
+  // Protocol counts
+  const pc={};all.forEach(v=>{pc[v.protocol]=(pc[v.protocol]||0)+1;});
+  const pmap={hyperliquid:'lp-hl-cnt',drift:'lp-dr-cnt',lighter:'lp-li-cnt',nado:'lp-na-cnt'};
+  Object.entries(pmap).forEach(([p,id])=>{ if(el(id)) el(id).textContent=pc[p]?pc[p]+' vaults':'—'; });
+  // Top vault cards
+  renderLandingVaults(all);
+}
+
+function renderLandingVaults(all){
+  const stack = document.getElementById('lp-vault-stack');
+  if(!stack) return;
+  // Top 3 by best 30D return; fall back to APR-based proxy if r30 is null
+  const top = all
+    .filter(v => (v.tvl_usd||0) > 50000)
+    .sort((a,b) => {
+      const ra = a.r30 != null ? a.r30 : (a.apy||a.apr||0) * 0.08;
+      const rb = b.r30 != null ? b.r30 : (b.apy||b.apr||0) * 0.08;
+      return rb - ra;
+    })
+    .slice(0, 3);
+  if(!top.length){ stack.innerHTML='<div style="color:rgba(255,255,255,.3);font-size:13px;padding:20px">No data yet</div>'; return; }
+
+  stack.innerHTML = top.map((v,i) => {
+    const pc = LP_PROTO_COLORS[v.protocol] || LP_PROTO_COLORS.nado;
+    const apr = v.apy || v.apr || 0;
+    const risk = v.risk_score || 50;
+    const r30 = v.r30;
+    const r90 = v.r90;
+    const entrySig = risk < 38 && apr > 0.08 ? 'good' : risk > 65 ? 'caution' : 'neutral';
+    const ec = LP_ENTRY[entrySig];
+    const riskColor = risk < 35 ? '#10b981' : risk < 65 ? '#f59e0b' : '#f43f5e';
+    const riskLabel = risk < 35 ? 'Low' : risk < 65 ? 'Med' : 'High';
+    const rankLabel = ['🥇','🥈','🥉'][i];
+    return `
+    <div class="lp-vc" onclick="dismissLanding('vault','${v.id}')">
+      <div class="lp-vc-top">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:16px;line-height:1">${rankLabel}</span>
+          <div class="lp-vc-proto" style="background:${pc.bg};color:${pc.color};border:1px solid ${pc.border}">${v.protocol.toUpperCase()}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="lp-vc-apr" style="color:${r30>=0?'#00ff88':'#f43f5e'}">${r30!=null?(r30>=0?'+':'')+(r30*100).toFixed(1)+'%':'—'}</div>
+          <div class="lp-vc-apr-lbl">30D Return</div>
+        </div>
+      </div>
+      <div class="lp-vc-name">${v.vault_name||v.id}</div>
+      <div class="lp-vc-meta">
+        <div class="lp-vc-tvl">TVL <b>${fmtUsd(v.tvl_usd||0)}</b></div>
+        ${r90!=null?`<div style="font-size:10px;color:rgba(255,255,255,.35)">${r90>=0?'+':''}${(r90*100).toFixed(0)}% 90D</div>`:''}
+        <div style="display:flex;align-items:center;gap:4px;margin-left:auto">
+          <div style="font-size:9px;font-weight:700;color:${riskColor};letter-spacing:.3px">RISK ${risk}</div>
+          <div style="width:28px;height:3px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden">
+            <div style="width:${risk}%;height:100%;background:${riskColor};border-radius:2px"></div>
+          </div>
+          <div class="lp-vc-entry" style="background:${ec.bg};color:${ec.color};margin-left:4px">${ec.label}</div>
+        </div>
+      </div>
+      <div style="margin-top:9px;display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:10px;color:rgba(255,255,255,.32)">APR <span style="color:rgba(0,212,255,.7);font-weight:700">${fmtPct(apr)}</span></div>
+        <div style="font-size:10px;color:rgba(255,255,255,.28)">Click to explore →</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function dismissLanding(target, vaultId){
+  sessionStorage.setItem('vv-visited','1');
+  const lp = document.getElementById('lp');
+  if(!lp) return;
+  lp.classList.add('lp-out');
+  setTimeout(()=>{
+    lp.style.display='none';
+    if(target==='vault' && vaultId) nav('vault',{id:vaultId});
+    else nav(target||'dashboard');
+  }, 480);
+}
+
+function showLanding(){
+  const lp = document.getElementById('lp');
+  if(!lp) return;
+  lp.classList.remove('lp-out');
+  lp.style.display='';
+  fillLandingStats();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MINI MAP (Dashboard widget)
+// ═══════════════════════════════════════════════════════════════════
+let mmFilter='all', mmAnimId=null;
+
+function renderMiniMap(){
+  const svgEl = document.getElementById('mini-map-svg');
+  if(!svgEl) return;
+  if(mmAnimId){ cancelAnimationFrame(mmAnimId); mmAnimId=null; }
+
+  const all = [...PV,...UV].filter(v=>(v.tvl_usd||0)>0);
+  if(!all.length) return;
+
+  const W = svgEl.clientWidth || 800;
+  const H = 220;
+  svgEl.setAttribute('width', W);
+  svgEl.setAttribute('height', H);
+
+  while(svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+
+  const PCOLS = {
+    hyperliquid:{c:'#00b857',g:'#00ff6e'}, drift:{c:'#FFB020',g:'#FFD060'},
+    lighter:{c:'#A78BFA',g:'#C4B5FD'}, nado:{c:'#64748b',g:'#94a3b8'},
+  };
+
+  const tvlMax = Math.max(...all.map(v=>v.tvl_usd||0));
+  const rScale = v => Math.max(2.5, Math.min(16, 2.5 + (v.tvl_usd||0)/tvlMax * 13));
+
+  // Group by protocol for force cluster centers
+  const protoGroups = {};
+  all.forEach(v=>{ const p=v.protocol||'nado'; (protoGroups[p]=protoGroups[p]||[]).push(v); });
+  const protos = Object.keys(protoGroups).sort((a,b)=>(protoGroups[b].length)-(protoGroups[a].length));
+  const bandW = W / Math.max(protos.length, 1);
+  const centers = {};
+  protos.forEach((p, i) => { centers[p] = { x: bandW * i + bandW/2, y: H/2 }; });
+
+  // Build node data with initial scatter around centers
+  const nodes = all.map(v => {
+    const p = v.protocol || 'nado';
+    const r = rScale(v);
+    const cx = centers[p].x;
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 15 + Math.random() * 45;
+    return {
+      v, p, r, color: PCOLS[p]?.c||'#fff', glow: PCOLS[p]?.g||'#fff',
+      x: cx + Math.cos(ang)*dist, y: H/2 + Math.sin(ang)*dist*0.6,
+      vx: 0, vy: 0, baseX: 0, baseY: 0,
+    };
+  });
+
+  // Build links (same protocol, limited connections)
+  const links = [];
+  protos.forEach(p => {
+    const pn = nodes.filter(n=>n.p===p);
+    pn.forEach((a,i) => {
+      pn.forEach((b,j) => {
+        if(j<=i) return;
+        const d = Math.hypot(a.x-b.x, a.y-b.y);
+        if(d < 65 && links.filter(l=>(l.a===a||l.b===a)).length < 3)
+          links.push({a, b, p});
+      });
+    });
+  });
+
+  // Simple force simulation (runs 120 ticks synchronously)
+  for(let tick=0; tick<120; tick++){
+    // Centering force to protocol cluster
+    nodes.forEach(n => {
+      const cx=centers[n.p].x, cy=centers[n.p].y;
+      n.vx += (cx - n.x) * 0.008;
+      n.vy += (cy - n.y) * 0.012;
+    });
+    // Repulsion between nodes
+    nodes.forEach((a,i) => nodes.forEach((b,j) => {
+      if(j<=i) return;
+      let dx=b.x-a.x, dy=b.y-a.y;
+      let d=Math.max(1, Math.hypot(dx,dy));
+      const minD = a.r + b.r + 4;
+      if(d < minD){
+        const f = (minD - d) / d * 0.15;
+        a.vx -= dx*f; a.vy -= dy*f;
+        b.vx += dx*f; b.vy += dy*f;
+      }
+    }));
+    // Spring force on links
+    links.forEach(l => {
+      const dx=l.b.x-l.a.x, dy=l.b.y-l.a.y;
+      const d=Math.max(1, Math.hypot(dx,dy));
+      const ideal = l.a.r + l.b.r + 12;
+      const f = (d - ideal) / d * 0.02;
+      l.a.vx += dx*f; l.a.vy += dy*f;
+      l.b.vx -= dx*f; l.b.vy -= dy*f;
+    });
+    // Boundary
+    nodes.forEach(n => {
+      n.vx *= 0.82; n.vy *= 0.82;
+      n.x += n.vx; n.y += n.vy;
+      n.x = Math.max(n.r+6, Math.min(W-n.r-6, n.x));
+      n.y = Math.max(n.r+10, Math.min(H-n.r-10, n.y));
+    });
+  }
+  nodes.forEach(n => { n.baseX = n.x; n.baseY = n.y; });
+
+  // Rebuild links after layout
+  links.length = 0;
+  protos.forEach(p => {
+    const pn = nodes.filter(n=>n.p===p);
+    pn.forEach((a,i) => pn.forEach((b,j) => {
+      if(j<=i) return;
+      const d = Math.hypot(a.x-b.x, a.y-b.y);
+      if(d < 55 + a.r + b.r) links.push({a, b, p});
+    }));
+  });
+
+  const svgNS='http://www.w3.org/2000/svg';
+
+  // Defs: radial gradients + glow filter
+  const defs = document.createElementNS(svgNS,'defs');
+  const gf = document.createElementNS(svgNS,'filter');
+  gf.setAttribute('id','mm-glow'); gf.setAttribute('x','-50%'); gf.setAttribute('y','-50%');
+  gf.setAttribute('width','200%'); gf.setAttribute('height','200%');
+  const gb = document.createElementNS(svgNS,'feGaussianBlur');
+  gb.setAttribute('stdDeviation','4'); gb.setAttribute('result','b');
+  gf.appendChild(gb);
+  const gm = document.createElementNS(svgNS,'feMerge');
+  const gm1 = document.createElementNS(svgNS,'feMergeNode'); gm1.setAttribute('in','b'); gm.appendChild(gm1);
+  const gm2 = document.createElementNS(svgNS,'feMergeNode'); gm2.setAttribute('in','SourceGraphic'); gm.appendChild(gm2);
+  gf.appendChild(gm); defs.appendChild(gf);
+
+  protos.forEach(p => {
+    const pc = PCOLS[p] || PCOLS.nado;
+    const rg = document.createElementNS(svgNS,'radialGradient');
+    rg.setAttribute('id','mm-rg-'+p); rg.setAttribute('cx','35%'); rg.setAttribute('cy','35%');
+    const s1 = document.createElementNS(svgNS,'stop'); s1.setAttribute('offset','0%'); s1.setAttribute('stop-color',pc.g);
+    const s2 = document.createElementNS(svgNS,'stop'); s2.setAttribute('offset','100%'); s2.setAttribute('stop-color',pc.c);
+    rg.appendChild(s1); rg.appendChild(s2); defs.appendChild(rg);
+  });
+  svgEl.appendChild(defs);
+
+  // Background nebula glows per cluster
+  const gBg = document.createElementNS(svgNS,'g');
+  protos.forEach(p => {
+    const pn = nodes.filter(n=>n.p===p);
+    if(pn.length<2) return;
+    const cx=pn.reduce((s,n)=>s+n.x,0)/pn.length;
+    const cy=pn.reduce((s,n)=>s+n.y,0)/pn.length;
+    const spread = Math.max(40, Math.sqrt(pn.reduce((s,n)=>s+Math.pow(n.x-cx,2)+Math.pow(n.y-cy,2),0)/pn.length)*1.3);
+    const e = document.createElementNS(svgNS,'ellipse');
+    e.setAttribute('cx',cx); e.setAttribute('cy',cy);
+    e.setAttribute('rx',spread+30); e.setAttribute('ry',spread*0.65+20);
+    e.setAttribute('fill',(PCOLS[p]?.c||'#fff'));
+    e.setAttribute('opacity','0.04');
+    e.setAttribute('filter','url(#mm-glow)');
+    gBg.appendChild(e);
+  });
+  svgEl.appendChild(gBg);
+
+  // Links
+  const gLines = document.createElementNS(svgNS,'g');
+  links.forEach(l => {
+    const line = document.createElementNS(svgNS,'line');
+    line.setAttribute('x1',l.a.x); line.setAttribute('y1',l.a.y);
+    line.setAttribute('x2',l.b.x); line.setAttribute('y2',l.b.y);
+    line.setAttribute('stroke',(PCOLS[l.p]?.c||'#fff'));
+    line.setAttribute('stroke-opacity','0.12');
+    line.setAttribute('stroke-width','0.6');
+    line._a = l.a; line._b = l.b;
+    gLines.appendChild(line);
+  });
+  svgEl.appendChild(gLines);
+
+  // Nodes
+  const gNodes = document.createElementNS(svgNS,'g');
+  const nodeEls = [];
+  nodes.forEach(nd => {
+    const show = mmFilter==='all' || nd.p===mmFilter;
+    const oFull = show ? 0.88 : 0.06;
+    const oGlow = show ? 0.15 : 0.01;
+
+    // Outer glow ring
+    const ring = document.createElementNS(svgNS,'circle');
+    ring.setAttribute('cx',nd.x); ring.setAttribute('cy',nd.y);
+    ring.setAttribute('r',nd.r+4); ring.setAttribute('fill','none');
+    ring.setAttribute('stroke',nd.color); ring.setAttribute('stroke-width','0.5');
+    ring.setAttribute('stroke-opacity', show?'0.2':'0.02');
+    gNodes.appendChild(ring);
+
+    // Glow
+    const glow = document.createElementNS(svgNS,'circle');
+    glow.setAttribute('cx',nd.x); glow.setAttribute('cy',nd.y);
+    glow.setAttribute('r',nd.r+6); glow.setAttribute('fill',nd.glow);
+    glow.setAttribute('opacity',oGlow);
+    glow.setAttribute('filter','url(#mm-glow)');
+    gNodes.appendChild(glow);
+
+    // Main circle with gradient
+    const dot = document.createElementNS(svgNS,'circle');
+    dot.setAttribute('cx',nd.x); dot.setAttribute('cy',nd.y);
+    dot.setAttribute('r',nd.r); dot.setAttribute('fill','url(#mm-rg-'+nd.p+')');
+    dot.setAttribute('opacity',oFull);
+    dot.setAttribute('cursor','pointer');
+    dot.setAttribute('style','transition:all .2s ease');
+
+    const title = document.createElementNS(svgNS,'title');
+    const apr = nd.v.apy||nd.v.apr||0;
+    const r30 = nd.v.r30;
+    title.textContent=`${nd.v.vault_name||nd.v.id}\nAPR ${fmtPct(apr)} · TVL ${fmtUsd(nd.v.tvl_usd||0)}${r30!=null?' · 30D '+(r30>=0?'+':'')+(r30*100).toFixed(1)+'%':''}`;
+    dot.appendChild(title);
+    dot.addEventListener('click',()=>nav('vault',{id:nd.v.id}));
+    dot.addEventListener('mouseenter',function(){
+      this.setAttribute('opacity','1'); this.setAttribute('r',nd.r*1.35);
+      this.setAttribute('filter','url(#mm-glow)');
+      ring.setAttribute('stroke-opacity','0.5'); ring.setAttribute('r',nd.r*1.35+4);
+    });
+    dot.addEventListener('mouseleave',function(){
+      this.setAttribute('opacity',oFull); this.setAttribute('r',nd.r);
+      this.removeAttribute('filter');
+      ring.setAttribute('stroke-opacity',show?'0.2':'0.02'); ring.setAttribute('r',nd.r+4);
+    });
+    gNodes.appendChild(dot);
+    nodeEls.push({nd, dot, glow, ring});
+  });
+  svgEl.appendChild(gNodes);
+
+  // Protocol labels at cluster centers
+  const gLabels = document.createElementNS(svgNS,'g');
+  protos.forEach(p => {
+    const pn = nodes.filter(n=>n.p===p);
+    if(pn.length<2) return;
+    const cx=pn.reduce((s,n)=>s+n.x,0)/pn.length;
+    const topY=Math.min(...pn.map(n=>n.y-n.r));
+    const pc = PCOLS[p]||PCOLS.nado;
+    const txt = document.createElementNS(svgNS,'text');
+    txt.setAttribute('x',cx); txt.setAttribute('y',Math.max(12, topY-10));
+    txt.setAttribute('text-anchor','middle'); txt.setAttribute('font-size','8');
+    txt.setAttribute('font-weight','700'); txt.setAttribute('font-family','inherit');
+    txt.setAttribute('fill',pc.c); txt.setAttribute('fill-opacity','0.45');
+    txt.setAttribute('letter-spacing','1.2');
+    txt.textContent = p.toUpperCase();
+    gLabels.appendChild(txt);
+  });
+  svgEl.appendChild(gLabels);
+
+  // Floating animation (breathing effect)
+  let t = 0;
+  function mmAnim(){
+    mmAnimId = requestAnimationFrame(mmAnim);
+    t += 0.008;
+    nodeEls.forEach((ne,i) => {
+      const n = ne.nd;
+      const phase = i * 0.7 + n.r * 0.3;
+      const dx = Math.sin(t*0.6 + phase) * 1.5;
+      const dy = Math.cos(t*0.45 + phase*1.2) * 1.8;
+      const nx = n.baseX + dx;
+      const ny = n.baseY + dy;
+      ne.dot.setAttribute('cx', nx); ne.dot.setAttribute('cy', ny);
+      ne.glow.setAttribute('cx', nx); ne.glow.setAttribute('cy', ny);
+      ne.ring.setAttribute('cx', nx); ne.ring.setAttribute('cy', ny);
+      const glowPulse = 0.12 + Math.sin(t*1.2 + phase)*0.06;
+      ne.glow.setAttribute('opacity', (mmFilter==='all'||n.p===mmFilter) ? glowPulse : 0.01);
+    });
+    // Update link positions to follow their nodes
+    gLines.childNodes.forEach(line => {
+      if(!line._a||!line._b) return;
+      const ai = nodes.indexOf(line._a), bi = nodes.indexOf(line._b);
+      const pa = ai*0.7 + line._a.r*0.3, pb = bi*0.7 + line._b.r*0.3;
+      line.setAttribute('x1', line._a.baseX + Math.sin(t*0.6+pa)*1.5);
+      line.setAttribute('y1', line._a.baseY + Math.cos(t*0.45+pa*1.2)*1.8);
+      line.setAttribute('x2', line._b.baseX + Math.sin(t*0.6+pb)*1.5);
+      line.setAttribute('y2', line._b.baseY + Math.cos(t*0.45+pb*1.2)*1.8);
+    });
+  }
+  mmAnim();
+}
+
+// Mini map filter buttons
+document.querySelectorAll('#mm-filters .mini-map-filter').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('#mm-filters .mini-map-filter').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    mmFilter=btn.dataset.mm;
+    renderMiniMap();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// VAULT MAP — D3 Force Graph
+// ═══════════════════════════════════════════════════════════════════
+const MAP_PROTO_COLORS = {
+  hyperliquid: { color:'#00b857', glow:'rgba(0,184,87,.45)' },
+  drift:       { color:'#FFB020', glow:'rgba(255,176,32,.45)' },
+  lighter:     { color:'#A78BFA', glow:'rgba(167,139,250,.45)' },
+  nado:        { color:'#8899bb', glow:'rgba(136,153,187,.45)' },
+};
+const MAP_ENTRY_CFG = {
+  good:    { color:'#10b981', icon:'🟢', label:'Good entry',   bg:'rgba(16,185,129,.1)',  border:'rgba(16,185,129,.25)' },
+  neutral: { color:'#f59e0b', icon:'🟡', label:'Neutral',      bg:'rgba(245,158,11,.1)', border:'rgba(245,158,11,.25)' },
+  caution: { color:'#f43f5e', icon:'🔴', label:'Caution',      bg:'rgba(244,63,94,.1)',  border:'rgba(244,63,94,.25)' },
+};
+const mapRiskColor = s => s<35?'#10b981':s<65?'#f59e0b':'#f43f5e';
+const mapFmtAPR = v => (v*100).toFixed(1)+'%';
+const mapFmtTVL = v => !v||isNaN(v)?'N/A':v>=1e9?'$'+(v/1e9).toFixed(1)+'B':v>=1e6?'$'+(v/1e6).toFixed(1)+'M':'$'+(v/1e3).toFixed(0)+'K';
+const mapFmt30d = v => v==null||isNaN(v)?'N/A':(v>=0?'+':'')+(v*100).toFixed(1)+'%';
+
+let mapSim=null, mapAnimId=null, mapMode='explore';
+let mapProtoFilter='all', mapSignalsOnly=false;
+let mapSelId=null, mapDivMode=false;
+let mapCompSet=new Set();
+let mapNodes=[], mapLinks=[], mapNodeMap=new Map();
+let mapSvgSel=null, mapG=null, mapZoom=null;
+let mapInitT=null;
+let mapLinkSel=null, mapNodeSel=null, mapPartSel=null, mapHaloSel=null;
+let mapParticles=[];
+
+function mapGetEntry(v){
+  const risk=v.risk_score||50, apr=v.apy||v.apr||0;
+  if(risk<38&&apr>0.12) return 'good';
+  if(risk>65) return 'caution';
+  return 'neutral';
+}
+
+function mapBuildData(){
+  const all=[...PV,...UV];
+  mapNodes=all.map(v=>({
+    id:v.id, protocol:v.protocol||'nado',
+    name:v.vault_name||v.name||v.id,
+    tvl_usd:v.tvl_usd||0,
+    apr:v.apy||v.apr||0,
+    pnl_30d:v.r30!=null?v.r30:null,
+    risk_score:v.risk_score||50,
+    risk_band:v.risk_band||'moderate',
+    age_label:v.age_label||(v.age_days?v.age_days+'d':'?'),
+    vault_url:v.vault_url||null,
+    entry_signal:mapGetEntry(v),
+    data_quality:v.data_quality||'mock',
+    _sel:false,
+  }));
+  mapNodeMap=new Map(mapNodes.map(d=>[d.id,d]));
+  // Build links
+  const seen=new Set(); mapLinks=[];
+  const lk=(a,b)=>a<b?a+'|'+b:b+'|'+a;
+  mapNodes.forEach((a,i)=>mapNodes.forEach((b,j)=>{
+    if(i>=j) return;
+    const k=lk(a.id,b.id); if(seen.has(k)) return;
+    const sp=a.protocol===b.protocol;
+    const ad=Math.abs(a.apr-b.apr);
+    let type=null,str=0;
+    if(sp&&ad<0.06){type='pa';str=3;}
+    else if(sp&&Math.random()<0.28){type='p';str=2;}
+    else if(!sp&&ad<0.06&&Math.random()<0.15){type='a';str=1.5;}
+    if(type){mapLinks.push({source:a.id,target:b.id,type,str,ad});seen.add(k);}
+  }));
+}
+
+const mapTvlR=()=>d3.scaleSqrt()
+  .domain([d3.min(mapNodes,d=>d.tvl_usd)||1, d3.max(mapNodes,d=>d.tvl_usd)||1e8])
+  .range([5,24]);
+
+function renderMap(){
+  if(!mapNodes.length) mapBuildData();
+  if(mapAnimId){cancelAnimationFrame(mapAnimId);mapAnimId=null;}
+  if(mapSim) mapSim.stop();
+
+  const el=document.getElementById('map-svg');
+  if(!el) return;
+
+  const W=el.clientWidth||innerWidth;
+  const H=el.clientHeight||(innerHeight-104);
+  const R=mapTvlR();
+
+  // Clear
+  d3.select('#map-svg').selectAll('*').remove();
+  mapSvgSel=d3.select('#map-svg').attr('width',W).attr('height',H);
+  mapG=mapSvgSel.append('g');
+  const defs=mapSvgSel.append('defs');
+
+  // Filters
+  const addF=(id,dev)=>{
+    const f=defs.append('filter').attr('id',id).attr('x','-60%').attr('y','-60%').attr('width','220%').attr('height','220%');
+    f.append('feGaussianBlur').attr('stdDeviation',dev).attr('result','b');
+    const m=f.append('feMerge');
+    m.append('feMergeNode').attr('in','b');
+    m.append('feMergeNode').attr('in','SourceGraphic');
+  };
+  addF('mglow-sm',3); addF('mglow-lg',9);
+  const hf=defs.append('filter').attr('id','mhalo-blur').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+  hf.append('feGaussianBlur').attr('stdDeviation',50);
+
+  // Gradients per protocol
+  Object.entries(MAP_PROTO_COLORS).forEach(([p,{color}])=>{
+    const gr=defs.append('radialGradient').attr('id','mg-'+p).attr('cx','30%').attr('cy','30%');
+    gr.append('stop').attr('offset','0%').attr('stop-color',d3.color(color).brighter(.8).formatHex());
+    gr.append('stop').attr('offset','100%').attr('stop-color',color);
+  });
+  const lpa=defs.append('linearGradient').attr('id','mlg-pa');
+  lpa.append('stop').attr('offset','0%').attr('stop-color','#00d4ff');
+  lpa.append('stop').attr('offset','100%').attr('stop-color','#00ff88');
+
+  // Zoom
+  mapInitT=d3.zoomIdentity.translate(W/2,H/2).scale(mapNodes.length>30?0.78:0.9);
+  mapZoom=d3.zoom().scaleExtent([0.08,6])
+    .on('zoom',e=>mapG.attr('transform',e.transform));
+  mapSvgSel.call(mapZoom);
+  mapSvgSel.call(mapZoom.transform,mapInitT);
+  mapSvgSel.on('click',()=>{mapClearSel();document.getElementById('map-panel').classList.remove('open');});
+
+  // Cluster halos
+  const halosData=Object.keys(MAP_PROTO_COLORS).map(p=>({p,x:0,y:0,rx:70,ry:70}));
+  mapHaloSel=mapG.append('g').selectAll('ellipse').data(halosData).join('ellipse')
+    .attr('fill',d=>MAP_PROTO_COLORS[d.p].color).attr('fill-opacity',0.05)
+    .attr('stroke',d=>MAP_PROTO_COLORS[d.p].color).attr('stroke-opacity',0.07)
+    .attr('stroke-width',1).attr('filter','url(#mhalo-blur)').attr('pointer-events','none');
+
+  // Simulation
+  mapSim=d3.forceSimulation(mapNodes)
+    .force('link',d3.forceLink(mapLinks).id(d=>d.id)
+      .distance(d=>d.type==='pa'?55:d.type==='p'?80:110)
+      .strength(d=>d.type==='pa'?0.06:d.type==='p'?0.03:0.012))
+    .force('charge',d3.forceManyBody().strength(-100).distanceMax(280))
+    .force('center',d3.forceCenter(0,0))
+    .force('collision',d3.forceCollide().radius(d=>R(d.tvl_usd)+6))
+    .force('x',d3.forceX(0).strength(0.02))
+    .force('y',d3.forceY(0).strength(0.02))
+    .alphaDecay(0.013);
+
+  // Links
+  mapLinkSel=mapG.append('g').selectAll('line').data(mapLinks).join('line')
+    .attr('stroke',d=>{
+      const s=mapNodeMap.get(d.source.id||d.source);
+      return d.type==='pa'?'url(#mlg-pa)':s?MAP_PROTO_COLORS[s.protocol]?.color||'#fff':'#fff';
+    })
+    .attr('stroke-opacity',d=>d.type==='pa'?0.24:d.type==='p'?0.14:0.09)
+    .attr('stroke-width',d=>d.type==='pa'?1.7:d.type==='p'?1:0.6)
+    .attr('stroke-dasharray',d=>d.type==='p'?'4,3':d.type==='a'?'2,4':null)
+    .style('cursor','pointer')
+    .on('mouseenter',function(ev,d){
+      d3.select(this).transition().duration(100).attr('stroke-opacity',.7).attr('stroke-width',3);
+      const s=mapNodeMap.get(d.source.id||d.source),t=mapNodeMap.get(d.target.id||d.target);
+      if(!s||!t) return;
+      const c=MAP_PROTO_COLORS[s.protocol]?.color||'#fff';
+      let h=`<div style="font-weight:700;margin-bottom:5px;font-size:11px">${s.name} ↔ ${t.name}</div>`;
+      if(d.type==='pa'||d.type==='p') h+=`<div style="margin:2px 0"><span style="font-size:9px;padding:2px 6px;border-radius:4px;background:${c}22;color:${c};border:1px solid ${c}44;font-weight:700;text-transform:uppercase">Protocol</span> ${s.protocol}</div>`;
+      if(d.type==='pa'||d.type==='a') h+=`<div style="margin:2px 0"><span style="font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(0,212,255,.1);color:#00d4ff;border:1px solid rgba(0,212,255,.25);font-weight:700;text-transform:uppercase">APR</span> ${mapFmtAPR(s.apr)} ≈ ${mapFmtAPR(t.apr)}</div>`;
+      h+=`<div style="font-size:10px;color:rgba(255,255,255,.35);margin-top:4px">APR diff: ${(d.ad*100).toFixed(1)}pp</div>`;
+      const lt=document.getElementById('map-link-tip');
+      lt.innerHTML=h; lt.style.display='block';
+    })
+    .on('mousemove',ev=>{
+      const lt=document.getElementById('map-link-tip');
+      lt.style.left=(ev.clientX+14)+'px'; lt.style.top=(ev.clientY-10)+'px';
+    })
+    .on('mouseleave',function(ev,d){
+      d3.select(this).transition().duration(150)
+        .attr('stroke-opacity',d.type==='pa'?0.24:d.type==='p'?0.14:0.09)
+        .attr('stroke-width',d.type==='pa'?1.7:d.type==='p'?1:0.6);
+      document.getElementById('map-link-tip').style.display='none';
+    });
+
+  // Particles on strong links
+  mapParticles=[];
+  mapLinks.filter(l=>l.type==='pa').forEach(l=>{
+    for(let i=0;i<3;i++) mapParticles.push({link:l,t:i/3,speed:0.004+Math.random()*0.003});
+  });
+  mapPartSel=mapG.append('g').attr('pointer-events','none')
+    .selectAll('circle').data(mapParticles).join('circle').attr('r',2).attr('opacity',0);
+
+  // Nodes
+  mapNodeSel=mapG.append('g').selectAll('g').data(mapNodes).join('g')
+    .attr('class','mnode').style('cursor','pointer')
+    .call(d3.drag().on('start',mds).on('drag',mdd).on('end',mde));
+
+  // Entry ring
+  mapNodeSel.append('circle').attr('class','mentry-ring')
+    .attr('r',d=>R(d.tvl_usd)+4).attr('fill','none')
+    .attr('stroke',d=>MAP_ENTRY_CFG[d.entry_signal].color)
+    .attr('stroke-width',d=>d.entry_signal==='good'?2:1.2)
+    .attr('stroke-opacity',d=>d.entry_signal==='good'?0.6:d.entry_signal==='caution'?0.5:0.18)
+    .attr('stroke-dasharray',d=>d.entry_signal==='neutral'?'3,3':null)
+    .attr('pointer-events','none');
+
+  // Halo
+  mapNodeSel.append('circle').attr('class','mnode-halo')
+    .attr('r',d=>R(d.tvl_usd)+10).attr('fill',d=>MAP_PROTO_COLORS[d.protocol]?.color||'#fff')
+    .attr('fill-opacity',0).attr('pointer-events','none');
+
+  // Circle
+  mapNodeSel.append('circle').attr('class','mnode-circle')
+    .attr('r',d=>R(d.tvl_usd))
+    .attr('fill',d=>`url(#mg-${d.protocol})`)
+    .attr('stroke',d=>MAP_PROTO_COLORS[d.protocol]?.color||'#fff')
+    .attr('stroke-width',1.5).attr('stroke-opacity',.75);
+
+  // APR label
+  mapNodeSel.each(function(d){
+    const r2=R(d.tvl_usd);
+    if(r2>=12){
+      const pc=MAP_PROTO_COLORS[d.protocol]?.color||'#fff';
+      d3.select(this).append('text').attr('text-anchor','middle').attr('dominant-baseline','middle')
+        .attr('dy',r2>=16?-4:0).attr('font-size',r2>=16?8:7).attr('font-weight','700')
+        .attr('fill',pc).attr('pointer-events','none').text(mapFmtAPR(d.apr));
+      if(r2>=16)
+        d3.select(this).append('text').attr('text-anchor','middle').attr('dominant-baseline','middle')
+          .attr('dy',6).attr('font-size',5.5).attr('fill','rgba(255,255,255,.35)').attr('pointer-events','none').text('APR');
+    }
+  });
+
+  // Name label for large nodes
+  mapNodeSel.each(function(d){
+    const r2=R(d.tvl_usd);
+    if(r2>=14)
+      d3.select(this).append('text').attr('text-anchor','middle').attr('font-size',9).attr('font-weight','500')
+        .attr('fill','rgba(255,255,255,.45)').attr('pointer-events','none')
+        .attr('dy',r2+13).text(d.name.length>16?d.name.slice(0,14)+'…':d.name);
+  });
+
+  // Hover events
+  mapNodeSel
+    .on('mouseenter',function(ev,d){
+      if(d._sel) return;
+      d3.select(this).select('.mnode-circle').transition().duration(130)
+        .attr('r',R(d.tvl_usd)*1.22).attr('filter','url(#mglow-sm)');
+      if(mapMode==='explore')
+        d3.select(this).select('.mnode-halo').transition().duration(180).attr('fill-opacity',0.12);
+      const ec=MAP_ENTRY_CFG[d.entry_signal];
+      const nt=document.getElementById('map-node-tip');
+      const riskColor=mapRiskColor(d.risk_score||50);
+      const r30=d.pnl_30d;
+      const r30Str=r30!=null?` &nbsp;<span style="color:${r30>=0?'#10b981':'#f43f5e'};font-size:10px">${r30>=0?'+':''}${(r30*100).toFixed(1)}% 30D</span>`:'';
+      nt.innerHTML=`<strong>${d.name}</strong> &nbsp;<span style="color:#00d4ff">${mapFmtAPR(d.apr)}</span> &nbsp;<span style="color:rgba(255,255,255,.45)">${mapFmtTVL(d.tvl_usd)}</span> &nbsp;<span style="color:${riskColor};font-size:9px">risk ${d.risk_score||'?'}</span>${r30Str} &nbsp;${ec.icon}`;
+      nt.style.display='block';
+    })
+    .on('mousemove',ev=>{
+      const nt=document.getElementById('map-node-tip');
+      nt.style.left=(ev.clientX+14)+'px'; nt.style.top=(ev.clientY-10)+'px';
+    })
+    .on('mouseleave',function(ev,d){
+      if(!d._sel){
+        d3.select(this).select('.mnode-circle').transition().duration(180).attr('r',R(d.tvl_usd)).attr('filter',null);
+        d3.select(this).select('.mnode-halo').transition().duration(180).attr('fill-opacity',0);
+      }
+      document.getElementById('map-node-tip').style.display='none';
+    })
+    .on('click',function(ev,d){
+      ev.stopPropagation();
+      if(ev.shiftKey){mapToggleCompare(d);return;}
+      mapSelectVault(d);
+    });
+
+  // ── Best-in-protocol crown badge ─────────────────────────────────
+  const bestByProto={};
+  mapNodes.forEach(v=>{
+    const score=v.apr/Math.max(v.risk_score,5);
+    if(!bestByProto[v.protocol]||score>bestByProto[v.protocol].score)
+      bestByProto[v.protocol]={id:v.id,score};
+  });
+  const bestIds=new Set(Object.values(bestByProto).map(b=>b.id));
+  mapNodeSel.filter(d=>bestIds.has(d.id)).each(function(d){
+    const r2=R(d.tvl_usd);
+    d3.select(this).append('text')
+      .attr('text-anchor','middle').attr('dominant-baseline','auto')
+      .attr('dy',-(r2+6)).attr('font-size',9).attr('pointer-events','none')
+      .attr('fill','rgba(255,215,0,0.85)').text('★');
+  });
+
+  // Tick
+  const hD=halosData;
+  mapSim.on('tick',()=>{
+    if(mapMode==='scatter') return; // scatter positions are set explicitly
+    mapLinkSel.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+              .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+    mapNodeSel.attr('transform',d=>`translate(${d.x},${d.y})`);
+    hD.forEach(h=>{
+      const pv=mapNodes.filter(v=>v.protocol===h.p);
+      if(!pv.length) return;
+      h.x=d3.mean(pv,v=>v.x||0); h.y=d3.mean(pv,v=>v.y||0);
+      const ex=d3.deviation(pv,v=>v.x||0)||45, ey=d3.deviation(pv,v=>v.y||0)||45;
+      h.rx=ex*1.3+60; h.ry=ey*1.3+60;
+    });
+    mapHaloSel.attr('cx',d=>d.x).attr('cy',d=>d.y).attr('rx',d=>d.rx).attr('ry',d=>d.ry);
+  });
+
+  mapSim.on('end',()=>{ setTimeout(mapDrawClusterLabels,200); });
+
+  // Animation loop
+  function anim(){
+    mapAnimId=requestAnimationFrame(anim);
+    const now=Date.now();
+    // Particles
+    mapParticles.forEach(p=>{p.t=(p.t+p.speed)%1;});
+    mapPartSel
+      .attr('cx',d=>{const s=d.link.source,t=d.link.target;return(s.x||0)+((t.x||0)-(s.x||0))*d.t;})
+      .attr('cy',d=>{const s=d.link.source,t=d.link.target;return(s.y||0)+((t.y||0)-(s.y||0))*d.t;})
+      .attr('fill',d=>{const s=mapNodeMap.get(d.link.source.id||d.link.source);return s?MAP_PROTO_COLORS[s.protocol]?.color||'#fff':'#00d4ff';})
+      .attr('opacity',d=>{const dist=Math.abs(d.t-.5)/.5;return Math.max(0,(1-dist*dist)*.65);});
+    // Pulse
+    if(mapMode==='explore'){
+      const R2=mapTvlR();
+      mapNodeSel.each(function(d){
+        if(d._sel) return;
+        const base=R2(d.tvl_usd);
+        const freq=0.8+d.apr*2.5;
+        const pulse=base+Math.sin((now/1000)*freq+d.apr*40)*1.0;
+        const glow=0.04+d.apr*.08;
+        d3.select(this).select('.mnode-circle').attr('r',pulse);
+        d3.select(this).select('.mnode-halo')
+          .attr('r',base+9+Math.sin((now/1000)*freq*.7)*2)
+          .attr('fill-opacity',glow*(0.4+0.6*Math.sin((now/1000)*freq*1.2)));
+      });
+    }
+  }
+  anim();
+
+  // Init mode + filter state
+  setMapMode(mapMode, true);
+  mapApplyFilter();
+  mapUpdateStats();
+
+  // Controls
+  document.getElementById('map-zi').onclick=()=>mapSvgSel.transition().duration(260).call(mapZoom.scaleBy,1.4);
+  document.getElementById('map-zo').onclick=()=>mapSvgSel.transition().duration(260).call(mapZoom.scaleBy,.72);
+  document.getElementById('map-reset').onclick=()=>mapSvgSel.transition().duration(480).call(mapZoom.transform,mapInitT);
+  document.getElementById('map-btn-resim').onclick=()=>{if(mapMode==='explore')mapSim.alpha(0.5).alphaTarget(0).restart();};
+}
+
+// ─── MODES ─────────────────────────────────────────────────────────
+function setMapMode(mode, skipAnim){
+  mapMode=mode;
+  document.getElementById('map-tab-explore').classList.toggle('active',mode==='explore');
+  document.getElementById('map-tab-scatter').classList.toggle('active',mode==='scatter');
+  // Legacy DOM overlays — always hidden (we use SVG axes now)
+  ['map-ax-x','map-ax-y','map-ax-zone','map-ax-zone-lbl'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.style.display='none';
+  });
+  // Close panel on mode switch
+  mapClearSel();
+  document.getElementById('map-panel').classList.remove('open');
+
+  const opp=document.getElementById('map-opp');
+  if(mode==='scatter'){
+    if(mapSim) mapSim.stop();
+    opp.classList.add('show');
+    // Hide explore-only visuals
+    if(mapG) mapG.select('.mcluster-labels').remove();
+    if(mapLinkSel) mapLinkSel.transition().duration(skipAnim?0:280).attr('stroke-opacity',0);
+    if(mapHaloSel) mapHaloSel.transition().duration(skipAnim?0:280).attr('fill-opacity',0).attr('stroke-opacity',0);
+    if(mapPartSel) mapPartSel.attr('opacity',0);
+    mapPositionScatter(skipAnim);
+  } else {
+    opp.classList.remove('show');
+    // Remove scatter SVG axes + cluster labels (will redraw)
+    if(mapG){ mapG.select('.mscatter-axes').remove(); mapG.select('.mcluster-labels').remove(); }
+    // Restore explore-mode zoom center
+    if(mapSvgSel&&mapInitT) mapSvgSel.transition().duration(skipAnim?0:420).call(mapZoom.transform, mapInitT);
+    if(mapLinkSel) mapLinkSel.transition().duration(skipAnim?0:280)
+      .attr('stroke-opacity',d=>d.type==='pa'?0.24:d.type==='p'?0.14:0.09);
+    if(mapHaloSel) mapHaloSel.transition().duration(skipAnim?0:360).attr('fill-opacity',0.05).attr('stroke-opacity',0.07);
+    if(mapSim) mapSim.alpha(0.3).restart();
+    setTimeout(()=>mapDrawClusterLabels(), 800);
+  }
+}
+
+function mapPositionScatter(skipAnim){
+  if(!mapNodeSel||!mapSvgSel||!mapG) return;
+  const el=document.getElementById('map-svg');
+  const W=el.clientWidth||window.innerWidth;
+  const H=el.clientHeight||(window.innerHeight-104);
+
+  // Reset zoom to identity so scene coords = screen coords
+  mapSvgSel.transition().duration(skipAnim?0:350).call(mapZoom.transform, d3.zoomIdentity);
+
+  // Auto-scale: compute APR range from vaults that actually have APR
+  const aprVals=[...mapNodes].map(d=>d.apr).filter(v=>v>0.005).sort((a,b)=>a-b);
+  let aprMax=aprVals.length ? aprVals[Math.floor(aprVals.length*0.93)] : 0.5;
+  aprMax=Math.max(aprMax, 0.25); // minimum 25%
+  aprMax=Math.min(aprMax, 6);    // cap at 600%
+
+  const PAD={l:72, r:28, t:42, b:52};
+  const xSc=d3.scaleLinear().domain([0,100]).range([PAD.l, W-PAD.r]);
+  const ySc=d3.scaleLinear().domain([0, aprMax]).range([H-PAD.b, PAD.t]);
+
+  // Position nodes — vaults with 0 APR go to bottom row
+  mapNodeSel.transition().duration(skipAnim?0:700).ease(d3.easeCubicInOut)
+    .attr('transform',d=>{
+      const x=xSc(Math.max(0,Math.min(100,d.risk_score||50)));
+      const apr=Math.max(0, Math.min(aprMax, d.apr));
+      return `translate(${x},${ySc(apr)})`;
+    });
+
+  // ── Draw SVG axes (inside mapG so they scale with zoom/pan) ──────
+  mapG.select('.mscatter-axes').remove();
+  // Insert axes group BEFORE links so nodes render on top
+  const aG=mapG.insert('g',':first-child').attr('class','mscatter-axes').attr('pointer-events','none');
+
+  // Background card
+  aG.append('rect').attr('x',0).attr('y',0).attr('width',W).attr('height',H)
+    .attr('fill','rgba(8,10,18,0)');
+
+  // Grid lines (horizontal)
+  const aprStep = aprMax<=0.5?0.05:aprMax<=1?0.1:aprMax<=2?0.2:aprMax<=4?0.5:1;
+  for(let v=aprStep; v<=aprMax*1.01; v+=aprStep){
+    const y=ySc(v);
+    aG.append('line').attr('x1',PAD.l).attr('y1',y).attr('x2',W-PAD.r).attr('y2',y)
+      .attr('stroke','rgba(255,255,255,0.05)').attr('stroke-width',1);
+    aG.append('text').attr('x',PAD.l-7).attr('y',y+4)
+      .attr('text-anchor','end').attr('font-size',10).attr('font-family','inherit')
+      .attr('fill','rgba(255,255,255,0.28)').text((v*100).toFixed(0)+'%');
+  }
+  // Grid lines (vertical)
+  [25,50,75].forEach(v=>{
+    aG.append('line').attr('x1',xSc(v)).attr('y1',PAD.t).attr('x2',xSc(v)).attr('y2',H-PAD.b)
+      .attr('stroke','rgba(255,255,255,0.04)').attr('stroke-width',1).attr('stroke-dasharray','3,4');
+  });
+
+  // Axes lines
+  aG.append('line').attr('x1',PAD.l).attr('y1',H-PAD.b).attr('x2',W-PAD.r).attr('y2',H-PAD.b)
+    .attr('stroke','rgba(255,255,255,0.15)').attr('stroke-width',1);
+  aG.append('line').attr('x1',PAD.l).attr('y1',PAD.t).attr('x2',PAD.l).attr('y2',H-PAD.b)
+    .attr('stroke','rgba(255,255,255,0.15)').attr('stroke-width',1);
+
+  // X axis ticks + labels
+  [0,25,50,75,100].forEach(v=>{
+    const x=xSc(v);
+    aG.append('line').attr('x1',x).attr('y1',H-PAD.b).attr('x2',x).attr('y2',H-PAD.b+4)
+      .attr('stroke','rgba(255,255,255,0.2)').attr('stroke-width',1);
+    aG.append('text').attr('x',x).attr('y',H-PAD.b+16)
+      .attr('text-anchor','middle').attr('font-size',10).attr('font-family','inherit')
+      .attr('fill','rgba(255,255,255,0.28)').text(v);
+  });
+
+  // Axis titles
+  aG.append('text').attr('x',(PAD.l+W-PAD.r)/2).attr('y',H-PAD.b+34)
+    .attr('text-anchor','middle').attr('font-size',10).attr('font-family','inherit')
+    .attr('fill','rgba(255,255,255,0.22)').attr('letter-spacing','1').text('RISK SCORE →');
+  aG.append('text').attr('transform',`rotate(-90)`)
+    .attr('x',-((PAD.t+H-PAD.b)/2)).attr('y',14)
+    .attr('text-anchor','middle').attr('font-size',10).attr('font-family','inherit')
+    .attr('fill','rgba(255,255,255,0.22)').attr('letter-spacing','1').text('← APR');
+
+  // Best Zone: low risk + decent APR quadrant
+  const bzRisk=40;
+  const medianApr=aprVals.length?aprVals[Math.floor(aprVals.length*0.55)]:aprMax*0.3;
+  const bzAprMin=Math.max(medianApr, aprMax*0.15);
+  const bzX1=PAD.l+1, bzX2=xSc(bzRisk);
+  const bzY1=ySc(aprMax), bzY2=ySc(bzAprMin);
+  if(bzX2>bzX1+30 && bzY2>bzY1+20){
+    aG.append('rect').attr('x',bzX1).attr('y',bzY1)
+      .attr('width',bzX2-bzX1).attr('height',bzY2-bzY1)
+      .attr('rx',6).attr('fill','rgba(16,185,129,0.03)')
+      .attr('stroke','rgba(16,185,129,0.18)').attr('stroke-dasharray','5,3');
+    aG.append('text').attr('x',bzX1+8).attr('y',bzY2-8)
+      .attr('text-anchor','start').attr('font-size',8).attr('font-weight','700').attr('font-family','inherit')
+      .attr('fill','rgba(16,185,129,0.4)').text('BEST ZONE');
+  }
+
+  // Quadrant corner labels
+  [
+    {x:W-PAD.r-4, y:PAD.t+14, label:'High risk · High APR', align:'end', color:'rgba(245,158,11,.32)'},
+    {x:W-PAD.r-4, y:H-PAD.b-10, label:'High risk · Low APR', align:'end', color:'rgba(244,63,94,.3)'},
+  ].forEach(q=>{
+    aG.append('text').attr('x',q.x).attr('y',q.y)
+      .attr('text-anchor',q.align).attr('font-size',9).attr('font-family','inherit')
+      .attr('fill',q.color).text(q.label);
+  });
+
+  // ── Efficient frontier line ─────────────────────────────────────
+  const sortedFront=[...mapNodes].filter(v=>v.apr>0.005&&v.tvl_usd>5000)
+    .sort((a,b)=>a.risk_score-b.risk_score);
+  let frontMaxApr=0; const frontier=[];
+  for(const v of sortedFront){ if(v.apr>frontMaxApr){ frontier.push(v); frontMaxApr=v.apr; } }
+  if(frontier.length>1){
+    const lineGen=d3.line()
+      .x(d=>xSc(Math.min(100,Math.max(0,d.risk_score))))
+      .y(d=>ySc(Math.min(aprMax,d.apr)))
+      .curve(d3.curveMonotoneX);
+    aG.append('path').datum(frontier).attr('d',lineGen)
+      .attr('fill','none').attr('stroke','rgba(16,185,129,0.3)')
+      .attr('stroke-width',1.5).attr('stroke-dasharray','7,4');
+    const fl=frontier[frontier.length-1];
+    aG.append('text').attr('x',xSc(Math.min(100,fl.risk_score))+6)
+      .attr('y',ySc(Math.min(aprMax,fl.apr))-6)
+      .attr('font-size',8).attr('font-family','inherit')
+      .attr('fill','rgba(16,185,129,0.42)').text('Efficient Frontier');
+  }
+
+  // Best 5 opportunities: best APR/Risk ratio (ignore 0-APR vaults)
+  const ranked=[...mapNodes].filter(v=>v.apr>0.01&&v.tvl_usd>5000)
+    .sort((a,b)=>(b.apr/Math.max(b.risk_score,5))-(a.apr/Math.max(a.risk_score,5)));
+  const best=ranked.slice(0,5);
+  document.getElementById('map-opp-list').innerHTML=best.map((v,i)=>`
+    <div class="map-opp-item" onclick="mapSelectVault(mapNodeMap.get('${v.id}'))">
+      <div class="map-opp-rk">${i+1}</div>
+      <div class="map-opp-dot" style="background:${MAP_PROTO_COLORS[v.protocol]?.color||'#fff'}"></div>
+      <div class="map-opp-nm">${v.name}</div>
+      <div class="map-opp-apr">${mapFmtAPR(v.apr)}</div>
+    </div>`).join('');
+}
+
+// ─── CLUSTER LABELS (Explore mode) ──────────────────────────────
+function mapDrawClusterLabels(){
+  if(!mapG||mapMode!=='explore') return;
+  mapG.select('.mcluster-labels').remove();
+  const clG=mapG.append('g').attr('class','mcluster-labels').attr('pointer-events','none');
+  Object.keys(MAP_PROTO_COLORS).forEach(proto=>{
+    const pv=mapNodes.filter(v=>v.protocol===proto);
+    if(pv.length<2) return;
+    const cx=d3.mean(pv,v=>v.x||0);
+    const cy=d3.mean(pv,v=>v.y||0);
+    const ey=d3.deviation(pv,v=>v.y||0)||45;
+    const color=MAP_PROTO_COLORS[proto]?.color||'#fff';
+    const labelY=cy-ey*1.25-72;
+    clG.append('text').attr('x',cx).attr('y',labelY)
+      .attr('text-anchor','middle').attr('font-size',13).attr('font-weight','800')
+      .attr('fill',color).attr('fill-opacity',0.5).attr('letter-spacing','1.8')
+      .text(proto.toUpperCase());
+    const tvlSum=d3.sum(pv,v=>v.tvl_usd||0);
+    clG.append('text').attr('x',cx).attr('y',labelY+16)
+      .attr('text-anchor','middle').attr('font-size',9).attr('fill','rgba(255,255,255,0.22)')
+      .text(pv.length+' vaults · '+mapFmtTVL(tvlSum)+' TVL');
+  });
+}
+
+// ─── SELECT ──────────────────────────────────────────────────────
+function mapClearSel(){
+  if(mapSelId){const v=mapNodeMap.get(mapSelId);if(v)v._sel=false;}
+  mapSelId=null; mapDivMode=false;
+  if(!mapNodeSel) return;
+  const R=mapTvlR();
+  // Restore all node visuals
+  mapNodeSel.select('.mnode-circle').transition().duration(180)
+    .attr('r',d=>R(d.tvl_usd))
+    .attr('fill-opacity',1).attr('stroke-opacity',.75).attr('filter',null);
+  mapNodeSel.select('.mnode-halo').transition().duration(180).attr('fill-opacity',0);
+  // In explore mode, restore links
+  if(mapMode==='explore' && mapLinkSel)
+    mapLinkSel.transition().duration(180)
+      .attr('stroke-opacity',d=>d.type==='pa'?0.24:d.type==='p'?0.14:0.09)
+      .attr('stroke-width',d=>d.type==='pa'?1.7:d.type==='p'?1:0.6);
+  // In scatter mode, keep links hidden, keep halos hidden
+  if(mapMode==='scatter'){
+    if(mapLinkSel) mapLinkSel.attr('stroke-opacity',0);
+    if(mapHaloSel) mapHaloSel.attr('fill-opacity',0).attr('stroke-opacity',0);
+  }
+  if(mapPartSel) mapPartSel.attr('opacity',0);
+}
+
+function mapSelectVault(d){
+  if(!d) return;
+  mapClearSel();
+  d._sel=true; mapSelId=d.id;
+  const R=mapTvlR();
+
+  if(mapMode==='scatter'){
+    // Scatter: dim non-selected, glow selected — no link/sim changes
+    mapNodeSel.select('.mnode-circle').transition().duration(200)
+      .attr('fill-opacity',n=>n.id===d.id?1:0.18)
+      .attr('stroke-opacity',n=>n.id===d.id?1:0.1);
+    mapNodeSel.filter(n=>n.id===d.id).select('.mnode-circle').transition().duration(200)
+      .attr('r',R(d.tvl_usd)*1.4).attr('filter','url(#mglow-lg)');
+    mapNodeSel.filter(n=>n.id===d.id).select('.mnode-halo').transition().duration(200).attr('fill-opacity',.25);
+  } else {
+    // Explore: show connected cluster
+    const connSet=new Set([d.id]);
+    mapLinks.forEach(l=>{
+      const s=l.source.id||l.source,t=l.target.id||l.target;
+      if(s===d.id||t===d.id){connSet.add(s);connSet.add(t);}
+    });
+    mapNodeSel.select('.mnode-circle').transition().duration(200)
+      .attr('fill-opacity',n=>connSet.has(n.id)?1:0.1)
+      .attr('stroke-opacity',n=>connSet.has(n.id)?.8:.06);
+    mapNodeSel.filter(n=>n.id===d.id).select('.mnode-circle').transition().duration(200)
+      .attr('r',R(d.tvl_usd)*1.35).attr('filter','url(#mglow-lg)');
+    mapNodeSel.filter(n=>n.id===d.id).select('.mnode-halo').transition().duration(200).attr('fill-opacity',.22);
+    if(mapLinkSel){
+      mapLinkSel.transition().duration(200)
+        .attr('stroke-opacity',l=>{const s=l.source.id||l.source,t=l.target.id||l.target;return(s===d.id||t===d.id)?.72:.02;})
+        .attr('stroke-width',l=>{const s=l.source.id||l.source,t=l.target.id||l.target;return(s===d.id||t===d.id)?(l.type==='pa'?3:2):.3;});
+      if(mapPartSel) mapPartSel.attr('opacity',p=>{const s=p.link.source.id||p.link.source,t=p.link.target.id||p.link.target;return(s===d.id||t===d.id)?.75:0;});
+    }
+  }
+  // Fill panel
+  const ec=MAP_ENTRY_CFG[d.entry_signal];
+  const pc=MAP_PROTO_COLORS[d.protocol]?.color||'#fff';
+  document.getElementById('map-p-entry').innerHTML=`<span style="font-size:15px">${ec.icon}</span><span style="color:${ec.color};font-size:11px;font-weight:700">${ec.label}</span>`;
+  document.getElementById('map-p-entry').style.cssText=`background:${ec.bg};border:1px solid ${ec.border};border-radius:9px;padding:7px 9px;display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;`;
+  const pp=document.getElementById('map-p-proto');
+  pp.textContent=d.protocol; pp.style.cssText=`background:${pc}1a;color:${pc};border:1px solid ${pc}44;font-size:9px;font-weight:700;padding:2px 7px;border-radius:5px;text-transform:uppercase;letter-spacing:.4px`;
+  document.getElementById('map-p-name').textContent=d.name;
+  // Rank context
+  const protoVaults=mapNodes.filter(v=>v.protocol===d.protocol).sort((a,b)=>b.apr-a.apr);
+  const aprRankInProto=protoVaults.findIndex(v=>v.id===d.id)+1;
+  const allByRatio=[...mapNodes].filter(v=>v.apr>0.001).sort((a,b)=>(b.apr/Math.max(b.risk_score,5))-(a.apr/Math.max(a.risk_score,5)));
+  const overallRank=allByRatio.findIndex(v=>v.id===d.id)+1;
+  const rankEl=document.getElementById('map-p-rank');
+  if(rankEl){
+    let rankHtml='';
+    if(aprRankInProto>0) rankHtml+=`<span title="APR rank within ${d.protocol}">#${aprRankInProto} in ${d.protocol}</span>`;
+    if(overallRank>0&&overallRank<=allByRatio.length) rankHtml+=`<span title="Overall APR/Risk rank">#${overallRank} overall</span>`;
+    rankEl.innerHTML=rankHtml;
+  }
+  document.getElementById('map-p-apr').textContent=mapFmtAPR(d.apr);
+  document.getElementById('map-p-tvl').textContent=mapFmtTVL(d.tvl_usd);
+  const r30el=document.getElementById('map-p-30d');
+  r30el.textContent=mapFmt30d(d.pnl_30d);
+  r30el.style.color=d.pnl_30d==null?'rgba(255,255,255,.4)':d.pnl_30d>=0?'#10b981':'#f43f5e';
+  document.getElementById('map-p-age').textContent=d.age_label||'?';
+  document.getElementById('map-p-rband').textContent=(d.risk_band||'moderate')+' risk';
+  document.getElementById('map-p-rscore').textContent=(d.risk_score||'?')+'/100';
+  const rf=document.getElementById('map-p-rfill');
+  rf.style.width=(d.risk_score||50)+'%'; rf.style.background=mapRiskColor(d.risk_score||50);
+  // compare btn
+  const inC=mapCompSet.has(d.id);
+  const cbtn=document.getElementById('map-p-compare');
+  cbtn.textContent=inC?'✓ Added':'+ Compare';
+  cbtn.className='map-p-act '+(inC?'added':'primary');
+  // open link
+  const ol=document.getElementById('map-p-open');
+  if(d.vault_url){ol.href=d.vault_url;ol.target='_blank';}
+  else{ol.href='#';ol.onclick=e=>{e.preventDefault();nav('vault',{id:d.id});};}
+  mapShowSimilar(d);
+  document.getElementById('map-p-div-section').style.display='';
+  document.getElementById('map-panel').classList.add('open');
+}
+
+function mapShowSimilar(d){
+  mapDivMode=false;
+  document.getElementById('map-p-div-ttl').textContent='Similar vaults';
+  document.getElementById('map-p-divbtn').textContent='🔀 Diversify';
+  const sim=mapNodes.filter(v=>v.id!==d.id&&v.protocol===d.protocol&&Math.abs(v.apr-d.apr)<0.08)
+    .sort((a,b)=>Math.abs(a.apr-d.apr)-Math.abs(b.apr-d.apr)).slice(0,4);
+  mapRenderDivList(sim);
+}
+function mapShowDiversify(d){
+  mapDivMode=true;
+  document.getElementById('map-p-div-ttl').textContent='Diversification picks';
+  document.getElementById('map-p-divbtn').textContent='← Similar';
+  const diff=mapNodes.filter(v=>v.id!==d.id&&v.protocol!==d.protocol&&Math.abs(v.apr-d.apr)>0.05)
+    .sort((a,b)=>(Math.abs(b.risk_score-d.risk_score)+Math.abs(b.apr-d.apr)*50)-(Math.abs(a.risk_score-d.risk_score)+Math.abs(a.apr-d.apr)*50))
+    .slice(0,4);
+  mapRenderDivList(diff);
+}
+function mapRenderDivList(list){
+  document.getElementById('map-p-div-list').innerHTML=list.map(v=>{
+    const pc=MAP_PROTO_COLORS[v.protocol]?.color||'#fff';
+    const ec=MAP_ENTRY_CFG[v.entry_signal];
+    return `<div class="map-p-div-item" onclick="mapSelectVault(mapNodeMap.get('${v.id}'))">
+      <div class="map-p-div-dot" style="background:${pc}"></div>
+      <div class="map-p-div-nm">${v.name}</div>
+      <span style="font-size:9px;padding:2px 5px;border-radius:4px;background:${ec.color}1a;color:${ec.color};white-space:nowrap">${mapFmtAPR(v.apr)}</span>
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('map-p-divbtn').onclick=()=>{const d=mapNodeMap.get(mapSelId);if(!d)return;mapDivMode?mapShowSimilar(d):mapShowDiversify(d);};
+document.getElementById('map-p-compare').onclick=()=>{const d=mapNodeMap.get(mapSelId);if(!d)return;mapToggleCompare(d);const inC=mapCompSet.has(d.id);const b=document.getElementById('map-p-compare');b.textContent=inC?'✓ Added':'+ Compare';b.className='map-p-act '+(inC?'added':'primary');};
+document.getElementById('map-panel-close').onclick=e=>{e.stopPropagation();mapClearSel();document.getElementById('map-panel').classList.remove('open');};
+
+// ─── COMPARE ──────────────────────────────────────────────────────
+function mapToggleCompare(d){
+  if(mapCompSet.has(d.id)) mapCompSet.delete(d.id);
+  else{if(mapCompSet.size>=4){alert('Max 4 vaults');return;}mapCompSet.add(d.id);}
+  mapUpdateCbar();
+  if(mapNodeSel) mapNodeSel.select('.mentry-ring')
+    .attr('stroke-width',n=>mapCompSet.has(n.id)?3:n.entry_signal==='good'?2:1.2)
+    .attr('stroke-opacity',n=>mapCompSet.has(n.id)?1:n.entry_signal==='good'?.6:n.entry_signal==='caution'?.5:.18);
+}
+function mapUpdateCbar(){
+  const bar=document.getElementById('map-cbar');
+  if(mapCompSet.size===0){bar.classList.remove('show');return;}
+  bar.classList.add('show');
+  document.getElementById('map-cbar-items').innerHTML=[...mapCompSet].map(id=>{
+    const v=mapNodeMap.get(id); if(!v) return '';
+    const c=MAP_PROTO_COLORS[v.protocol]?.color||'#fff';
+    return `<div class="map-cbar-item" style="border-color:${c}44;color:${c}">${v.name}</div>`;
+  }).join('');
+}
+document.getElementById('map-cbar-go').onclick=()=>{
+  // Pre-select vaults in Compare page then navigate
+  selComp=new Set(mapCompSet);
+  nav('compare');
+};
+document.getElementById('map-cbar-x').onclick=()=>{
+  mapCompSet.clear(); mapUpdateCbar();
+  if(mapNodeSel) mapNodeSel.select('.mentry-ring')
+    .attr('stroke-width',d=>d.entry_signal==='good'?2:1.2)
+    .attr('stroke-opacity',d=>d.entry_signal==='good'?.6:d.entry_signal==='caution'?.5:.18);
+};
+
+// ─── FILTER + SIGNALS ─────────────────────────────────────────────
+document.querySelectorAll('#map-proto-pills .map-pill').forEach(pill=>{
+  pill.addEventListener('click',()=>{
+    document.querySelectorAll('#map-proto-pills .map-pill').forEach(p=>p.classList.remove('active'));
+    pill.classList.add('active'); mapProtoFilter=pill.dataset.mp;
+    mapApplyFilter(); mapUpdateStats();
+  });
+});
+document.getElementById('map-btn-signals').onclick=function(){
+  mapSignalsOnly=!mapSignalsOnly; this.classList.toggle('on',mapSignalsOnly);
+  mapApplyFilter(); mapUpdateStats();
+};
+function mapApplyFilter(){
+  if(!mapNodeSel) return;
+  mapClearSel(); document.getElementById('map-panel').classList.remove('open');
+  mapNodeSel.transition().duration(260).attr('opacity',d=>{
+    if(mapProtoFilter!=='all'&&d.protocol!==mapProtoFilter) return 0.06;
+    if(mapSignalsOnly&&d.entry_signal!=='good') return 0.07;
+    return 1;
+  });
+  if(mapMode==='explore' && mapLinkSel)
+    mapLinkSel.transition().duration(260).attr('stroke-opacity',l=>{
+      const s=mapNodeMap.get(l.source.id||l.source),t=mapNodeMap.get(l.target.id||l.target);
+      if(!s||!t) return 0.02;
+      const mp=mapProtoFilter==='all'||(s.protocol===mapProtoFilter&&t.protocol===mapProtoFilter);
+      const ms=!mapSignalsOnly||(s.entry_signal==='good'&&t.entry_signal==='good');
+      if(!mp||!ms) return 0.01;
+      return l.type==='pa'?.38:l.type==='p'?.2:.1;
+    });
+}
+function mapUpdateStats(){
+  const fv=mapNodes.filter(v=>(mapProtoFilter==='all'||v.protocol===mapProtoFilter)&&(!mapSignalsOnly||v.entry_signal==='good'));
+  const el=id=>document.getElementById(id);
+  el('msv').textContent=fv.length||'—';
+  el('mstvl').textContent=fv.length?mapFmtTVL(d3.sum(fv,v=>v.tvl_usd)):'—';
+  el('msapr').textContent=fv.length?mapFmtAPR(d3.max(fv,v=>v.apr)||0):'—';
+  el('msgreen').textContent=fv.filter(v=>v.entry_signal==='good').length||'0';
+}
+
+// Search
+document.getElementById('map-search').addEventListener('input',function(){
+  if(!mapNodeSel) return;
+  const q=this.value.trim().toLowerCase();
+  mapNodeSel.transition().duration(160)
+    .attr('opacity',d=>!q||d.name.toLowerCase().includes(q)||d.protocol.includes(q)?1:0.05);
+});
+
+// Resize
+window.addEventListener('resize',()=>{
+  if(curPage==='map'&&mapSvgSel){
+    const el=document.getElementById('map-svg');
+    const W=el.clientWidth||innerWidth, H=el.clientHeight||(innerHeight-104);
+    mapSvgSel.attr('width',W).attr('height',H);
+    if(mapMode==='scatter') mapPositionScatter(true);
+  }
+});
+
+// ─── DRAG ──────────────────────────────────────────────────────────
+function mds(e,d){
+  if(mapMode==='scatter') return; // no drag in scatter
+  if(!e.active&&mapSim)mapSim.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;
+}
+function mdd(e,d){
+  if(mapMode==='scatter') return;
+  d.fx=e.x;d.fy=e.y;
+}
+function mde(e,d){
+  if(mapMode==='scatter') return;
+  if(!e.active&&mapSim)mapSim.alphaTarget(0);d.fx=null;d.fy=null;
+}
+
 // Init: load data then navigate
 (async function(){
   // Initialize theme and tooltips
   initTheme();
   initTooltips();
   
+  // Show/hide landing page before data loads
+  initLanding();
+
   await loadVaults();
   if(PV.length===0&&UV.length===0)useFallback();
   document.getElementById('lastUpd').textContent='Last updated: '+new Date().toLocaleString();
+
+  // Fill landing page stats (if still visible)
+  fillLandingStats();
+
   const h=location.hash.slice(1);
   if(h.startsWith('vault/'))nav('vault',{id:h.split('/')[1]});
-  else if(['analytics','compare'].includes(h))nav(h);
+  else if(['analytics','compare','map'].includes(h))nav(h);
   else nav('dashboard');
   
   // Start floating APR animation

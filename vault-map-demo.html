@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VaultVision — Vault Map</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #040710;
+  --surface: rgba(255,255,255,0.04);
+  --border: rgba(255,255,255,0.07);
+  --text: #e8f0ff;
+  --muted: rgba(255,255,255,0.38);
+  --accent1: #00d4ff;
+  --accent2: #00ff88;
+  --gradient: linear-gradient(135deg, #00d4ff, #00ff88);
+  --hl: #00e96b; --drift: #FFB020; --lighter: #A78BFA; --nado: #b0bcd4;
+  --green: #00ff88; --yellow: #FFB020; --red: #ff4d6d;
+}
+html, body { width:100%; height:100%; background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  overflow:hidden; user-select:none; }
+
+/* ── HEADER */
+header {
+  position:fixed; top:0; left:0; right:0; z-index:100; height:52px;
+  display:flex; align-items:center; justify-content:space-between; padding:0 16px;
+  background:rgba(4,7,16,.9); backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);
+}
+.logo { font-size:15px; font-weight:800;
+  background:var(--gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.logo span { -webkit-text-fill-color:var(--muted); font-weight:400; font-size:12px; margin-left:6px; }
+
+.header-mid { display:flex; align-items:center; gap:6px; }
+.header-right { display:flex; align-items:center; gap:7px; }
+
+/* mode tabs */
+.mode-tabs { display:flex; gap:3px; background:rgba(255,255,255,.05); border-radius:10px; padding:3px; }
+.mode-tab {
+  padding:5px 12px; border-radius:8px; border:none; background:none;
+  color:var(--muted); font-size:12px; font-weight:600; cursor:pointer; transition:all .2s;
+}
+.mode-tab:hover { color:var(--text); }
+.mode-tab.active { background:rgba(255,255,255,.09); color:var(--text); }
+
+/* filter pills */
+.filter-pills { display:flex; gap:4px; }
+.pill {
+  padding:4px 11px; border-radius:20px; border:1px solid var(--border);
+  background:var(--surface); color:var(--muted);
+  font-size:11px; font-weight:600; cursor:pointer; transition:all .18s;
+  display:flex; align-items:center; gap:4px;
+}
+.pdot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.pill:hover { color:var(--text); border-color:rgba(255,255,255,.18); }
+.pill.active { color:var(--accent1); border-color:var(--accent1); background:rgba(0,212,255,.1); }
+.pill.active[data-p="hyperliquid"] { color:var(--hl); border-color:var(--hl); background:rgba(0,233,107,.08); }
+.pill.active[data-p="drift"]       { color:var(--drift); border-color:var(--drift); background:rgba(255,176,32,.08); }
+.pill.active[data-p="lighter"]     { color:var(--lighter); border-color:var(--lighter); background:rgba(167,139,250,.08); }
+.pill.active[data-p="nado"]        { color:var(--nado); border-color:var(--nado); background:rgba(176,188,212,.08); }
+
+/* search */
+.sw { position:relative; display:flex; align-items:center; }
+.sw svg { position:absolute; left:8px; pointer-events:none; }
+#search { width:150px; padding:4px 9px 4px 25px; border-radius:20px;
+  border:1px solid var(--border); background:var(--surface);
+  color:var(--text); font-size:11px; outline:none; transition:border-color .2s; }
+#search:focus { border-color:var(--accent1); }
+#search::placeholder { color:var(--muted); }
+
+.icon-btn { width:30px; height:30px; border-radius:7px; border:1px solid var(--border);
+  background:var(--surface); color:var(--muted); font-size:13px;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; transition:all .18s; }
+.icon-btn:hover { color:var(--text); border-color:rgba(255,255,255,.18); }
+.icon-btn.on { background:rgba(0,212,255,.12); border-color:var(--accent1); color:var(--accent1); }
+
+/* ── CANVAS */
+#graph { position:fixed; top:52px; left:0; right:0; bottom:0; }
+
+/* ── SCATTER AXES */
+.axis-label {
+  position:fixed; font-size:10px; color:var(--muted); text-transform:uppercase;
+  letter-spacing:.6px; pointer-events:none; z-index:10;
+}
+#ax-x { bottom:68px; left:50%; transform:translateX(-50%); }
+#ax-y { top:50%; left:18px; transform:translateY(-50%) rotate(-90deg); transform-origin:center; }
+#ax-zone {
+  position:fixed; z-index:5; pointer-events:none;
+  border:1px dashed rgba(0,255,136,.18); border-radius:12px;
+  background:rgba(0,255,136,.03);
+  display:none;
+}
+#ax-zone-label {
+  position:fixed; z-index:6; pointer-events:none;
+  font-size:10px; color:rgba(0,255,136,.5); font-weight:700;
+  text-transform:uppercase; letter-spacing:.5px;
+  display:none;
+}
+
+/* ── LEGEND (left) */
+.legend {
+  position:fixed; bottom:20px; left:16px; z-index:100;
+  background:rgba(4,7,16,.88); backdrop-filter:blur(16px);
+  border:1px solid var(--border); border-radius:12px; padding:12px 14px;
+  display:flex; flex-direction:column; gap:8px;
+}
+.leg-title { font-size:9px; font-weight:700; letter-spacing:.7px;
+  text-transform:uppercase; color:var(--muted); }
+.leg-row { display:flex; align-items:center; gap:7px; font-size:11px; }
+.leg-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.leg-signal { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--muted); }
+.sig { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+.leg-sep { height:1px; background:var(--border); margin:2px 0; }
+.leg-size { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--muted); }
+.sc { border-radius:50%; background:rgba(255,255,255,.2); flex-shrink:0; }
+
+/* ── STATS BAR */
+.stats-bar {
+  position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:100;
+  background:rgba(4,7,16,.88); backdrop-filter:blur(16px);
+  border:1px solid var(--border); border-radius:12px;
+  padding:9px 20px; display:flex; gap:20px;
+}
+.si { display:flex; flex-direction:column; align-items:center; gap:1px; }
+.sv { font-size:14px; font-weight:800; background:var(--gradient);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.sl { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; }
+
+/* ── CONTROLS */
+.controls {
+  position:fixed; bottom:20px; right:16px; z-index:100;
+  display:flex; flex-direction:column; gap:5px;
+}
+.ctrl {
+  width:32px; height:32px; border-radius:7px; border:1px solid var(--border);
+  background:rgba(4,7,16,.88); backdrop-filter:blur(12px);
+  color:var(--muted); font-size:14px;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; transition:all .18s;
+}
+.ctrl:hover { color:var(--text); border-color:rgba(255,255,255,.2); }
+
+/* ── COMPARE TOAST */
+#compare-bar {
+  position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
+  z-index:200; display:none;
+  background:rgba(4,7,16,.96); backdrop-filter:blur(20px);
+  border:1px solid rgba(0,212,255,.3); border-radius:14px;
+  padding:10px 16px; gap:12px; align-items:center;
+  box-shadow:0 8px 40px rgba(0,0,0,.6), 0 0 20px rgba(0,212,255,.08);
+  animation:barIn .2s ease;
+}
+@keyframes barIn { from{opacity:0;transform:translateX(-50%) translateY(8px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
+#compare-bar.show { display:flex; }
+.cbar-items { display:flex; gap:6px; }
+.cbar-item {
+  padding:4px 10px; border-radius:7px;
+  background:rgba(0,212,255,.1); border:1px solid rgba(0,212,255,.25);
+  font-size:11px; color:var(--accent1); max-width:130px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.cbar-btn {
+  padding:6px 14px; border-radius:8px; border:none;
+  background:var(--gradient); color:#040710;
+  font-size:12px; font-weight:800; cursor:pointer; transition:opacity .18s;
+  white-space:nowrap;
+}
+.cbar-btn:hover { opacity:.88; }
+.cbar-clear { color:var(--muted); font-size:18px; cursor:pointer;
+  width:22px; display:flex; align-items:center; justify-content:center;
+  transition:color .15s; }
+.cbar-clear:hover { color:var(--text); }
+.cbar-hint { font-size:10px; color:var(--muted); }
+
+/* ── SIDE PANEL */
+#panel {
+  position:fixed; top:50%; right:16px; transform:translateY(-50%);
+  z-index:200; width:268px;
+  background:rgba(4,7,16,.97); backdrop-filter:blur(28px);
+  border:1px solid var(--border); border-radius:18px; padding:18px;
+  display:none; flex-direction:column; gap:12px;
+  box-shadow:0 30px 80px rgba(0,0,0,.7), 0 0 0 1px rgba(0,212,255,.05);
+  animation:pIn .2s ease;
+}
+@keyframes pIn { from{opacity:0;transform:translateY(-50%) translateX(18px)} to{opacity:1;transform:translateY(-50%) translateX(0)} }
+#panel.open { display:flex; }
+.p-close {
+  position:absolute; top:12px; right:12px; width:22px; height:22px;
+  border-radius:6px; background:rgba(255,255,255,.05); border:1px solid var(--border);
+  color:var(--muted); font-size:12px; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; transition:all .15s;
+}
+.p-close:hover { color:var(--text); background:rgba(255,255,255,.1); }
+.p-entry-badge {
+  display:flex; align-items:center; gap:7px; padding:8px 10px;
+  border-radius:10px; font-size:12px; font-weight:700;
+}
+.p-name { font-size:14px; font-weight:800; color:var(--text); line-height:1.3; }
+.p-proto-badge { font-size:9px; font-weight:700; padding:3px 7px; border-radius:5px;
+  text-transform:uppercase; letter-spacing:.4px; }
+.p-metrics { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.pm { background:var(--surface); border:1px solid var(--border); border-radius:9px; padding:8px 10px; }
+.pm-val { font-size:15px; font-weight:700; }
+.pm-lbl { font-size:9px; color:var(--muted); margin-top:2px; text-transform:uppercase; letter-spacing:.3px; }
+.pm.apr .pm-val { background:var(--gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.risk-row { display:flex; flex-direction:column; gap:4px; }
+.risk-labels { display:flex; justify-content:space-between; font-size:10px; color:var(--muted); }
+.risk-track { height:4px; border-radius:2px; background:rgba(255,255,255,.06); overflow:hidden; }
+.risk-fill { height:100%; border-radius:2px; transition:width .5s; }
+.p-actions { display:flex; gap:6px; }
+.p-act-btn {
+  flex:1; padding:7px 8px; border-radius:8px; border:none;
+  font-size:11px; font-weight:700; cursor:pointer; transition:all .18s;
+}
+.p-act-btn.primary {
+  background:rgba(0,212,255,.12); border:1px solid rgba(0,212,255,.3);
+  color:var(--accent1);
+}
+.p-act-btn.primary:hover { background:rgba(0,212,255,.2); }
+.p-act-btn.secondary {
+  background:rgba(255,255,255,.05); border:1px solid var(--border);
+  color:var(--muted);
+}
+.p-act-btn.secondary:hover { color:var(--text); border-color:rgba(255,255,255,.18); }
+.p-act-btn.added { background:rgba(0,255,136,.1); border-color:rgba(0,255,136,.3); color:var(--green); }
+.p-divider { display:flex; flex-direction:column; gap:4px; }
+.p-div-title { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+.p-div-items { display:flex; flex-direction:column; gap:3px; }
+.p-div-item {
+  display:flex; align-items:center; gap:7px; padding:5px 8px;
+  background:var(--surface); border:1px solid var(--border); border-radius:7px;
+  cursor:pointer; transition:all .18s; font-size:11px;
+}
+.p-div-item:hover { border-color:rgba(255,255,255,.18); background:rgba(255,255,255,.06); }
+.p-div-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.p-div-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.p-div-apr { font-size:10px; color:var(--muted); white-space:nowrap; }
+.p-link { display:block; text-align:center; padding:7px;
+  border-radius:8px; border:1px solid rgba(0,212,255,.22);
+  background:rgba(0,212,255,.05); color:var(--accent1);
+  font-size:11px; font-weight:700; cursor:pointer; text-decoration:none;
+  transition:all .18s; }
+.p-link:hover { background:rgba(0,212,255,.1); border-color:rgba(0,212,255,.4); }
+
+/* ── LINK HOVER TIP */
+#link-tip {
+  position:fixed; pointer-events:none; z-index:400;
+  background:rgba(4,7,16,.94); backdrop-filter:blur(14px);
+  border:1px solid var(--border); border-radius:10px; padding:9px 12px;
+  font-size:11px; display:none; max-width:220px;
+}
+.lt-tag { font-size:9px; padding:2px 6px; border-radius:4px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.3px; }
+
+/* ── NODE HOVER TIP */
+#hover-tip {
+  position:fixed; pointer-events:none; z-index:300;
+  background:rgba(4,7,16,.93); backdrop-filter:blur(12px);
+  border:1px solid var(--border); border-radius:8px; padding:6px 10px;
+  font-size:11px; display:none; white-space:nowrap;
+}
+
+/* ── OPPORTUNITY PANEL (scatter mode) */
+#opp-hint {
+  position:fixed; top:66px; right:16px; z-index:100; width:200px;
+  background:rgba(4,7,16,.88); backdrop-filter:blur(16px);
+  border:1px solid rgba(0,255,136,.15); border-radius:12px; padding:12px 14px;
+  display:none; flex-direction:column; gap:8px;
+}
+#opp-hint.show { display:flex; }
+.opp-title { font-size:9px; font-weight:700; letter-spacing:.7px;
+  text-transform:uppercase; color:rgba(0,255,136,.7); }
+.opp-list { display:flex; flex-direction:column; gap:4px; }
+.opp-item { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text); }
+.opp-rank { font-size:9px; color:var(--muted); width:14px; }
+.opp-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.opp-nm { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.opp-apr { font-size:10px; background:var(--gradient);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">VaultVision <span>/ Vault Map</span></div>
+  <div class="header-mid">
+    <div class="mode-tabs">
+      <button class="mode-tab active" id="tab-explore" onclick="setMode('explore')">🔭 Explore</button>
+      <button class="mode-tab" id="tab-scatter" onclick="setMode('scatter')">📊 Risk/Return</button>
+    </div>
+    <div class="filter-pills">
+      <div class="pill active" data-p="all">All</div>
+      <div class="pill" data-p="hyperliquid"><div class="pdot" style="background:var(--hl)"></div>HL</div>
+      <div class="pill" data-p="drift"><div class="pdot" style="background:var(--drift)"></div>Drift</div>
+      <div class="pill" data-p="lighter"><div class="pdot" style="background:var(--lighter)"></div>Lighter</div>
+      <div class="pill" data-p="nado"><div class="pdot" style="background:var(--nado)"></div>Nado</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="sw">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="2.5">
+        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+      </svg>
+      <input id="search" type="text" placeholder="Найти vault…">
+    </div>
+    <div class="icon-btn" id="btn-signals" title="Только сигналы входа">⚡</div>
+    <div class="icon-btn" id="btn-help" onclick="alert('Explore: карта схожести\nRisk/Return: риск vs APR — найди лучшее соотношение\nShift+клик на узлах — выбрать для сравнения\nКлик на узел — детали + диверсификация')">?</div>
+  </div>
+</header>
+
+<!-- SVG -->
+<svg id="graph"></svg>
+
+<!-- SCATTER AXIS LABELS -->
+<div class="axis-label" id="ax-x" style="display:none">← Меньше риска &nbsp;&nbsp; Больше риска →</div>
+<div class="axis-label" id="ax-y" style="display:none">↑ APR</div>
+<div id="ax-zone"></div>
+<div id="ax-zone-label">🏆 Best Zone</div>
+
+<!-- OPPORTUNITY HINT (scatter mode) -->
+<div id="opp-hint">
+  <div class="opp-title">Лучшие возможности</div>
+  <div class="opp-list" id="opp-list"></div>
+</div>
+
+<!-- LEGEND -->
+<div class="legend">
+  <div class="leg-title">Протокол</div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--hl)"></div>Hyperliquid</div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--drift)"></div>Drift</div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--lighter)"></div>Lighter</div>
+  <div class="leg-row"><div class="leg-dot" style="background:var(--nado)"></div>Nado</div>
+  <div class="leg-sep"></div>
+  <div class="leg-title">Entry сигнал</div>
+  <div class="leg-signal"><div class="sig" style="background:#00ff88"></div>Хорошее время</div>
+  <div class="leg-signal"><div class="sig" style="background:#FFB020"></div>Нейтрально</div>
+  <div class="leg-signal"><div class="sig" style="background:#ff4d6d"></div>Осторожно</div>
+  <div class="leg-sep"></div>
+  <div class="leg-title">Shift+клик</div>
+  <div style="font-size:10px;color:var(--muted)">Выбрать для Compare</div>
+</div>
+
+<!-- STATS -->
+<div class="stats-bar">
+  <div class="si"><div class="sv" id="sv">52</div><div class="sl">Vaults</div></div>
+  <div class="si"><div class="sv" id="stvl">—</div><div class="sl">Total TVL</div></div>
+  <div class="si"><div class="sv" id="sapr">—</div><div class="sl">Best APR</div></div>
+  <div class="si"><div class="sv" id="sgreen">—</div><div class="sl">Green Signal</div></div>
+</div>
+
+<!-- CONTROLS -->
+<div class="controls">
+  <div class="ctrl" id="btn-zi">+</div>
+  <div class="ctrl" id="btn-zo">−</div>
+  <div class="ctrl" id="btn-reset">⌖</div>
+  <div class="ctrl" id="btn-resim" title="Reshuffle">⟳</div>
+</div>
+
+<!-- COMPARE BAR -->
+<div id="compare-bar">
+  <div class="cbar-hint">Shift+клик чтобы добавить</div>
+  <div class="cbar-items" id="cbar-items"></div>
+  <button class="cbar-btn" id="cbar-go">Сравнить →</button>
+  <div class="cbar-clear" id="cbar-clear">✕</div>
+</div>
+
+<!-- SIDE PANEL -->
+<div id="panel">
+  <button class="p-close" id="p-close">✕</button>
+  <div class="p-entry-badge" id="p-entry-badge"></div>
+  <div>
+    <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">
+      <div class="p-proto-badge" id="p-proto"></div>
+    </div>
+    <div class="p-name" id="p-name"></div>
+  </div>
+  <div class="p-metrics">
+    <div class="pm apr"><div class="pm-val" id="p-apr"></div><div class="pm-lbl">APR</div></div>
+    <div class="pm"><div class="pm-val" id="p-tvl"></div><div class="pm-lbl">TVL</div></div>
+    <div class="pm"><div class="pm-val" id="p-30d"></div><div class="pm-lbl">30D Return</div></div>
+    <div class="pm"><div class="pm-val" id="p-age"></div><div class="pm-lbl">Age</div></div>
+  </div>
+  <div class="risk-row">
+    <div class="risk-labels"><span id="p-rband"></span><span id="p-rscore"></span></div>
+    <div class="risk-track"><div class="risk-fill" id="p-rfill"></div></div>
+  </div>
+  <div class="p-actions">
+    <button class="p-act-btn primary" id="p-btn-compare">+ В сравнение</button>
+    <button class="p-act-btn secondary" id="p-btn-diversify">🔀 Диверсифицировать</button>
+  </div>
+  <div class="p-divider" id="p-div-section" style="display:none">
+    <div class="p-div-title" id="p-div-title">Похожие хранилища</div>
+    <div class="p-div-items" id="p-div-items"></div>
+  </div>
+  <a class="p-link" href="#">Открыть в VaultVision →</a>
+</div>
+
+<!-- LINK TIP -->
+<div id="link-tip"></div>
+<!-- NODE HOVER TIP -->
+<div id="hover-tip"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  DATA
+// ═══════════════════════════════════════════════════════
+const PROTO = {
+  hyperliquid: { color:'#00e96b', glow:'rgba(0,233,107,.5)' },
+  drift:       { color:'#FFB020', glow:'rgba(255,176,32,.5)' },
+  lighter:     { color:'#A78BFA', glow:'rgba(167,139,250,.5)' },
+  nado:        { color:'#b0bcd4', glow:'rgba(176,188,212,.5)' },
+};
+const ENTRY_LABELS = ['good','neutral','caution'];
+const ENTRY_COLORS = { good:'#00ff88', neutral:'#FFB020', caution:'#ff4d6d' };
+const ENTRY_TEXT = {
+  good:    { icon:'🟢', label:'Хороший момент входа', bg:'rgba(0,255,136,.1)', border:'rgba(0,255,136,.25)', color:'#00ff88' },
+  neutral: { icon:'🟡', label:'Нейтральный сигнал',   bg:'rgba(255,176,32,.1)', border:'rgba(255,176,32,.25)', color:'#FFB020' },
+  caution: { icon:'🔴', label:'Осторожно — высокий риск', bg:'rgba(255,77,109,.1)', border:'rgba(255,77,109,.25)', color:'#ff4d6d' },
+};
+
+const r = (a,b) => Math.random()*(b-a)+a;
+const ri = (a,b) => Math.floor(r(a,b+1));
+const pick = a => a[Math.floor(Math.random()*a.length)];
+
+const NAMES = {
+  hyperliquid: ['Alpha Edge','Momentum Pro','Delta Neutral','Perp Master','Liquid Alpha',
+    'HyperVault #1','Yield Engine','MarketMaker Elite','Funding Arb','Basis Trade',
+    'Long Gamma','Vol Crusher','HL Compounder','Perpetual Yield','Grid Supreme'],
+  drift: ['SOL Maximizer','Drift Neutral','Perp Yield','BTC Delta','SOL/USDC LP',
+    'Funding Harvest','Drift Compounder','Solana Alpha','Mark-2-Market','Arb Engine','Drift Reserve'],
+  lighter: ['Lighter Basis','ETH Neutral','StETH Arb','CEX-DEX Bridge',
+    'Lighter #1','Alpha Stream','Vol Surface','ETH MM','Lighter Yield'],
+  nado: ['Nado Prime','Dark Pool #1','Stealth Yield','Nado Compounder',
+    'Shadow MM','Nado Reserve','Anon Vault'],
+};
+
+function mkVault(i, proto) {
+  const tvl = Math.pow(10, r(6.1, 8.5));
+  const apr = r(0.04, 0.48);
+  const risk = ri(8, 90);
+  // entry signal: good if risk<40 & apr>0.15, caution if risk>65, else neutral
+  const entrySig = risk < 38 && apr > 0.14 ? 'good' : risk > 65 ? 'caution' : 'neutral';
+  const names = NAMES[proto];
+  return {
+    id:`${proto}:${i}`, protocol:proto,
+    name: names[i % names.length] + (Math.random()>.55?` v${ri(2,5)}`:''),
+    tvl_usd: tvl, apr, pnl_30d: r(-0.06, 0.14),
+    risk_score: risk, risk_band: risk<35?'low':risk<65?'moderate':'high',
+    age_days: ri(12, 730),
+    entry_signal: entrySig,
+    _selected: false,
+  };
+}
+
+const vaults = [
+  ...NAMES.hyperliquid.map((_,i) => mkVault(i,'hyperliquid')),
+  ...NAMES.drift.map((_,i)       => mkVault(i,'drift')),
+  ...NAMES.lighter.map((_,i)     => mkVault(i,'lighter')),
+  ...NAMES.nado.map((_,i)        => mkVault(i,'nado')),
+];
+
+// Links
+function buildLinks(vaults) {
+  const links = [], seen = new Set();
+  const key = (a,b) => a<b?`${a}|${b}`:`${b}|${a}`;
+  vaults.forEach((a,i) => vaults.forEach((b,j) => {
+    if (i>=j) return;
+    const k = key(a.id,b.id);
+    if (seen.has(k)) return;
+    const sameProto = a.protocol===b.protocol;
+    const aprDiff   = Math.abs(a.apr-b.apr);
+    const aprClose  = aprDiff < 0.06;
+    let type=null, strength=0;
+    if (sameProto && aprClose)           { type='proto+apr'; strength=3; }
+    else if (sameProto && Math.random()<.32) { type='proto'; strength=2; }
+    else if (!sameProto && aprClose && Math.random()<.2) { type='apr'; strength=1.5; }
+    if (type) { links.push({source:a.id,target:b.id,type,strength,aprDiff}); seen.add(k); }
+  }));
+  return links;
+}
+const links = buildLinks(vaults);
+
+// Helpers
+const fmtTVL = v => v>=1e9?'$'+(v/1e9).toFixed(1)+'B':v>=1e6?'$'+(v/1e6).toFixed(1)+'M':'$'+(v/1e3).toFixed(0)+'K';
+const fmtAPR = v => (v*100).toFixed(1)+'%';
+const fmtPct = v => (v>=0?'+':'')+(v*100).toFixed(1)+'%';
+const fmtAge = d => d>=365?(d/365).toFixed(1)+'y':d+'d';
+const riskColor = s => s<35?'#00ff88':s<65?'#FFB020':'#ff4d6d';
+
+const tvlR = d3.scaleSqrt()
+  .domain([d3.min(vaults,d=>d.tvl_usd), d3.max(vaults,d=>d.tvl_usd)])
+  .range([5, 25]);
+
+// ═══════════════════════════════════════════════════════
+//  D3 SETUP
+// ═══════════════════════════════════════════════════════
+const svg = d3.select('#graph');
+let W = innerWidth, H = innerHeight - 52;
+svg.attr('width',W).attr('height',H);
+const g = svg.append('g').attr('class','scene');
+const defs = svg.append('defs');
+
+function addFilter(id, dev) {
+  const f = defs.append('filter').attr('id',id).attr('x','-60%').attr('y','-60%').attr('width','220%').attr('height','220%');
+  f.append('feGaussianBlur').attr('stdDeviation',dev).attr('result','b');
+  const m = f.append('feMerge');
+  m.append('feMergeNode').attr('in','b');
+  m.append('feMergeNode').attr('in','SourceGraphic');
+}
+addFilter('glow-sm',3); addFilter('glow-lg',9);
+
+const haloFilt = defs.append('filter').attr('id','halo-blur').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+haloFilt.append('feGaussianBlur').attr('stdDeviation',50);
+
+Object.entries(PROTO).forEach(([p,{color}]) => {
+  const gr = defs.append('radialGradient').attr('id',`g-${p}`).attr('cx','30%').attr('cy','30%');
+  gr.append('stop').attr('offset','0%').attr('stop-color', d3.color(color).brighter(.8).formatHex());
+  gr.append('stop').attr('offset','100%').attr('stop-color', color);
+});
+
+const lgPA = defs.append('linearGradient').attr('id','lg-pa');
+lgPA.append('stop').attr('offset','0%').attr('stop-color','#00d4ff');
+lgPA.append('stop').attr('offset','100%').attr('stop-color','#00ff88');
+
+const zoom = d3.zoom().scaleExtent([0.1,5])
+  .on('zoom', e => g.attr('transform',e.transform));
+svg.call(zoom);
+
+let initT = d3.zoomIdentity.translate(W/2,H/2).scale(0.82);
+svg.call(zoom.transform, initT);
+
+const nodeMap = new Map(vaults.map(d=>[d.id,d]));
+
+// ── CLUSTER HALOS
+const haloL = g.append('g');
+const haloData = Object.keys(PROTO).map(p=>({protocol:p,x:0,y:0,rx:80,ry:80}));
+const haloSel = haloL.selectAll('ellipse').data(haloData).join('ellipse')
+  .attr('fill',d=>PROTO[d.protocol].color).attr('fill-opacity',0.05)
+  .attr('stroke',d=>PROTO[d.protocol].color).attr('stroke-opacity',0.07)
+  .attr('stroke-width',1).attr('filter','url(#halo-blur)')
+  .attr('pointer-events','none');
+
+// ── SIMULATION
+const sim = d3.forceSimulation(vaults)
+  .force('link', d3.forceLink(links).id(d=>d.id)
+    .distance(d=>d.type==='proto+apr'?55:d.type==='proto'?85:115)
+    .strength(d=>d.type==='proto+apr'?0.06:d.type==='proto'?0.03:0.012))
+  .force('charge', d3.forceManyBody().strength(-130).distanceMax(320))
+  .force('center', d3.forceCenter(0,0))
+  .force('collision', d3.forceCollide().radius(d=>tvlR(d.tvl_usd)+7))
+  .force('x', d3.forceX(0).strength(0.025))
+  .force('y', d3.forceY(0).strength(0.025))
+  .alphaDecay(0.012);
+
+// ── LINKS
+const linkL = g.append('g');
+const linkSel = linkL.selectAll('line').data(links).join('line')
+  .attr('stroke', d => {
+    const src = nodeMap.get(d.source.id||d.source);
+    return d.type==='proto+apr' ? 'url(#lg-pa)' : src ? PROTO[src.protocol].color : '#fff';
+  })
+  .attr('stroke-opacity', d=>d.type==='proto+apr'?0.25:d.type==='proto'?0.14:0.1)
+  .attr('stroke-width', d=>d.type==='proto+apr'?1.8:d.type==='proto'?1:0.6)
+  .attr('stroke-dasharray', d=>d.type==='proto'?'4,3':d.type==='apr'?'2,4':null)
+  .style('cursor','pointer')
+  .on('mouseenter', function(ev,d) {
+    d3.select(this).transition().duration(120).attr('stroke-opacity',.75).attr('stroke-width',3);
+    const src=nodeMap.get(d.source.id||d.source), tgt=nodeMap.get(d.target.id||d.target);
+    if(!src||!tgt) return;
+    const c = PROTO[src.protocol].color;
+    let html = `<div style="font-weight:700;margin-bottom:6px">${src.name} ↔ ${tgt.name}</div>`;
+    if(d.type==='proto+apr'||d.type==='proto')
+      html+=`<div style="margin-bottom:3px"><span class="lt-tag" style="background:${c}22;color:${c};border:1px solid ${c}44">Протокол</span> ${src.protocol}</div>`;
+    if(d.type==='proto+apr'||d.type==='apr')
+      html+=`<div style="margin-bottom:3px"><span class="lt-tag" style="background:rgba(0,212,255,.1);color:#00d4ff;border:1px solid rgba(0,212,255,.25)">APR</span> ${fmtAPR(src.apr)} ≈ ${fmtAPR(tgt.apr)}</div>`;
+    html+=`<div style="font-size:10px;color:var(--muted);margin-top:5px">Разница APR: ${(d.aprDiff*100).toFixed(1)}pp</div>`;
+    const lt=document.getElementById('link-tip');
+    lt.innerHTML=html; lt.style.display='block';
+  })
+  .on('mousemove', ev=>{
+    const lt=document.getElementById('link-tip');
+    lt.style.left=(ev.clientX+14)+'px'; lt.style.top=(ev.clientY-10)+'px';
+  })
+  .on('mouseleave', function(ev,d) {
+    d3.select(this).transition().duration(180)
+      .attr('stroke-opacity',d.type==='proto+apr'?0.25:d.type==='proto'?0.14:0.1)
+      .attr('stroke-width',d.type==='proto+apr'?1.8:d.type==='proto'?1:0.6);
+    document.getElementById('link-tip').style.display='none';
+  });
+
+// ── PARTICLES
+const strongLinks = links.filter(l=>l.type==='proto+apr');
+const particles = [];
+strongLinks.forEach(l => {
+  for(let i=0;i<3;i++) particles.push({link:l, t:i/3, speed:0.004+Math.random()*0.003});
+});
+const particleL = g.append('g').attr('pointer-events','none');
+const partSel = particleL.selectAll('circle').data(particles).join('circle')
+  .attr('r',2).attr('opacity',0);
+
+// ── NODES
+const nodeL = g.append('g');
+const nodeSel = nodeL.selectAll('g').data(vaults).join('g')
+  .attr('class','node').style('cursor','pointer')
+  .call(d3.drag().on('start',ds).on('drag',dd).on('end',de));
+
+// Entry signal ring (outermost)
+nodeSel.append('circle').attr('class','entry-ring')
+  .attr('r', d=>tvlR(d.tvl_usd)+5)
+  .attr('fill','none')
+  .attr('stroke', d=>ENTRY_COLORS[d.entry_signal])
+  .attr('stroke-width', d=>d.entry_signal==='good'?2:1.2)
+  .attr('stroke-opacity', d=>d.entry_signal==='good'?0.6:d.entry_signal==='caution'?0.5:0.2)
+  .attr('stroke-dasharray', d=>d.entry_signal==='neutral'?'3,3':null)
+  .attr('pointer-events','none');
+
+// Glow halo
+nodeSel.append('circle').attr('class','node-halo')
+  .attr('r',d=>tvlR(d.tvl_usd)+10).attr('fill',d=>PROTO[d.protocol].color)
+  .attr('fill-opacity',0).attr('pointer-events','none');
+
+// Main circle
+nodeSel.append('circle').attr('class','node-circle')
+  .attr('r',d=>tvlR(d.tvl_usd))
+  .attr('fill',d=>`url(#g-${d.protocol})`)
+  .attr('stroke',d=>PROTO[d.protocol].color)
+  .attr('stroke-width',1.5).attr('stroke-opacity',.75);
+
+// APR text on large nodes
+nodeSel.each(function(d) {
+  const r2=tvlR(d.tvl_usd);
+  if(r2>=13) {
+    d3.select(this).append('text').attr('text-anchor','middle').attr('dominant-baseline','middle')
+      .attr('dy',r2>=18?-4:0).attr('font-size',r2>=18?8:7).attr('font-weight','700')
+      .attr('fill',PROTO[d.protocol].color).attr('pointer-events','none')
+      .text(fmtAPR(d.apr));
+    if(r2>=18)
+      d3.select(this).append('text').attr('text-anchor','middle').attr('dominant-baseline','middle')
+        .attr('dy',6).attr('font-size',5.5).attr('fill','rgba(255,255,255,.4)').attr('pointer-events','none')
+        .text('APR');
+  }
+});
+
+// Name label for large nodes
+nodeSel.each(function(d) {
+  const r2=tvlR(d.tvl_usd);
+  if(r2>=15)
+    d3.select(this).append('text').attr('text-anchor','middle').attr('font-size',9).attr('font-weight','500')
+      .attr('fill','rgba(255,255,255,.5)').attr('pointer-events','none')
+      .attr('dy',r2+13).text(d.name.length>16?d.name.slice(0,14)+'…':d.name);
+});
+
+// Hover
+nodeSel
+  .on('mouseenter', function(ev,d) {
+    if(d._selected) return;
+    d3.select(this).select('.node-circle').transition().duration(140)
+      .attr('r',tvlR(d.tvl_usd)*1.22).attr('filter','url(#glow-sm)');
+    d3.select(this).select('.node-halo').transition().duration(200).attr('fill-opacity',0.12);
+    const et=ENTRY_TEXT[d.entry_signal];
+    document.getElementById('hover-tip').innerHTML =
+      `<strong>${d.name}</strong>&nbsp; <span style="color:var(--accent1)">${fmtAPR(d.apr)}</span>&nbsp; ${fmtTVL(d.tvl_usd)}&nbsp; ${et.icon}`;
+    document.getElementById('hover-tip').style.display='block';
+  })
+  .on('mousemove', ev=>{
+    const ht=document.getElementById('hover-tip');
+    ht.style.left=(ev.clientX+14)+'px'; ht.style.top=(ev.clientY-10)+'px';
+  })
+  .on('mouseleave', function(ev,d) {
+    if(!d._selected){
+      d3.select(this).select('.node-circle').transition().duration(200)
+        .attr('r',tvlR(d.tvl_usd)).attr('filter',null);
+      d3.select(this).select('.node-halo').transition().duration(200).attr('fill-opacity',0);
+    }
+    document.getElementById('hover-tip').style.display='none';
+  })
+  .on('click', function(ev,d) {
+    ev.stopPropagation();
+    if(ev.shiftKey) { toggleCompare(d); return; }
+    selectVault(d);
+  });
+
+svg.on('click', ()=>{ clearSel(); document.getElementById('panel').classList.remove('open'); });
+
+// ── TICK
+sim.on('tick', ()=>{
+  linkSel.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+         .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+  nodeSel.attr('transform',d=>`translate(${d.x},${d.y})`);
+  haloData.forEach(h=>{
+    const pv=vaults.filter(v=>v.protocol===h.protocol);
+    if(!pv.length) return;
+    h.x=d3.mean(pv,v=>v.x||0); h.y=d3.mean(pv,v=>v.y||0);
+    const ex=d3.deviation(pv,v=>v.x||0)||50, ey=d3.deviation(pv,v=>v.y||0)||50;
+    h.rx=ex*1.3+65; h.ry=ey*1.3+65;
+  });
+  haloSel.attr('cx',d=>d.x).attr('cy',d=>d.y).attr('rx',d=>d.rx).attr('ry',d=>d.ry);
+});
+
+// ── ANIMATION LOOP
+let animId;
+function animLoop(){
+  animId=requestAnimationFrame(animLoop);
+  const now=Date.now();
+  particles.forEach(p=>{ p.t=(p.t+p.speed)%1; });
+  partSel
+    .attr('cx',d=>{ const s=d.link.source,t=d.link.target; return (s.x||0)+((t.x||0)-(s.x||0))*d.t; })
+    .attr('cy',d=>{ const s=d.link.source,t=d.link.target; return (s.y||0)+((t.y||0)-(s.y||0))*d.t; })
+    .attr('fill',d=>{ const s=nodeMap.get(d.link.source.id||d.link.source); return s?PROTO[s.protocol].color:'#00d4ff'; })
+    .attr('opacity',d=>{ const dist=Math.abs(d.t-.5)/.5; return Math.max(0,(1-dist*dist)*0.7); });
+
+  if(currentMode==='explore') {
+    nodeSel.each(function(d){
+      if(d._selected) return;
+      const base=tvlR(d.tvl_usd);
+      const freq=0.8+d.apr*2.5;
+      const pulse=base+Math.sin((now/1000)*freq+d.apr*40)*1.1;
+      const glow=0.04+d.apr*0.1;
+      d3.select(this).select('.node-circle').attr('r',pulse);
+      d3.select(this).select('.node-halo')
+        .attr('r',base+10+Math.sin((now/1000)*freq*.7)*2.5)
+        .attr('fill-opacity',glow*(0.4+0.6*Math.sin((now/1000)*freq*1.2)));
+    });
+  }
+}
+animLoop();
+
+// ═══════════════════════════════════════════════════════
+//  MODE: EXPLORE ↔ SCATTER
+// ═══════════════════════════════════════════════════════
+let currentMode = 'explore';
+
+function setMode(mode){
+  currentMode=mode;
+  document.getElementById('tab-explore').classList.toggle('active', mode==='explore');
+  document.getElementById('tab-scatter').classList.toggle('active', mode==='scatter');
+
+  const axX=document.getElementById('ax-x');
+  const axY=document.getElementById('ax-y');
+  const axZone=document.getElementById('ax-zone');
+  const axZoneLbl=document.getElementById('ax-zone-label');
+  const oppHint=document.getElementById('opp-hint');
+
+  if(mode==='scatter'){
+    // Turn off simulation
+    sim.stop();
+    axX.style.display=''; axY.style.display='';
+    axZone.style.display=''; axZoneLbl.style.display='';
+    oppHint.classList.add('show');
+    linkSel.transition().duration(300).attr('stroke-opacity',0);
+    haloSel.transition().duration(300).attr('fill-opacity',0).attr('stroke-opacity',0);
+    partSel.attr('opacity',0);
+    positionScatter();
+  } else {
+    axX.style.display='none'; axY.style.display='none';
+    axZone.style.display='none'; axZoneLbl.style.display='none';
+    oppHint.classList.remove('show');
+    linkSel.transition().duration(300)
+      .attr('stroke-opacity',d=>d.type==='proto+apr'?0.25:d.type==='proto'?0.14:0.1);
+    haloSel.transition().duration(400).attr('fill-opacity',0.05).attr('stroke-opacity',0.07);
+    sim.alpha(0.3).restart();
+  }
+}
+
+function positionScatter(){
+  // Map: risk_score → X,  apr → Y
+  // We need to work in SVG coords (centered around origin for zoom)
+  const pad=80;
+  const gW=W-pad*2, gH=H-pad*2;
+  // scatter coordinate in scene space (origin = center)
+  const xScale = d3.scaleLinear().domain([0,100]).range([-gW/2+pad, gW/2-pad]);
+  const yScale = d3.scaleLinear().domain([0, 0.5]).range([gH/2-pad, -gH/2+pad]);
+
+  // Position nodes with transition
+  nodeSel.transition().duration(700).ease(d3.easeCubicInOut)
+    .attr('transform', d => `translate(${xScale(d.risk_score)},${yScale(d.apr)})`);
+
+  // Reset zoom
+  svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity.translate(W/2,H/2).scale(1));
+
+  // Draw axis lines (in SVG space via fixed position)
+  // "Best zone": low risk (0-35) + high APR (>0.2)
+  // In scene coords: x from xScale(0) to xScale(35), y from yScale(0.2) to yScale(0.5)
+  const x0 = W/2 + xScale(0);
+  const x35 = W/2 + xScale(35);
+  const y20 = H/2+52 + yScale(0.2);
+  const y50 = H/2+52 + yScale(0.49);
+
+  const zone = document.getElementById('ax-zone');
+  zone.style.left   = x0+'px';
+  zone.style.top    = y50+'px';
+  zone.style.width  = (x35-x0)+'px';
+  zone.style.height = (y20-y50)+'px';
+
+  const zl = document.getElementById('ax-zone-label');
+  zl.style.left = (x0+8)+'px';
+  zl.style.top  = (y50+6)+'px';
+
+  // Best 5 vaults in that zone + update panel
+  const best = [...vaults].filter(v=>v.risk_score<40&&v.apr>0.18)
+    .sort((a,b)=>(b.apr-b.risk_score/100)-(a.apr-a.risk_score/100))
+    .slice(0,5);
+  const oppList = document.getElementById('opp-list');
+  oppList.innerHTML = best.map((v,i)=>`
+    <div class="opp-item" onclick="selectVault(nodeMap.get('${v.id}'))" style="cursor:pointer">
+      <div class="opp-rank">${i+1}</div>
+      <div class="opp-dot" style="background:${PROTO[v.protocol].color}"></div>
+      <div class="opp-nm">${v.name}</div>
+      <div class="opp-apr">${fmtAPR(v.apr)}</div>
+    </div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════
+//  SELECT VAULT
+// ═══════════════════════════════════════════════════════
+let selId=null, divMode=false;
+
+function clearSel(){
+  if(selId){ const v=nodeMap.get(selId); if(v) v._selected=false; }
+  selId=null; divMode=false;
+  nodeSel.select('.node-circle').transition().duration(200)
+    .attr('fill-opacity',1).attr('stroke-opacity',.75).attr('filter',null);
+  nodeSel.select('.node-halo').transition().duration(200).attr('fill-opacity',0);
+  if(currentMode==='explore')
+    linkSel.transition().duration(200)
+      .attr('stroke-opacity',d=>d.type==='proto+apr'?0.25:d.type==='proto'?0.14:0.1)
+      .attr('stroke-width',d=>d.type==='proto+apr'?1.8:d.type==='proto'?1:0.6);
+  partSel.attr('opacity',0);
+}
+
+function selectVault(d){
+  clearSel();
+  d._selected=true; selId=d.id;
+
+  const connSet=new Set([d.id]);
+  const connLinks=[];
+  links.forEach(l=>{
+    const s=l.source.id||l.source, t=l.target.id||l.target;
+    if(s===d.id||t===d.id){ connSet.add(s); connSet.add(t); connLinks.push(l); }
+  });
+
+  nodeSel.select('.node-circle').transition().duration(220)
+    .attr('fill-opacity',n=>connSet.has(n.id)?1:0.1)
+    .attr('stroke-opacity',n=>connSet.has(n.id)?.8:.07);
+  nodeSel.filter(n=>n.id===d.id).select('.node-circle').transition().duration(220)
+    .attr('r',tvlR(d.tvl_usd)*1.35).attr('filter','url(#glow-lg)');
+  nodeSel.filter(n=>n.id===d.id).select('.node-halo').transition().duration(220).attr('fill-opacity',.2);
+
+  if(currentMode==='explore'){
+    linkSel.transition().duration(220)
+      .attr('stroke-opacity',l=>{
+        const s=l.source.id||l.source,t=l.target.id||l.target;
+        return (s===d.id||t===d.id)?.7:.02;
+      })
+      .attr('stroke-width',l=>{
+        const s=l.source.id||l.source,t=l.target.id||l.target;
+        return (s===d.id||t===d.id)?(l.type==='proto+apr'?3:2):.4;
+      });
+    partSel.attr('opacity',p=>{
+      const s=p.link.source.id||p.link.source,t=p.link.target.id||p.link.target;
+      return (s===d.id||t===d.id)?.8:0;
+    });
+  }
+
+  // Fill panel
+  const et=ENTRY_TEXT[d.entry_signal];
+  const pc=PROTO[d.protocol];
+  document.getElementById('p-entry-badge').innerHTML =
+    `<span style="font-size:16px">${et.icon}</span>
+     <span style="color:${et.color};font-size:12px;font-weight:700">${et.label}</span>`;
+  document.getElementById('p-entry-badge').style.cssText =
+    `background:${et.bg};border:1px solid ${et.border};border-radius:10px;padding:8px 10px;display:flex;align-items:center;gap:7px`;
+
+  const pp=document.getElementById('p-proto');
+  pp.textContent=d.protocol; pp.style.cssText=`background:${pc.color}1a;color:${pc.color};border:1px solid ${pc.color}44;font-size:9px;font-weight:700;padding:3px 7px;border-radius:5px;text-transform:uppercase;letter-spacing:.4px`;
+  document.getElementById('p-name').textContent=d.name;
+  document.getElementById('p-apr').textContent=fmtAPR(d.apr);
+  document.getElementById('p-tvl').textContent=fmtTVL(d.tvl_usd);
+  const r30=document.getElementById('p-30d');
+  r30.textContent=fmtPct(d.pnl_30d); r30.style.color=d.pnl_30d>=0?'#00ff88':'#ff4d6d';
+  document.getElementById('p-age').textContent=fmtAge(d.age_days);
+  document.getElementById('p-rband').textContent=d.risk_band.charAt(0).toUpperCase()+d.risk_band.slice(1)+' risk';
+  document.getElementById('p-rscore').textContent=d.risk_score+'/100';
+  const rf=document.getElementById('p-rfill');
+  rf.style.width=d.risk_score+'%'; rf.style.background=riskColor(d.risk_score);
+
+  // Compare button state
+  const inComp=compareSet.has(d.id);
+  const cbtn=document.getElementById('p-btn-compare');
+  cbtn.textContent=inComp?'✓ В сравнении':'+ В сравнение';
+  cbtn.className='p-act-btn '+(inComp?'added':'primary');
+
+  showSimilar(d);
+  document.getElementById('p-div-section').style.display='';
+  document.getElementById('panel').classList.add('open');
+}
+
+function showSimilar(d){
+  divMode=false;
+  document.getElementById('p-div-title').textContent='Похожие хранилища';
+  document.getElementById('p-btn-diversify').textContent='🔀 Диверсифицировать';
+  const similar = vaults
+    .filter(v=>v.id!==d.id && v.protocol===d.protocol && Math.abs(v.apr-d.apr)<0.08)
+    .sort((a,b)=>Math.abs(a.apr-d.apr)-Math.abs(b.apr-d.apr))
+    .slice(0,4);
+  renderDivList(similar);
+}
+
+function showDiversify(d){
+  divMode=true;
+  document.getElementById('p-div-title').textContent='Для диверсификации (разные кластеры)';
+  document.getElementById('p-btn-diversify').textContent='← Похожие';
+  // find vaults from OTHER protocols with very different APR or risk band
+  const different = vaults
+    .filter(v=>v.id!==d.id && v.protocol!==d.protocol && Math.abs(v.apr-d.apr)>0.06)
+    .sort((a,b)=>{
+      const scoreA = Math.abs(a.risk_score-d.risk_score)*0.5 + Math.abs(a.apr-d.apr)*100*0.5;
+      const scoreB = Math.abs(b.risk_score-d.risk_score)*0.5 + Math.abs(b.apr-d.apr)*100*0.5;
+      return scoreB-scoreA;
+    })
+    .slice(0,4);
+  renderDivList(different);
+}
+
+function renderDivList(list){
+  document.getElementById('p-div-items').innerHTML = list.map(v=>`
+    <div class="p-div-item" onclick="selectVault(nodeMap.get('${v.id}'))">
+      <div class="p-div-dot" style="background:${PROTO[v.protocol].color}"></div>
+      <div class="p-div-name">${v.name}</div>
+      <div style="font-size:9px;padding:2px 5px;border-radius:4px;background:${ENTRY_COLORS[v.entry_signal]}1a;color:${ENTRY_COLORS[v.entry_signal]}">${fmtAPR(v.apr)}</div>
+    </div>`).join('');
+}
+
+document.getElementById('p-btn-diversify').onclick = ()=>{
+  const d=nodeMap.get(selId); if(!d) return;
+  if(divMode) showSimilar(d); else showDiversify(d);
+};
+
+document.getElementById('p-btn-compare').onclick = ()=>{
+  const d=nodeMap.get(selId); if(!d) return;
+  toggleCompare(d);
+  const inComp=compareSet.has(d.id);
+  const cbtn=document.getElementById('p-btn-compare');
+  cbtn.textContent=inComp?'✓ В сравнении':'+ В сравнение';
+  cbtn.className='p-act-btn '+(inComp?'added':'primary');
+};
+
+document.getElementById('p-close').onclick = e=>{
+  e.stopPropagation(); clearSel();
+  document.getElementById('panel').classList.remove('open');
+};
+
+// ═══════════════════════════════════════════════════════
+//  COMPARE SET
+// ═══════════════════════════════════════════════════════
+const compareSet = new Set();
+
+function toggleCompare(d){
+  if(compareSet.has(d.id)){ compareSet.delete(d.id); }
+  else {
+    if(compareSet.size>=4) { alert('Максимум 4 хранилища для сравнения'); return; }
+    compareSet.add(d.id);
+  }
+  updateCompareBar();
+
+  // Update entry ring to show selection
+  nodeSel.select('.entry-ring')
+    .attr('stroke-width', n=>compareSet.has(n.id)?3:n.entry_signal==='good'?2:1.2)
+    .attr('stroke-opacity', n=>compareSet.has(n.id)?1:n.entry_signal==='good'?.6:n.entry_signal==='caution'?.5:.2);
+}
+
+function updateCompareBar(){
+  const bar=document.getElementById('compare-bar');
+  if(compareSet.size===0){ bar.classList.remove('show'); return; }
+  bar.classList.add('show');
+  const items=document.getElementById('cbar-items');
+  items.innerHTML=[...compareSet].map(id=>{
+    const v=nodeMap.get(id);
+    return `<div class="cbar-item" style="border-color:${PROTO[v.protocol].color}44;color:${PROTO[v.protocol].color}">${v.name}</div>`;
+  }).join('');
+}
+
+document.getElementById('cbar-go').onclick = ()=>{
+  const names=[...compareSet].map(id=>nodeMap.get(id)?.name).filter(Boolean).join(', ');
+  alert(`Сравнение (${compareSet.size} vault'а):\n${names}\n\n→ В production версии открывает страницу Compare с этими vault'ами`);
+};
+document.getElementById('cbar-clear').onclick = ()=>{
+  compareSet.clear(); updateCompareBar();
+  nodeSel.select('.entry-ring')
+    .attr('stroke-width',d=>d.entry_signal==='good'?2:1.2)
+    .attr('stroke-opacity',d=>d.entry_signal==='good'?.6:d.entry_signal==='caution'?.5:.2);
+};
+
+// ═══════════════════════════════════════════════════════
+//  FILTER
+// ═══════════════════════════════════════════════════════
+let activeP='all', signalsOnly=false;
+
+document.querySelectorAll('.pill').forEach(pill=>{
+  pill.addEventListener('click',()=>{
+    document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
+    pill.classList.add('active');
+    activeP=pill.dataset.p;
+    applyFilter();
+  });
+});
+
+document.getElementById('btn-signals').onclick = function(){
+  signalsOnly=!signalsOnly;
+  this.classList.toggle('on',signalsOnly);
+  applyFilter();
+};
+
+function applyFilter(){
+  clearSel(); document.getElementById('panel').classList.remove('open');
+  nodeSel.transition().duration(280).attr('opacity',d=>{
+    if(activeP!=='all'&&d.protocol!==activeP) return 0.06;
+    if(signalsOnly&&d.entry_signal!=='good') return 0.08;
+    return 1;
+  });
+  if(currentMode==='explore')
+    linkSel.transition().duration(280).attr('stroke-opacity',l=>{
+      const s=nodeMap.get(l.source.id||l.source), t=nodeMap.get(l.target.id||l.target);
+      if(!s||!t) return 0.03;
+      const matchP=activeP==='all'||(s.protocol===activeP&&t.protocol===activeP);
+      const matchSig=!signalsOnly||(s.entry_signal==='good'&&t.entry_signal==='good');
+      if(!matchP||!matchSig) return 0.02;
+      return l.type==='proto+apr'?.4:l.type==='proto'?.2:.12;
+    });
+
+  const fv=vaults.filter(v=>(activeP==='all'||v.protocol===activeP)&&(!signalsOnly||v.entry_signal==='good'));
+  document.getElementById('sv').textContent=fv.length;
+  document.getElementById('stvl').textContent=fmtTVL(d3.sum(fv,v=>v.tvl_usd));
+  document.getElementById('sapr').textContent=fmtAPR(d3.max(fv,v=>v.apr)||0);
+  document.getElementById('sgreen').textContent=fv.filter(v=>v.entry_signal==='good').length;
+}
+applyFilter();
+
+// SEARCH
+document.getElementById('search').addEventListener('input',function(){
+  const q=this.value.trim().toLowerCase();
+  nodeSel.transition().duration(180)
+    .attr('opacity',d=>!q||d.name.toLowerCase().includes(q)||d.protocol.includes(q)?1:0.05);
+});
+
+// DRAG
+function ds(e,d){ if(!e.active)sim.alphaTarget(0.3).restart(); d.fx=d.x;d.fy=d.y; }
+function dd(e,d){ d.fx=e.x;d.fy=e.y; }
+function de(e,d){ if(!e.active)sim.alphaTarget(0); d.fx=null;d.fy=null; }
+
+// CONTROLS
+document.getElementById('btn-zi').onclick    = ()=>svg.transition().duration(280).call(zoom.scaleBy,1.4);
+document.getElementById('btn-zo').onclick    = ()=>svg.transition().duration(280).call(zoom.scaleBy,.72);
+document.getElementById('btn-reset').onclick = ()=>svg.transition().duration(500).call(zoom.transform,currentMode==='scatter'?d3.zoomIdentity.translate(W/2,H/2).scale(1):initT);
+document.getElementById('btn-resim').onclick = ()=>{ if(currentMode==='explore') sim.alpha(0.5).alphaTarget(0).restart(); };
+
+window.addEventListener('resize',()=>{
+  W=innerWidth; H=innerHeight-52;
+  svg.attr('width',W).attr('height',H);
+});
+</script>
+</body>
+</html>
