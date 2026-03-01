@@ -6390,6 +6390,73 @@ class APIHandler(BaseHTTPRequestHandler):
         path = parsed.path
         query = parse_qs(parsed.query)
         
+        # OG image for social previews
+        if path == "/og-image.svg":
+            try:
+                conn = get_db()
+                cur = conn.execute("SELECT COUNT(*) as cnt, COALESCE(SUM(tvl_usd),0) as tvl, COALESCE(MAX(apr),0) as best_apr FROM vaults WHERE tvl_usd>0")
+                row = cur.fetchone()
+                cnt = row[0] if row else 0
+                tvl = row[1] if row else 0
+                best = row[2] if row else 0
+                tvl_str = f"${tvl/1e6:.0f}M" if tvl >= 1e6 else f"${tvl/1e3:.0f}K"
+                apr_str = f"{best*100:.1f}%"
+                svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0a0e1a"/><stop offset="100%" stop-color="#0d1424"/></linearGradient>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#00d4ff"/><stop offset="100%" stop-color="#00ff88"/></linearGradient>
+    <linearGradient id="gn" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#00b857"/><stop offset="100%" stop-color="#00ff6e"/></linearGradient>
+    <filter id="gl"><feGaussianBlur stdDeviation="40" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="200" cy="320" r="180" fill="#00d4ff" opacity="0.03" filter="url(#gl)"/>
+  <circle cx="900" cy="250" r="220" fill="#00ff88" opacity="0.025" filter="url(#gl)"/>
+  <circle cx="600" cy="500" r="150" fill="#A78BFA" opacity="0.02" filter="url(#gl)"/>
+  <!-- Decorative nodes -->
+  <circle cx="850" cy="180" r="6" fill="#00b857" opacity="0.5"/><circle cx="870" cy="200" r="4" fill="#00b857" opacity="0.35"/>
+  <circle cx="920" cy="170" r="8" fill="#00b857" opacity="0.4"/><circle cx="890" cy="220" r="3" fill="#00b857" opacity="0.3"/>
+  <line x1="850" y1="180" x2="870" y2="200" stroke="#00b857" stroke-opacity="0.15" stroke-width="1"/>
+  <line x1="870" y1="200" x2="920" y2="170" stroke="#00b857" stroke-opacity="0.12" stroke-width="1"/>
+  <circle cx="1000" cy="350" r="5" fill="#FFB020" opacity="0.4"/><circle cx="1030" cy="370" r="7" fill="#FFB020" opacity="0.35"/>
+  <circle cx="1060" cy="340" r="4" fill="#FFB020" opacity="0.3"/>
+  <line x1="1000" y1="350" x2="1030" y2="370" stroke="#FFB020" stroke-opacity="0.12" stroke-width="1"/>
+  <circle cx="950" cy="450" r="5" fill="#A78BFA" opacity="0.35"/><circle cx="980" cy="470" r="3" fill="#A78BFA" opacity="0.3"/>
+  <!-- Logo -->
+  <rect x="80" y="70" width="52" height="52" rx="14" fill="url(#acc)"/>
+  <text x="106" y="105" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="22" font-weight="700" fill="white" text-anchor="middle">VV</text>
+  <text x="148" y="103" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="24" font-weight="700" fill="white">VaultVision</text>
+  <rect x="340" y="84" width="52" height="24" rx="6" fill="rgba(0,212,255,0.12)" stroke="rgba(0,212,255,0.3)" stroke-width="1"/>
+  <text x="366" y="101" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="11" font-weight="700" fill="#00d4ff" text-anchor="middle">BETA</text>
+  <!-- Headline -->
+  <text x="80" y="240" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="56" font-weight="900" fill="#f1f5f9" letter-spacing="-1.5">Find your edge in</text>
+  <text x="80" y="310" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="56" font-weight="900" fill="url(#acc)" letter-spacing="-1.5">on-chain vaults.</text>
+  <!-- Subtitle -->
+  <text x="80" y="370" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="20" fill="rgba(255,255,255,0.4)">Compare vaults across Hyperliquid, Drift, Lighter &amp; Nado</text>
+  <!-- Stats bar -->
+  <rect x="80" y="430" width="260" height="72" rx="14" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+  <text x="120" y="460" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="22" font-weight="800" fill="url(#acc)">{tvl_str}</text>
+  <text x="120" y="482" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="10" fill="rgba(255,255,255,0.3)" letter-spacing="0.8">TOTAL TVL</text>
+  <rect x="220" y="445" width="1" height="40" fill="rgba(255,255,255,0.06)"/>
+  <text x="255" y="460" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="22" font-weight="800" fill="#10b981">{apr_str}</text>
+  <text x="255" y="482" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="10" fill="rgba(255,255,255,0.3)" letter-spacing="0.8">BEST APR</text>
+  <rect x="370" y="430" width="160" height="72" rx="14" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+  <text x="410" y="460" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="22" font-weight="800" fill="white">{cnt}</text>
+  <text x="410" y="482" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="10" fill="rgba(255,255,255,0.3)" letter-spacing="0.8">ACTIVE VAULTS</text>
+  <text x="490" y="460" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="22" font-weight="800" fill="white">4</text>
+  <text x="490" y="482" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="10" fill="rgba(255,255,255,0.3)" letter-spacing="0.8">PROTOCOLS</text>
+  <!-- URL -->
+  <text x="80" y="570" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="16" fill="rgba(255,255,255,0.2)">vaultvision.tech</text>
+</svg>'''
+                self.send_response(200)
+                self.send_header("Content-Type", "image/svg+xml")
+                self.send_header("Cache-Control", "public, max-age=300")
+                self.end_headers()
+                self.wfile.write(svg.encode("utf-8"))
+                return
+            except Exception as e:
+                self.send_error(500, f"OG image error: {e}")
+                return
+
         # Serve frontend HTML
         if path == "/" or path == "/index.html":
             try:
