@@ -4823,31 +4823,71 @@ def get_hl_entry_intel(vault_id: str) -> Optional[dict]:
 # BACKTEST ENGINE — Production-grade vault analysis
 # =============================================================================
 
-_BTC_PRICE_CACHE: Dict[str, Any] = {"prices": [], "ts": 0}
+_BTC_PRICE_CACHE: Dict[str, Any] = {"prices": [], "ts": 0, "attempt_ts": 0}
 _BTC_CACHE_TTL = 3600  # 1 hour
+_BTC_ERROR_RETRY_SEC = 180  # avoid hammering providers on failures
 
 
 def _fetch_btc_prices() -> List[tuple]:
-    """Fetch daily BTC/USDT candles from Binance. Returns [(ts_sec, close), ...]."""
+    """Fetch daily BTC candles (Hyperliquid primary, Binance fallback)."""
     global _BTC_PRICE_CACHE
     now = int(time.time())
+    # Serve warm cache fast.
     if _BTC_PRICE_CACHE["prices"] and now - _BTC_PRICE_CACHE["ts"] < _BTC_CACHE_TTL:
         return _BTC_PRICE_CACHE["prices"]
+    # If last attempt recently failed and no data, do not retry immediately.
+    if (not _BTC_PRICE_CACHE["prices"]) and now - int(_BTC_PRICE_CACHE.get("attempt_ts", 0)) < _BTC_ERROR_RETRY_SEC:
+        return []
+
+    _BTC_PRICE_CACHE["attempt_ts"] = now
+    start_ms = (now - 5 * 365 * 86400) * 1000  # 5 years for long monthly panels
+    end_ms = now * 1000
+
+    # 1) Hyperliquid primary source
     try:
-        start_ms = (now - 365 * 86400) * 1000
-        end_ms = now * 1000
-        url = f"https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&startTime={start_ms}&endTime={end_ms}&limit=1000"
+        payload = {
+            "type": "candleSnapshot",
+            "req": {"coin": "BTC", "interval": "1d", "startTime": start_ms, "endTime": end_ms},
+        }
+        req = urllib.request.Request(
+            HL_API_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "VaultVision/1.0"},
+        )
+        resp = urllib.request.urlopen(req, timeout=12)
+        data = json.loads(resp.read())
+        prices = []
+        if isinstance(data, list):
+            for c in data:
+                ts_ms = c.get("t")
+                close = c.get("c")
+                if ts_ms is None or close is None:
+                    continue
+                prices.append((int(ts_ms) // 1000, float(close)))
+        if prices:
+            _BTC_PRICE_CACHE["prices"] = prices
+            _BTC_PRICE_CACHE["ts"] = now
+            print(f"[BTC] Cached {len(prices)} daily prices (Hyperliquid)")
+            return prices
+    except Exception as e:
+        print(f"[BTC] Hyperliquid fetch error: {e}")
+
+    # 2) Binance fallback (for environments where HL endpoint is unavailable)
+    try:
+        url = f"https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&startTime={start_ms}&endTime={end_ms}&limit=2000"
         req = urllib.request.Request(url, headers={"User-Agent": "VaultVision/1.0"})
         resp = urllib.request.urlopen(req, timeout=10)
         data = json.loads(resp.read())
         prices = [(int(d[0]) // 1000, float(d[4])) for d in data]
-        _BTC_PRICE_CACHE["prices"] = prices
-        _BTC_PRICE_CACHE["ts"] = now
-        print(f"[BTC] Cached {len(prices)} daily prices")
-        return prices
+        if prices:
+            _BTC_PRICE_CACHE["prices"] = prices
+            _BTC_PRICE_CACHE["ts"] = now
+            print(f"[BTC] Cached {len(prices)} daily prices (Binance fallback)")
+            return prices
     except Exception as e:
-        print(f"[BTC] Fetch error: {e}")
-        return _BTC_PRICE_CACHE.get("prices", [])
+        print(f"[BTC] Binance fetch error: {e}")
+
+    return _BTC_PRICE_CACHE.get("prices", [])
 
 
 def _find_closest(series, target_ts):
@@ -8104,8 +8144,30 @@ def run_server(port: int):
     server.serve_forever()
 
 
-def run_fetch_loop():
+def _has_recent_vault_data(max_age_sec: int = 1800) -> bool:
+    """Return True when DB already has reasonably fresh vault rows."""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        row = c.execute(
+            "SELECT COUNT(*) as cnt, COALESCE(MAX(updated_ts),0) as max_ts FROM vaults"
+        ).fetchone()
+        conn.close()
+        if not row:
+            return False
+        cnt = int(row["cnt"] or 0)
+        max_ts = int(row["max_ts"] or 0)
+        if cnt <= 0 or max_ts <= 0:
+            return False
+        return (int(time.time()) - max_ts) <= max_age_sec
+    except Exception:
+        return False
+
+
+def run_fetch_loop(initial_delay_sec: int = 0):
     """Background fetch loop."""
+    if initial_delay_sec > 0:
+        time.sleep(initial_delay_sec)
     while True:
         try:
             run_fetch_job()
@@ -8136,12 +8198,12 @@ def main():
     # TASK C: Fast first load - serve from DB immediately, fetch in background
     print("[SERVER] Starting server (serving from DB immediately)")
     
-    # Start background fetch thread
-    fetch_thread = threading.Thread(target=run_fetch_loop, daemon=True)
+    # Start a single background fetch thread.
+    # If DB already has fresh data, delay the first heavy fetch to improve cold-start UX.
+    # Balance UX and freshness: quick boot, then refresh shortly after.
+    initial_delay = 30 if _has_recent_vault_data(max_age_sec=1800) else 2
+    fetch_thread = threading.Thread(target=run_fetch_loop, kwargs={"initial_delay_sec": initial_delay}, daemon=True)
     fetch_thread.start()
-    
-    # Trigger initial fetch in background (non-blocking)
-    threading.Thread(target=run_fetch_job, daemon=True).start()
     
     # Run server (bind to 0.0.0.0 for production)
     run_server(port)
