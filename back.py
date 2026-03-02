@@ -39,7 +39,7 @@ from typing import Optional, List, Dict, Any
 # =============================================================================
 DB_PATH = "vaultvision.db"
 DEFAULT_PORT = 8787
-FETCH_INTERVAL_SEC = 30 * 60  # 30 minutes
+FETCH_INTERVAL_SEC = 15 * 60  # 15 minutes — ensures APR stays fresh
 
 # Hyperliquid
 HL_API_URL = "https://api.hyperliquid.xyz/info"
@@ -2038,14 +2038,6 @@ def get_all_vaults() -> List[dict]:
     - Hyperliquid: exclude vaults with null TVL or TVL < $500K
     - Nado (demo): always include (exclude_from_rankings=true)
     """
-    global _HL_APR_FIX_LAST_TS
-    now_ts = int(time.time())
-    if now_ts - _HL_APR_FIX_LAST_TS >= HL_APR_FIX_TTL_SEC:
-        try:
-            fix_hyperliquid_apr_in_db()
-            _HL_APR_FIX_LAST_TS = now_ts
-        except Exception as e:
-            print(f"[HL APR FIX] Skipped (error): {e}")
     # Retry logic for database locked errors
     max_retries = 5
     retry_delay = 0.1  # 100ms
@@ -4012,6 +4004,19 @@ def enrich_hl_vaults(vaults: List[dict], max_enrich: int = 30) -> List[dict]:
         if not details:
             time.sleep(1)
             continue
+        
+        # Use APR from official vaultDetails API (most authoritative, real-time source)
+        api_apr = details.get("apr")
+        if api_apr is not None:
+            try:
+                api_apr = float(api_apr)
+                if api_apr > 0:
+                    old_apr = vault.get("apr", 0)
+                    vault["apr"] = api_apr
+                    if abs(old_apr - api_apr) > 0.01:
+                        print(f"[HL] APR updated for {vault['name'][:35]}: {old_apr:.4f} -> {api_apr:.4f} (official API)")
+            except (ValueError, TypeError):
+                pass
         
         # Extract history from portfolio structure
         # Portfolio format: [['day', {accountValueHistory: [...], pnlHistory: [...]}], ['week', {...}], ['month', {...}]]
