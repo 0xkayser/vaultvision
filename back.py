@@ -31,7 +31,7 @@ import time
 import urllib.request
 import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 from typing import Optional, List, Dict, Any
 
 # =============================================================================
@@ -4820,6 +4820,566 @@ def get_hl_entry_intel(vault_id: str) -> Optional[dict]:
 
 
 # =============================================================================
+# BACKTEST ENGINE — Production-grade vault analysis
+# =============================================================================
+
+_BTC_PRICE_CACHE: Dict[str, Any] = {"prices": [], "ts": 0}
+_BTC_CACHE_TTL = 3600  # 1 hour
+
+
+def _fetch_btc_prices() -> List[tuple]:
+    """Fetch daily BTC/USDT candles from Binance. Returns [(ts_sec, close), ...]."""
+    global _BTC_PRICE_CACHE
+    now = int(time.time())
+    if _BTC_PRICE_CACHE["prices"] and now - _BTC_PRICE_CACHE["ts"] < _BTC_CACHE_TTL:
+        return _BTC_PRICE_CACHE["prices"]
+    try:
+        start_ms = (now - 365 * 86400) * 1000
+        end_ms = now * 1000
+        url = f"https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&startTime={start_ms}&endTime={end_ms}&limit=1000"
+        req = urllib.request.Request(url, headers={"User-Agent": "VaultVision/1.0"})
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read())
+        prices = [(int(d[0]) // 1000, float(d[4])) for d in data]
+        _BTC_PRICE_CACHE["prices"] = prices
+        _BTC_PRICE_CACHE["ts"] = now
+        print(f"[BTC] Cached {len(prices)} daily prices")
+        return prices
+    except Exception as e:
+        print(f"[BTC] Fetch error: {e}")
+        return _BTC_PRICE_CACHE.get("prices", [])
+
+
+def _find_closest(series, target_ts):
+    best, best_diff = None, float("inf")
+    for ts, val in series:
+        d = abs(ts - target_ts)
+        if d < best_diff:
+            best_diff = d
+            best = (ts, val)
+    return best
+
+
+def compute_vault_backtest(vault_pk: str, deposit: float = 10000, horizon_days: int = 30) -> dict:
+    """Full backtest analysis for any vault. Returns JSON-serializable dict."""
+    import random as _rand
+    import statistics as _stats
+
+    # Basic hard bounds to prevent pathological requests from exhausting CPU.
+    try:
+        deposit = float(deposit)
+    except Exception:
+        deposit = 10000.0
+    deposit = max(100.0, min(deposit, 10_000_000.0))
+    try:
+        horizon_days = int(horizon_days)
+    except Exception:
+        horizon_days = 30
+    horizon_days = max(1, min(horizon_days, 365))
+
+    for _attempt in range(5):
+        try:
+            conn = get_db()
+            c = conn.cursor()
+            vault = c.execute("SELECT * FROM vaults WHERE pk=?", (vault_pk,)).fetchone()
+            if not vault:
+                vault = c.execute("SELECT * FROM vaults WHERE lower(pk)=lower(?)", (vault_pk,)).fetchone()
+            if not vault:
+                vault = c.execute("SELECT * FROM vaults WHERE vault_id=?", (vault_pk,)).fetchone()
+            if not vault:
+                vault = c.execute("SELECT * FROM vaults WHERE lower(vault_id)=lower(?)", (vault_pk,)).fetchone()
+            break
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e).lower() and _attempt < 4:
+                time.sleep(0.2 * (_attempt + 1))
+                continue
+            print(f"[BACKTEST] DB error for {vault_pk}: {e}")
+            return {"error": f"Database busy: {e}", "insufficient_data": True}
+    else:
+        return {"error": "Database busy after retries", "insufficient_data": True}
+
+    if not vault:
+        conn.close()
+        return {"error": f"Vault not found: {vault_pk}", "insufficient_data": True}
+
+    vault_name = vault["name"] or "Unknown"
+    protocol = vault["protocol"] or ""
+    leader_commission = 0.10
+
+    # Load PnL history (all time)
+    rows = c.execute(
+        "SELECT ts, pnl_usd, account_value FROM pnl_history WHERE vault_pk=? ORDER BY ts ASC",
+        (vault_pk,)
+    ).fetchall()
+    values = [(r["ts"], float(r["account_value"])) for r in rows if r["account_value"] and float(r["account_value"]) > 0]
+
+    # Fallback to snapshots if no pnl_history
+    if len(values) < 5:
+        rows = c.execute(
+            "SELECT ts, tvl_usd, apr FROM snapshots WHERE vault_pk=? AND tvl_usd>0 ORDER BY ts ASC",
+            (vault_pk,)
+        ).fetchall()
+        values = [(r["ts"], float(r["tvl_usd"])) for r in rows if r["tvl_usd"] and float(r["tvl_usd"]) > 0]
+
+    if len(values) < 10:
+        tvl = float(vault["tvl_usd"]) if vault["tvl_usd"] else 0
+        apr_val = float(vault["apr"]) if vault["apr"] else 0
+        age_s = int(time.time()) - int(vault["first_seen_ts"]) if vault["first_seen_ts"] else 0
+        age_d = max(age_s // 86400, 0)
+        need = 10 - len(values)
+        conn.close()
+        return {
+            "vault_name": vault_name,
+            "protocol": protocol,
+            "insufficient_data": True,
+            "data_points": len(values),
+            "min_required": 10,
+            "data_quality": "insufficient",
+            "message": f"Only {len(values)} data points available. Need at least 10 for analysis.",
+            "simple_apr": apr_val,
+            "tvl": tvl,
+            "age_days": age_d,
+            "est_days_until_ready": need,
+        }
+
+    # Load HLP for benchmark
+    hlp_rows = c.execute(
+        "SELECT ts, account_value FROM pnl_history WHERE vault_pk=? ORDER BY ts ASC",
+        (HL_HLP_ADDRESS,)
+    ).fetchall()
+    hlp_values = [(r["ts"], float(r["account_value"])) for r in hlp_rows if r["account_value"] and float(r["account_value"]) > 0]
+
+    # Load risk states
+    risk_rows = c.execute(
+        "SELECT leverage_effective, liq_risk, entry_score, entry_label, reasons FROM hl_vault_state WHERE vault_id=? ORDER BY ts DESC LIMIT 1",
+        (vault_pk,)
+    ).fetchone()
+
+    conn.close()
+
+    # BTC prices
+    btc_prices = _fetch_btc_prices()
+    total_days = (values[-1][0] - values[0][0]) / 86400
+
+    # ── Daily returns (non-overlapping) ──
+    daily_returns = []
+    btc_daily = []
+    day_sec = 86400
+    cur_ts = values[0][0]
+    end_ts_val = values[-1][0]
+
+    while cur_ts + day_sec <= end_ts_val:
+        nxt = cur_ts + day_sec
+        v_now = _find_closest(values, cur_ts)
+        v_nxt = _find_closest(values, nxt)
+        if v_now and v_nxt and v_now[1] > 0 and abs(v_now[0] - cur_ts) < 43200 and abs(v_nxt[0] - nxt) < 43200:
+            daily_returns.append((cur_ts, (v_nxt[1] - v_now[1]) / v_now[1]))
+        b_now = _find_closest(btc_prices, cur_ts)
+        b_nxt = _find_closest(btc_prices, nxt)
+        if b_now and b_nxt and b_now[1] > 0 and abs(b_now[0] - cur_ts) < 86400:
+            btc_daily.append((cur_ts, (b_nxt[1] - b_now[1]) / b_now[1]))
+        cur_ts = nxt
+
+    from datetime import datetime as _dt
+
+    raw_vault_rets = [r for _, r in daily_returns]
+    abs_raw = sorted(abs(r) for r in raw_vault_rets if math.isfinite(r))
+    if abs_raw:
+        q95 = abs_raw[int(0.95 * (len(abs_raw) - 1))]
+        # Dynamic scale per vault: keeps normal moves, compresses flow spikes.
+        RET_SCALE = min(0.60, max(0.08, q95 * 1.5))
+    else:
+        RET_SCALE = 0.15
+
+    def _cap(r):
+        if r is None or not math.isfinite(r):
+            return 0.0
+        # Hard guard for impossible jumps, then smooth compression (not flat clipping).
+        r = max(min(r, 3.0), -0.95)
+        return RET_SCALE * math.tanh(r / RET_SCALE)
+
+    all_vault_rets_ts = [(_ts, _cap(r)) for _ts, r in daily_returns]
+    all_vault_rets = [r for _, r in all_vault_rets_ts]
+    all_btc_ts = list(btc_daily)
+    all_btc_rets = [r for _, r in all_btc_ts]
+
+    hlp_daily_ts = []
+    if len(hlp_values) > 1:
+        for i in range(1, len(hlp_values)):
+            prev_ts, prev_v = hlp_values[i - 1]
+            cur_ts_h, cur_v = hlp_values[i]
+            if prev_v > 0 and (cur_ts_h - prev_ts) < 2 * day_sec:
+                hlp_daily_ts.append((prev_ts, _cap((cur_v - prev_v) / prev_v)))
+
+    data_quality = "full" if len(all_vault_rets) >= 30 else ("partial" if len(all_vault_rets) >= 10 else "insufficient")
+
+    # ── FILTER BY HORIZON for benchmarks ──
+    def _horizon_slice(series_ts, h_days, min_obs=3):
+        if not series_ts:
+            return []
+        end_ts = series_ts[-1][0]
+        cutoff_ts = end_ts - h_days * 86400
+        by_time = [(ts, r) for ts, r in series_ts if ts >= cutoff_ts]
+        if len(by_time) >= min_obs:
+            return by_time
+        # Sparse history fallback: use latest observations to keep horizon reactive.
+        return series_ts[-min(h_days, len(series_ts)):]
+
+    h_vault_ts = _horizon_slice(all_vault_rets_ts, horizon_days)
+    h_btc_ts = _horizon_slice(all_btc_ts, horizon_days)
+    h_hlp_ts = _horizon_slice(hlp_daily_ts, horizon_days)
+
+    h_vault = [r for _, r in h_vault_ts]
+    h_btc = [r for _, r in h_btc_ts]
+    h_hlp = [r for _, r in h_hlp_ts]
+
+    if not h_vault:
+        h_vault_ts = all_vault_rets_ts
+        h_btc_ts = all_btc_ts
+        h_hlp_ts = hlp_daily_ts
+        h_vault = all_vault_rets
+        h_btc = all_btc_rets
+        h_hlp = [r for _, r in hlp_daily_ts]
+
+    if len(h_vault_ts) >= 2:
+        bench_days = max(1, int((h_vault_ts[-1][0] - h_vault_ts[0][0]) / 86400))
+    else:
+        bench_days = min(horizon_days, max(1, int(total_days)))
+
+    def _compound(rets):
+        c = 1.0
+        for r in rets:
+            c *= (1 + r)
+        return c - 1
+
+    vault_gross = _compound(h_vault)
+    vault_net = vault_gross * (1 - leader_commission) if vault_gross > 0 else vault_gross
+    btc_ret = _compound(h_btc)
+    hlp_ret = _compound(h_hlp)
+    stable_ret = (1.08) ** (bench_days / 365) - 1
+
+    vault_rets = all_vault_rets
+
+    benchmarks = {
+        "vault": {"return": round(vault_net, 4), "final": round(deposit * (1 + vault_net)), "apr_equiv": round(vault_net * 365 / max(bench_days, 1), 4)},
+        "btc": {"return": round(btc_ret, 4), "final": round(deposit * (1 + btc_ret))},
+        "hlp": {"return": round(hlp_ret, 4), "final": round(deposit * (1 + hlp_ret))},
+        "stable": {"return": round(stable_ret, 4), "final": round(deposit * (1 + stable_ret))},
+    }
+
+    # ── RISK METRICS ──
+    risk_metrics = {}
+    if len(vault_rets) >= 10:
+        v_mean = _stats.mean(vault_rets)
+        v_std = _stats.stdev(vault_rets)
+        v_ann_ret = v_mean * 365
+        v_ann_vol = v_std * math.sqrt(365)
+        rf = 0.05
+        sharpe = (v_ann_ret - rf) / v_ann_vol if v_ann_vol > 0 else 0
+        neg = [r for r in vault_rets if r < 0]
+        downside = _stats.stdev(neg) * math.sqrt(365) if len(neg) > 1 else 0
+        sortino = (v_ann_ret - rf) / downside if downside > 0 else 99
+
+        # Max drawdown (from compounded daily returns, not raw AUM)
+        cum = 1.0
+        peak_cum = 1.0
+        max_dd = 0
+        for r in vault_rets:
+            cum *= (1 + r)
+            if cum > peak_cum:
+                peak_cum = cum
+            dd = (cum - peak_cum) / peak_cum
+            if dd < max_dd:
+                max_dd = dd
+
+        n = len(vault_rets)
+        skew = 0
+        kurt = 0
+        if n > 3 and v_std > 0:
+            skew = (n / ((n-1)*(n-2))) * sum(((r - v_mean) / v_std)**3 for r in vault_rets)
+            kurt = ((n*(n+1)) / ((n-1)*(n-2)*(n-3))) * sum(((r - v_mean) / v_std)**4 for r in vault_rets) - (3*(n-1)**2)/((n-2)*(n-3))
+
+        risk_metrics = {
+            "sharpe": round(sharpe, 2), "sortino": round(min(sortino, 99), 2),
+            "annual_return": round(v_ann_ret, 4), "annual_vol": round(v_ann_vol, 4),
+            "max_drawdown": round(max_dd, 4),
+            "best_day": round(max(vault_rets), 4), "worst_day": round(min(vault_rets), 4),
+            "win_rate": round(sum(1 for r in vault_rets if r > 0) / len(vault_rets), 3),
+            "skewness": round(skew, 2), "kurtosis": round(kurt, 2),
+            "daily_observations": len(vault_rets),
+        }
+
+    # ── CORRELATION ──
+    correlation = {}
+    if len(vault_rets) >= 10 and len(all_btc_rets) >= 10:
+        from datetime import datetime as _dt
+        v_dict = {_dt.utcfromtimestamp(ts).strftime("%Y-%m-%d"): ret for ts, ret in daily_returns}
+        b_dict = {_dt.utcfromtimestamp(ts).strftime("%Y-%m-%d"): ret for ts, ret in btc_daily}
+        common = sorted(set(v_dict) & set(b_dict))
+        if len(common) >= 10:
+            paired = [(v_dict[d], b_dict[d]) for d in common]
+            vp = [p[0] for p in paired]
+            bp = [p[1] for p in paired]
+            vm, bm = _stats.mean(vp), _stats.mean(bp)
+            vs, bs = _stats.stdev(vp), _stats.stdev(bp)
+            cov = sum((v - vm) * (b - bm) for v, b in paired) / (len(paired) - 1) if len(paired) > 1 else 0
+            corr = cov / (vs * bs) if vs > 0 and bs > 0 else 0
+            beta = cov / (bs ** 2) if bs > 0 else 0
+
+            crash = [(v, b) for v, b in paired if b < -0.03]
+            pump = [(v, b) for v, b in paired if b > 0.03]
+            correlation = {
+                "pearson": round(corr, 3), "beta": round(beta, 3),
+                "btc_crash_vault_avg": round(_stats.mean([v for v, b in crash]), 4) if crash else None,
+                "btc_pump_vault_avg": round(_stats.mean([v for v, b in pump]), 4) if pump else None,
+                "paired_days": len(common),
+            }
+
+    # ── MONTE CARLO ──
+    monte_carlo = {}
+    if len(vault_rets) >= 15:
+        _rand.seed(42)
+        NUM_SIMS = 2000
+        mc_finals = []
+        for _ in range(NUM_SIMS):
+            bal = deposit
+            for __ in range(horizon_days):
+                dr = _rand.choice(vault_rets)
+                if dr > 0: dr *= (1 - leader_commission)
+                bal *= (1 + dr)
+            mc_finals.append(bal)
+        mc_finals.sort()
+        mc_rets = [(v - deposit) / deposit for v in mc_finals]
+
+        def pct(p):
+            return round(mc_finals[min(int(NUM_SIMS * p / 100), NUM_SIMS - 1)])
+
+        monte_carlo = {
+            "percentiles": {"p1": pct(1), "p5": pct(5), "p10": pct(10), "p25": pct(25), "p50": pct(50), "p75": pct(75), "p90": pct(90), "p95": pct(95), "p99": pct(99)},
+            "prob_loss": round(sum(1 for r in mc_rets if r < 0) / NUM_SIMS, 3),
+            "prob_loss_10": round(sum(1 for r in mc_rets if r < -0.10) / NUM_SIMS, 3),
+            "prob_loss_25": round(sum(1 for r in mc_rets if r < -0.25) / NUM_SIMS, 3),
+            "prob_gain_50": round(sum(1 for r in mc_rets if r > 0.50) / NUM_SIMS, 3),
+            "prob_double": round(sum(1 for r in mc_rets if r > 1.0) / NUM_SIMS, 3),
+            "ev": round(_stats.mean(mc_rets) * deposit),
+            "std": round(_stats.stdev(mc_rets) * deposit) if len(mc_rets) > 1 else 0,
+            "sims": NUM_SIMS,
+            "horizon_days": horizon_days,
+        }
+
+    # ── RISK OF RUIN ──
+    risk_of_ruin = {}
+    if len(vault_rets) >= 15:
+        _rand.seed(123)
+        RR_SIMS = 2000
+        ruin_counts = {10: 0, 20: 0, 30: 0, 50: 0}
+        race = {"ruin20_first": 0, "target50_first": 0}
+        for _ in range(RR_SIMS):
+            bal = deposit
+            hit_ruin20 = False
+            hit_target50 = False
+            hit_thr = {t: False for t in ruin_counts}
+            for __ in range(90):
+                dr = _rand.choice(vault_rets)
+                if dr > 0: dr *= (1 - leader_commission)
+                bal *= (1 + dr)
+                ret = (bal - deposit) / deposit
+                for thr in ruin_counts:
+                    if not hit_thr[thr] and ret <= -thr / 100:
+                        hit_thr[thr] = True
+                        ruin_counts[thr] += 1
+                if not hit_ruin20 and ret <= -0.20: hit_ruin20 = True
+                if not hit_target50 and ret >= 0.50: hit_target50 = True
+            if hit_ruin20 and not hit_target50: race["ruin20_first"] += 1
+            elif hit_target50 and not hit_ruin20: race["target50_first"] += 1
+
+        risk_of_ruin = {
+            "p_lose_10": round(ruin_counts[10] / RR_SIMS, 3),
+            "p_lose_20": round(ruin_counts[20] / RR_SIMS, 3),
+            "p_lose_30": round(ruin_counts[30] / RR_SIMS, 3),
+            "p_lose_50": round(ruin_counts[50] / RR_SIMS, 3),
+            "race_20_vs_50": {
+                "ruin_first": round(race["ruin20_first"] / RR_SIMS, 3),
+                "target_first": round(race["target50_first"] / RR_SIMS, 3),
+            },
+        }
+
+    # ── KELLY CRITERION ──
+    kelly = {}
+    if len(vault_rets) >= 15:
+        wins = [r for r in vault_rets if r > 0]
+        losses = [r for r in vault_rets if r < 0]
+        if wins and losses:
+            wr = len(wins) / len(vault_rets)
+            avg_w = _stats.mean(wins)
+            avg_l = abs(_stats.mean(losses))
+            payoff = avg_w / avg_l if avg_l > 0 else 99
+            kelly_f = wr - (1 - wr) / payoff if payoff > 0 else 0
+            kelly = {
+                "full": round(kelly_f, 3),
+                "half": round(kelly_f / 2, 3),
+                "win_rate": round(wr, 3),
+                "avg_win": round(avg_w, 4),
+                "avg_loss": round(avg_l, 4),
+                "payoff_ratio": round(payoff, 2),
+            }
+
+    # ── FORWARD WALK ──
+    forward_walk = {}
+    if len(vault_rets) >= 20:
+        split = int(len(vault_rets) * 0.7)
+        train = vault_rets[:split]
+        test = vault_rets[split:]
+        if len(train) > 3 and len(test) > 3:
+            tr_m, tr_s = _stats.mean(train), _stats.stdev(train)
+            te_m, te_s = _stats.mean(test), _stats.stdev(test)
+            tr_ann = tr_m * 365
+            te_ann = te_m * 365
+            tr_vol = tr_s * math.sqrt(365)
+            te_vol = te_s * math.sqrt(365)
+            rf = 0.05
+            tr_sh = (tr_ann - rf) / tr_vol if tr_vol > 0 else 0
+            te_sh = (te_ann - rf) / te_vol if te_vol > 0 else 0
+            stability = "stable" if te_sh >= tr_sh * 0.7 else ("degraded" if te_sh >= 0 else "unstable")
+            forward_walk = {
+                "train_sharpe": round(tr_sh, 2),
+                "test_sharpe": round(te_sh, 2),
+                "stability": stability,
+            }
+
+    # ── MONTHLY BREAKDOWN (use full raw history, robust to sparse points) ──
+    def _monthly_from_series(series, cap_rets=True):
+        # Use month-end values to avoid sparse-gap artifacts and zero-filled fake months.
+        month_last = {}
+        for ts, val in series:
+            if val is None or val <= 0:
+                continue
+            mk = _dt.utcfromtimestamp(ts).strftime("%Y-%m")
+            if mk not in month_last or ts > month_last[mk][0]:
+                month_last[mk] = (ts, float(val))
+        months_sorted = sorted(month_last.keys())
+        out = {}
+        prev_val = None
+        for mk in months_sorted:
+            cur_val = month_last[mk][1]
+            if prev_val is None or prev_val <= 0:
+                out[mk] = None
+            else:
+                r = (cur_val - prev_val) / prev_val
+                out[mk] = _cap(r) if cap_rets else r
+            prev_val = cur_val
+        return out
+
+    vm_month = _monthly_from_series(values, cap_rets=True)
+    bm_month = _monthly_from_series(btc_prices, cap_rets=False)
+    hm_month = _monthly_from_series(hlp_values, cap_rets=True)
+
+    # Keep month axis anchored to the selected vault history to avoid noisy empty rows.
+    months = sorted(vm_month.keys())
+    monthly = []
+    for mk in months:
+        v = vm_month.get(mk)
+        b = bm_month.get(mk)
+        h = hm_month.get(mk)
+        if v is None and b is None and h is None:
+            continue
+        monthly.append({
+            "month": mk,
+            "vault": (round(v, 4) if isinstance(v, (int, float)) else None),
+            "btc": (round(b, 4) if isinstance(b, (int, float)) else None),
+            "hlp": (round(h, 4) if isinstance(h, (int, float)) else None),
+        })
+
+    # ── SCORE ──
+    score = 0
+    factors = []
+    if vault_net > btc_ret:
+        score += 2; factors.append(f"+Alpha vs BTC: {(vault_net-btc_ret)*100:+.0f}%")
+    else:
+        factors.append(f"-Underperforms BTC by {(btc_ret-vault_net)*100:.0f}%")
+
+    sh = risk_metrics.get("sharpe", 0)
+    if sh >= 1.5:
+        score += 2; factors.append(f"+Good Sharpe: {sh:.2f}")
+    elif sh >= 0.5:
+        score += 1; factors.append(f"~Moderate Sharpe: {sh:.2f}")
+    else:
+        factors.append(f"-Poor Sharpe: {sh:.2f}")
+
+    mdd = risk_metrics.get("max_drawdown", 0)
+    if mdd > -0.20:
+        score += 1; factors.append(f"+Controlled drawdown: {mdd*100:.0f}%")
+    elif mdd > -0.40:
+        factors.append(f"~Moderate drawdown: {mdd*100:.0f}%")
+    else:
+        factors.append(f"-Severe drawdown: {mdd*100:.0f}%")
+
+    pc = correlation.get("pearson", 0)
+    if abs(pc) < 0.3:
+        score += 1; factors.append(f"+Low BTC correlation ({pc:+.2f})")
+    else:
+        factors.append(f"~Correlated with BTC ({pc:+.2f})")
+
+    fw = forward_walk.get("stability", "")
+    if fw == "stable":
+        score += 1; factors.append("+Stable performance over time")
+    elif fw == "degraded":
+        factors.append("-Performance degraded recently")
+    elif fw == "unstable":
+        factors.append("-Unstable performance")
+
+    pl = monte_carlo.get("prob_loss", 1)
+    if pl < 0.40:
+        score += 1; factors.append(f"+{horizon_days}d loss probability: {pl*100:.0f}%")
+
+    kf = kelly.get("full", 0)
+    if kf > 0.05:
+        score += 1; factors.append(f"+Positive Kelly edge: {kf*100:.0f}%")
+
+    if monte_carlo.get("prob_loss_25", 1) < 0.05:
+        score += 1
+
+    rating = "STRONG BUY" if score >= 8 else "BUY" if score >= 6 else "HOLD" if score >= 4 else "CAUTION" if score >= 2 else "AVOID"
+
+    # ── Entry intel ──
+    entry_intel = None
+    if risk_rows:
+        try:
+            entry_intel = {
+                "leverage": float(risk_rows["leverage_effective"]) if risk_rows["leverage_effective"] else None,
+                "liq_risk": str(risk_rows["liq_risk"]) if risk_rows["liq_risk"] else None,
+                "entry_score": int(risk_rows["entry_score"]) if risk_rows["entry_score"] else None,
+                "entry_label": risk_rows["entry_label"],
+            }
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "vault_name": vault_name,
+        "vault_pk": vault_pk,
+        "requested_horizon_days": horizon_days,
+        "protocol": protocol,
+        "data_points": len(values),
+        "period_days": round(bench_days),
+        "total_days": round(total_days),
+        "data_quality": data_quality,
+        "deposit": deposit,
+        "benchmarks": benchmarks,
+        "risk_metrics": risk_metrics,
+        "correlation": correlation,
+        "monte_carlo": monte_carlo,
+        "risk_of_ruin": risk_of_ruin,
+        "kelly": kelly,
+        "forward_walk": forward_walk,
+        "monthly": monthly,
+        "score": score,
+        "rating": rating,
+        "factors": factors,
+        "entry_intel": entry_intel,
+    }
+
+
+# =============================================================================
 # OTHER PROTOCOLS - REAL DISCOVERY (NO PLACEHOLDERS)
 # =============================================================================
 # DISCOVERY METHODS:
@@ -6392,7 +6952,7 @@ class APIHandler(BaseHTTPRequestHandler):
     
     def do_GET(self):
         parsed = urlparse(self.path)
-        path = parsed.path
+        path = unquote(parsed.path)
         query = parse_qs(parsed.query)
         
         # OG image for social previews
@@ -6904,8 +7464,30 @@ class APIHandler(BaseHTTPRequestHandler):
             else:
                 self.send_json({"error": "Invalid vault ID"}, 404)
         
+        elif path.startswith("/api/vault/") and "/backtest" in path:
+            parts = path.split("/")
+            vault_id = parts[3] if len(parts) > 3 else None
+            try:
+                deposit = float(query.get("deposit", [10000])[0])
+            except Exception:
+                deposit = 10000.0
+            try:
+                days = int(query.get("days", [30])[0])
+            except Exception:
+                days = 30
+            deposit = max(100.0, min(deposit, 10_000_000.0))
+            days = max(1, min(days, 365))
+            if vault_id:
+                try:
+                    result = compute_vault_backtest(vault_id, deposit, days)
+                    self.send_json(result)
+                except Exception as e:
+                    print(f"[BACKTEST] ERROR for {vault_id}: {e}", flush=True)
+                    self.send_json({"error": str(e), "insufficient_data": True, "vault_name": vault_id})
+            else:
+                self.send_json({"error": "Invalid vault ID"}, 400)
+
         elif path.startswith("/api/vault/") and "/entry" in path:
-            # GET /api/vault/<vault_id>/entry — Entry Intelligence endpoint
             parts = path.split("/")
             vault_id = parts[3] if len(parts) > 3 else None
             

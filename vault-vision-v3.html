@@ -204,6 +204,60 @@ tbody tr:last-child td{border-bottom:none}
 .calc-res-val{font-size:22px;font-weight:700;margin-top:4px;color:var(--text-primary)}
 .calc-res-val.profit{background:var(--gradient-positive);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .calc-res-val.loss{background:var(--gradient-negative);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+/* Backtest Dashboard */
+.bt-dash{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:32px}
+.bt-card{background:var(--bg-card);border:1px solid var(--border-light);border-radius:20px;padding:24px;backdrop-filter:blur(10px);animation:fadeInUp .5s ease-out both;position:relative;overflow:hidden}
+.bt-card.bt-full{grid-column:1/-1}
+.bt-card h4{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--text-secondary);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.bt-card h4 svg{opacity:.5}
+.bt-controls{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.bt-controls .calc-group{flex:1;min-width:140px}
+.bt-run{padding:12px 28px;border:none;border-radius:12px;background:var(--gradient-accent);color:#fff;font-weight:700;font-size:14px;cursor:pointer;transition:all .2s;white-space:nowrap;align-self:flex-end}
+.bt-run:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,212,255,.3)}
+.bt-run:disabled{opacity:.5;cursor:wait}
+.bt-bench-tbl{width:100%;border-collapse:collapse;margin-top:8px}
+.bt-bench-tbl th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--text-secondary);padding:8px 0;border-bottom:1px solid var(--border-light)}
+.bt-bench-tbl td{padding:10px 0;font-size:14px;font-weight:600;color:var(--text-primary);border-bottom:1px solid var(--border-light)}
+.bt-bench-tbl td:last-child{text-align:right}
+.bt-bench-bar{height:6px;border-radius:3px;transition:width .6s ease}
+.bt-alpha{display:inline-block;background:var(--gradient-accent);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;margin-left:8px}
+.bt-hist-wrap{position:relative;margin-top:8px}
+.bt-risk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.bt-risk-item{text-align:center;padding:16px 8px;background:var(--slate-50);border-radius:14px;border:1px solid var(--border-light);transition:all .2s}
+[data-theme="dark"] .bt-risk-item{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06)}
+.bt-risk-item:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
+.bt-risk-val{font-size:24px;font-weight:800;color:var(--text-primary);line-height:1.1}
+.bt-risk-label{font-size:11px;color:var(--text-secondary);text-transform:uppercase;margin-top:6px}
+.bt-risk-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle}
+.bt-corr-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-light);font-size:14px}
+.bt-corr-row:last-child{border:none}
+.bt-corr-label{color:var(--text-secondary)}
+.bt-corr-val{font-weight:700;color:var(--text-primary)}
+.bt-kelly-gauge{display:flex;gap:8px;margin-top:12px;align-items:center}
+.bt-kelly-seg{flex:1;height:10px;border-radius:5px;background:var(--slate-200);position:relative;overflow:hidden}
+.bt-kelly-fill{height:100%;border-radius:5px;transition:width .6s ease}
+.bt-kelly-labels{display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-top:6px}
+.bt-score-circle{width:120px;height:120px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto 16px;position:relative}
+.bt-score-num{font-size:42px;font-weight:900;line-height:1;color:#fff}
+.bt-score-of{font-size:12px;color:rgba(255,255,255,.7)}
+.bt-rating{text-align:center;font-size:18px;font-weight:800;padding:6px 20px;border-radius:10px;display:inline-block;margin-bottom:16px}
+.bt-factors{list-style:none;padding:0;margin:0}
+.bt-factors li{padding:5px 0;font-size:13px;color:var(--text-secondary)}
+.bt-factors li::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:8px;vertical-align:middle}
+.bt-factors li.fpos::before{background:#10b981}
+.bt-factors li.fneg::before{background:#f43f5e}
+.bt-factors li.fneut::before{background:#fbbf24}
+.bt-loading{text-align:center;padding:40px 20px;color:var(--text-secondary);font-size:14px}
+.bt-loading .spinner{width:32px;height:32px;border:3px solid var(--border-light);border-top-color:var(--sky-400);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+#btStatus{grid-column:1/-1}
+#btResults{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.bt-insuf{text-align:center;padding:32px;color:var(--text-secondary)}
+.bt-insuf svg{margin-bottom:12px;opacity:.3}
+.bt-month-tbl{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+.bt-month-tbl th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--text-secondary);padding:6px 8px;border-bottom:1px solid var(--border-light)}
+.bt-month-tbl td{padding:6px 8px;border-bottom:1px solid var(--border-light);font-weight:600}
+@media(max-width:768px){.bt-dash{grid-template-columns:1fr}#btResults{grid-template-columns:1fr}.bt-risk-grid{grid-template-columns:repeat(2,1fr)}.bt-controls{flex-direction:column}}
 /* Entry Intelligence Blocks */
 .entry-intel-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:32px}
 .entry-card{background:var(--bg-card);border:1px solid var(--border-light);border-radius:20px;padding:24px;backdrop-filter:blur(10px);animation:fadeInUp .5s ease-out both}
@@ -1320,6 +1374,275 @@ function getRiskColor(score) {
 }
 
 // =============================================================================
+// BACKTEST ENGINE — Frontend
+// =============================================================================
+let _btTimer=null;
+function runBacktest(vid){
+  const btn=document.getElementById('btRun');
+  const status=document.getElementById('btStatus');
+  const results=document.getElementById('btResults');
+  if(!btn)return;
+  const amt=parseFloat(document.getElementById('btAmt').value)||10000;
+  const days=parseInt(document.getElementById('btDays').value)||30;
+  btn.disabled=true;btn.textContent='Running...';
+  status.innerHTML='<div class="bt-loading"><div class="spinner"></div>Analyzing '+days+'-day horizon with $'+amt.toLocaleString()+' deposit...</div>';
+  results.innerHTML='';
+  const btUrl=API_BASE+'/api/vault/'+encodeURIComponent(vid)+'/backtest?deposit='+amt+'&days='+days;
+  fetch(btUrl)
+  .then(r=>r.json()).then(d=>{
+    btn.disabled=false;btn.textContent='Run Backtest';status.innerHTML='';
+    if(d.insufficient_data){
+      results.innerHTML=btInsufficient(d);return;
+    }
+    results.innerHTML=btBenchmarks(d)+btMonteCarlo(d,amt)+btRiskMetrics(d)+btCorrelation(d)+btKelly(d,amt)+btMonthly(d)+btVerdict(d);
+    btDrawHistogram(d,amt);
+  }).catch(e=>{
+    btn.disabled=false;btn.textContent='Run Backtest';
+    status.innerHTML='<div class="bt-insuf">Error: '+e.message+'</div>';
+  });
+}
+function btPreview(v){
+  const apr = v && v.apy!=null ? _fmtPct(v.apy) : 'N/A';
+  const r30 = v && v.r30!=null ? _fmtPct(v.r30) : 'N/A';
+  const r90 = v && v.r90!=null ? _fmtPct(v.r90) : 'N/A';
+  const risk = v && v.risk_score!=null ? (v.risk_score+'/100') : 'N/A';
+  const tvl = v ? fmtTvl(v.tvl_usd) : 'N/A';
+  return '<div class="bt-card bt-full" style="padding:14px 16px;min-height:auto">'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'+
+      '<div>'+
+        '<div style="font-size:13px;font-weight:700;color:var(--text-primary)">Backtest Preview</div>'+
+        '<div style="font-size:12px;color:var(--text-secondary);margin-top:2px">Quick snapshot before full simulation</div>'+
+      '</div>'+
+      '<button class="pill" onclick="runBacktest(\''+v.id+'\')" style="padding:6px 10px">Run Full Backtest</button>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:10px">'+
+      '<div style="padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid var(--border-light);border-radius:8px;font-size:12px"><span style="color:var(--text-muted)">TVL:</span> <strong style="color:var(--sky-400)">'+tvl+'</strong></div>'+
+      '<div style="padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid var(--border-light);border-radius:8px;font-size:12px"><span style="color:var(--text-muted)">APR:</span> <strong>'+apr+'</strong></div>'+
+      '<div style="padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid var(--border-light);border-radius:8px;font-size:12px"><span style="color:var(--text-muted)">30D:</span> <strong>'+r30+'</strong></div>'+
+      '<div style="padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid var(--border-light);border-radius:8px;font-size:12px"><span style="color:var(--text-muted)">90D:</span> <strong>'+r90+'</strong></div>'+
+      '<div style="padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid var(--border-light);border-radius:8px;font-size:12px"><span style="color:var(--text-muted)">Risk:</span> <strong>'+risk+'</strong></div>'+
+    '</div></div>';
+}
+function btInsufficient(d){
+  if(d && d.error){
+    return '<div class="bt-card bt-full" style="padding:14px 16px;min-height:auto">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'+
+      '<div style="font-size:13px;color:var(--text-secondary)"><strong style="color:var(--text-primary)">Backtest preview unavailable:</strong> '+(d.error||'temporary issue')+'</div>'+
+      '<button class="pill" onclick="document.getElementById(\'btRun\').click()" style="padding:6px 10px">Retry</button>'+
+      '</div></div>';
+  }
+  const pts=d.data_points||0, need=d.min_required||10;
+  const pct=Math.min(Math.round(pts/need*100),99);
+  const dep=parseFloat(document.getElementById('btAmt').value)||10000;
+  const apr=d.simple_apr||0;
+  const tvl=d.tvl||0;
+  const age=d.age_days||0;
+  const est=d.est_days_until_ready||0;
+  const proto=d.protocol||'';
+
+  let h='<div class="bt-card bt-full" style="padding:14px 16px;min-height:auto">';
+
+  h+='<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">';
+  h+='<div style="font-size:13px;color:var(--text-secondary)"><strong style="color:var(--text-primary)">Preview mode:</strong> '+pts+' / '+need+' points'+(est>0?' · ~'+est+'d to full backtest':'')+'</div>';
+  h+='<div style="font-size:12px;color:var(--text-muted)">'+(proto?proto.toUpperCase():'Vault')+'</div></div>';
+
+  h+='<div style="background:rgba(255,255,255,.04);border-radius:10px;height:6px;overflow:hidden;margin-bottom:12px">';
+  h+='<div style="height:100%;width:'+pct+'%;background:linear-gradient(90deg,#00d4ff,#8b5cf6);border-radius:10px;transition:width .6s ease"></div></div>';
+
+  if(tvl>0||apr!==0||age>0){
+    h+='<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:10px">';
+    if(tvl>0) h+='<div style="padding:8px 10px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--border-light);font-size:12px"><span style="color:var(--text-muted)">TVL:</span> <strong style="color:var(--sky-400)">'+_fmtUsd(tvl)+'</strong></div>';
+    h+='<div style="padding:8px 10px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--border-light);font-size:12px"><span style="color:var(--text-muted)">APR:</span> <strong style="'+_pctClr(apr)+'">'+(apr!==0?_fmtPct(apr):'N/A')+'</strong></div>';
+    if(age>0) h+='<div style="padding:8px 10px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--border-light);font-size:12px"><span style="color:var(--text-muted)">Age:</span> <strong style="color:var(--text-primary)">'+age+'d</strong></div>';
+    h+='</div>';
+  }
+
+  if(apr!==0){
+    h+='<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary)">';
+    [7,30,90].forEach(function(days){
+      const fin=dep*Math.pow(1+apr/365,days);
+      const pnl=fin-dep;
+      h+='<span>'+days+'d: <strong style="'+_pctClr(pnl)+'">'+_fmtPct(pnl/dep)+'</strong></span>';
+    });
+    h+='</div>';
+  }
+
+  if(apr===0&&pts===0){
+    h+='<div style="font-size:12px;color:var(--text-muted)">Vault is new, collecting baseline history before full backtest.</div>';
+  }
+
+  h+='</div>';
+  return h;
+}
+function _pctClr(v){
+  if(v==null||Number.isNaN(v)) return 'color:var(--text-muted)';
+  return v>=0?'color:#10b981':'color:#f43f5e';
+}
+function _fmtPct(v){return v==null?'N/A':(v>=0?'+':'')+(v*100).toFixed(1)+'%'}
+function _fmtUsd(v){return v==null?'N/A':'$'+Math.round(v).toLocaleString()}
+
+function btBenchmarks(d){
+  if(!d.benchmarks)return '';
+  const b=d.benchmarks;
+  const strategies=[
+    {name:'Vault',data:b.vault,color:'#00d4ff'},
+    {name:'BTC',data:b.btc,color:'#f7931a'},
+    {name:'HLP Index',data:b.hlp,color:'#8b5cf6'},
+    {name:'Stablecoin Lending',data:b.stable,color:'#10b981'}
+  ];
+  const maxAbs=Math.max(...strategies.map(s=>Math.abs(s.data.return||0)),0.01);
+  let rows=strategies.map(s=>{
+    const r=s.data.return||0;
+    const w=Math.min(Math.abs(r)/maxAbs*100,100);
+    const alpha=s.name==='Vault'&&b.btc?(r-b.btc.return):null;
+    return '<tr><td style="color:'+s.color+';font-weight:700">'+s.name+(alpha!=null&&alpha>0?'<span class="bt-alpha">'+_fmtPct(alpha)+' alpha</span>':'')+'</td><td style="'+_pctClr(r)+'">'+_fmtPct(r)+'</td><td>'+_fmtUsd(s.data.final)+'</td><td><div class="bt-bench-bar" style="width:'+w+'%;background:'+(r>=0?s.color:'#f43f5e')+'"></div></td></tr>';
+  }).join('');
+  const pDays = d.period_days!=null ? d.period_days : 'N/A';
+  const reqDays = d.requested_horizon_days!=null ? d.requested_horizon_days : pDays;
+  const lbl = (pDays===reqDays || pDays==='N/A') ? (pDays+'d historical') : ('effective '+pDays+'d of requested '+reqDays+'d');
+  return '<div class="bt-card bt-full"><h4><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 4 6-8"/></svg>Benchmark Comparison <span style="font-size:11px;font-weight:400;color:var(--text-muted)">('+lbl+')</span></h4><table class="bt-bench-tbl"><thead><tr><th>Strategy</th><th>Return</th><th>Final Value</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+function btMonteCarlo(d,deposit){
+  if(!d.monte_carlo||!d.monte_carlo.percentiles)return '';
+  const mc=d.monte_carlo;
+  const p=mc.percentiles;
+  return '<div class="bt-card bt-full"><h4><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10"/></svg>Monte Carlo Simulation <span style="font-size:11px;font-weight:400;color:var(--text-muted)">('+mc.sims+' scenarios, '+mc.horizon_days+'d)</span></h4>'+
+    '<div class="bt-hist-wrap"><svg id="btHistSvg" width="100%" height="200"></svg></div>'+
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px">'+
+    '<div class="bt-risk-item"><div class="bt-risk-val" style="'+_pctClr(-mc.prob_loss)+'">'+(mc.prob_loss*100).toFixed(0)+'%</div><div class="bt-risk-label">P(Loss)</div></div>'+
+    '<div class="bt-risk-item"><div class="bt-risk-val" style="'+_pctClr(-mc.prob_loss_25)+'">'+(mc.prob_loss_25*100).toFixed(1)+'%</div><div class="bt-risk-label">P(Loss &gt;25%)</div></div>'+
+    '<div class="bt-risk-item"><div class="bt-risk-val" style="color:#10b981">'+(mc.prob_gain_50*100).toFixed(1)+'%</div><div class="bt-risk-label">P(Gain &gt;50%)</div></div>'+
+    '</div>'+
+    '<div style="display:flex;justify-content:space-between;margin-top:12px;font-size:12px;color:var(--text-secondary)">'+
+    '<span>Worst 5%: '+_fmtUsd(p.p5)+'</span><span>Median: '+_fmtUsd(p.p50)+'</span><span>Best 5%: '+_fmtUsd(p.p95)+'</span></div></div>';
+}
+
+function btDrawHistogram(d,deposit){
+  if(!d.monte_carlo||!d.monte_carlo.percentiles)return;
+  const svg=document.getElementById('btHistSvg');
+  if(!svg)return;
+  const mc=d.monte_carlo;
+  const p=mc.percentiles;
+  const vals=[p.p1,p.p5,p.p10,p.p25,p.p50,p.p75,p.p90,p.p95,p.p99];
+  const lo=vals[0],hi=vals[vals.length-1];
+  const range=hi-lo||1;
+  const W=svg.clientWidth||500,H=180;
+  svg.setAttribute('viewBox','0 0 '+W+' '+H);
+  const bins=30;
+  const counts=new Array(bins).fill(0);
+  const step=range/bins;
+  const interpVals=[];
+  for(let i=0;i<vals.length-1;i++){
+    const n=Math.round(mc.sims*(([1,5,10,25,50,75,90,95,99][i+1]-[1,5,10,25,50,75,90,95,99][i])/100));
+    for(let j=0;j<n;j++) interpVals.push(vals[i]+(vals[i+1]-vals[i])*(j/n));
+  }
+  interpVals.forEach(v=>{const b=Math.min(Math.floor((v-lo)/step),bins-1);if(b>=0)counts[b]++;});
+  const maxC=Math.max(...counts,1);
+  const bw=W/bins;
+  let html='';
+  counts.forEach((c,i)=>{
+    const x=i*bw;const h=c/maxC*(H-30);const y=H-20-h;
+    const mid=lo+step*(i+0.5);
+    const clr=mid<deposit?'rgba(244,63,94,0.6)':mid<deposit*1.5?'rgba(56,189,248,0.6)':'rgba(16,185,129,0.6)';
+    html+='<rect x="'+x+'" y="'+y+'" width="'+(bw-1)+'" height="'+h+'" rx="2" fill="'+clr+'"/>';
+  });
+  const depX=(deposit-lo)/range*W;
+  html+='<line x1="'+depX+'" y1="0" x2="'+depX+'" y2="'+(H-20)+'" stroke="#fff" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.5"/>';
+  html+='<text x="'+depX+'" y="12" fill="var(--text-secondary)" text-anchor="middle" font-size="10">Deposit</text>';
+  const p50x=(p.p50-lo)/range*W;
+  html+='<line x1="'+p50x+'" y1="0" x2="'+p50x+'" y2="'+(H-20)+'" stroke="#00d4ff" stroke-width="2"/>';
+  html+='<text x="'+p50x+'" y="12" fill="#00d4ff" text-anchor="middle" font-size="10" font-weight="700">Median</text>';
+  svg.innerHTML=html;
+}
+
+function btRiskMetrics(d){
+  if(!d.risk_metrics)return '';
+  const m=d.risk_metrics;
+  function item(label,val,fmt,thresh){
+    let clr='#fbbf24';
+    if(thresh==='sharpe'){clr=val>=1.5?'#10b981':val>=0.5?'#fbbf24':'#f43f5e'}
+    else if(thresh==='dd'){clr=val>-0.2?'#10b981':val>-0.4?'#fbbf24':'#f43f5e'}
+    else if(thresh==='wr'){clr=val>0.55?'#10b981':val>0.45?'#fbbf24':'#f43f5e'}
+    else if(thresh==='vol'){clr=val<1?'#10b981':val<2?'#fbbf24':'#f43f5e'}
+    return '<div class="bt-risk-item"><div class="bt-risk-val"><span class="bt-risk-dot" style="background:'+clr+'"></span>'+fmt+'</div><div class="bt-risk-label">'+label+'</div></div>';
+  }
+  return '<div class="bt-card"><h4><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Risk Metrics</h4><div class="bt-risk-grid">'+
+    item('Sharpe Ratio',m.sharpe,m.sharpe.toFixed(2),'sharpe')+
+    item('Sortino Ratio',m.sortino,(m.sortino>50?'99+':m.sortino.toFixed(2)),'sharpe')+
+    item('Max Drawdown',m.max_drawdown,(m.max_drawdown*100).toFixed(1)+'%','dd')+
+    item('Ann. Volatility',m.annual_vol,(m.annual_vol*100).toFixed(0)+'%','vol')+
+    item('Win Rate',m.win_rate,(m.win_rate*100).toFixed(1)+'%','wr')+
+    item('Skewness',m.skewness,m.skewness.toFixed(2),'sharpe')+
+    '</div></div>';
+}
+
+function btCorrelation(d){
+  if(!d.correlation||d.correlation.pearson==null)return '';
+  const c=d.correlation;
+  function row(l,v,fmt){return '<div class="bt-corr-row"><span class="bt-corr-label">'+l+'</span><span class="bt-corr-val" style="'+_pctClr(typeof v==="number"?-Math.abs(v):0)+'">'+fmt+'</span></div>'}
+  let interp='Neutral';
+  if(Math.abs(c.pearson)<0.2)interp='Very low correlation — independent of BTC';
+  else if(Math.abs(c.pearson)<0.5)interp='Moderate correlation';
+  else interp='High correlation with BTC';
+  return '<div class="bt-card"><h4><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/></svg>Market Correlation</h4>'+
+    row('Pearson Correlation',c.pearson,c.pearson.toFixed(3))+
+    row('Beta',c.beta,c.beta.toFixed(3))+
+    (c.btc_crash_vault_avg!=null?row('When BTC crashes (&gt;3%)',c.btc_crash_vault_avg,_fmtPct(c.btc_crash_vault_avg)):'')+
+    (c.btc_pump_vault_avg!=null?row('When BTC pumps (&gt;3%)',c.btc_pump_vault_avg,_fmtPct(c.btc_pump_vault_avg)):'')+
+    '<div style="margin-top:12px;padding:10px;background:var(--slate-50);border-radius:8px;font-size:13px;color:var(--text-secondary);text-align:center">'+interp+'</div></div>';
+}
+
+function btKelly(d,deposit){
+  if(!d.kelly||d.kelly.full==null)return '';
+  const k=d.kelly;
+  const half=Math.max(k.half||0,0);
+  const full=Math.max(k.full||0,0);
+  const clr=full>0.15?'#10b981':full>0.05?'#fbbf24':'#f43f5e';
+  const rec=half;
+  return '<div class="bt-card bt-full"><h4><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a4 4 0 0 0-8 0v2"/></svg>Kelly Criterion (Position Sizing)</h4>'+
+    '<div style="text-align:center;margin:16px 0"><div style="font-size:36px;font-weight:900;color:'+clr+'">'+(rec*100).toFixed(1)+'%</div><div style="font-size:13px;color:var(--text-secondary);margin-top:4px">Recommended allocation (Half Kelly)</div>'+
+    '<div style="font-size:18px;font-weight:700;margin-top:8px;color:var(--text-primary)">'+_fmtUsd(deposit*rec)+' of '+_fmtUsd(deposit)+'</div></div>'+
+    '<div class="bt-kelly-gauge">'+
+    '<div class="bt-kelly-seg"><div class="bt-kelly-fill" style="width:'+(Math.min(full/0.5,1)*100)+'%;background:'+clr+'"></div></div>'+
+    '</div>'+
+    '<div class="bt-kelly-labels"><span>0%</span><span>Quarter ('+(full/4*100).toFixed(0)+'%)</span><span>Half ('+(half*100).toFixed(0)+'%)</span><span>Full ('+(full*100).toFixed(0)+'%)</span></div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;font-size:13px">'+
+    '<div class="bt-corr-row"><span class="bt-corr-label">Win Rate</span><span class="bt-corr-val">'+(k.win_rate*100).toFixed(1)+'%</span></div>'+
+    '<div class="bt-corr-row"><span class="bt-corr-label">Payoff Ratio</span><span class="bt-corr-val">'+k.payoff_ratio.toFixed(2)+'x</span></div>'+
+    '</div></div>';
+}
+
+function btMonthly(d){
+  if(!d.monthly||!d.monthly.length)return '';
+  let rows=d.monthly.map(m=>'<tr><td>'+m.month+'</td><td style="'+_pctClr(m.vault)+'">'+_fmtPct(m.vault)+'</td><td style="'+_pctClr(m.btc)+'">'+_fmtPct(m.btc)+'</td><td style="'+_pctClr(m.hlp)+'">'+_fmtPct(m.hlp)+'</td></tr>').join('');
+  return '<div class="bt-card bt-full"><h4><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Monthly Breakdown</h4>'+
+    '<table class="bt-month-tbl"><thead><tr><th>Month</th><th>Vault</th><th>BTC</th><th>HLP</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+function btVerdict(d){
+  if(d.score==null)return '';
+  const s=d.score;const r=d.rating||'HOLD';
+  const bg=s>=8?'linear-gradient(135deg,#10b981,#059669)':s>=6?'linear-gradient(135deg,#00d4ff,#0ea5e9)':s>=4?'linear-gradient(135deg,#fbbf24,#f59e0b)':'linear-gradient(135deg,#f43f5e,#e11d48)';
+  const rbg=s>=8?'#10b981':s>=6?'#0ea5e9':s>=4?'#fbbf24':'#f43f5e';
+  const factors=(d.factors||[]).map(f=>{
+    const t=f[0];const cls=t==='+'?'fpos':t==='-'?'fneg':'fneut';
+    return '<li class="'+cls+'">'+f.slice(1)+'</li>';
+  }).join('');
+  let fw='';
+  if(d.forward_walk&&d.forward_walk.stability){
+    const st=d.forward_walk.stability;
+    const sc=st==='stable'?'#10b981':st==='degraded'?'#fbbf24':'#f43f5e';
+    fw='<div style="margin-top:16px;padding:12px;background:var(--slate-50);border-radius:10px;text-align:center;font-size:13px"><span style="font-weight:700;color:'+sc+'">Forward-Walk: '+st.charAt(0).toUpperCase()+st.slice(1)+'</span><br><span style="color:var(--text-secondary)">Train Sharpe: '+d.forward_walk.train_sharpe+' | Test Sharpe: '+d.forward_walk.test_sharpe+'</span></div>';
+  }
+  return '<div class="bt-card bt-full" style="text-align:center"><h4 style="justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Verdict</h4>'+
+    '<div class="bt-score-circle" style="background:'+bg+'"><div class="bt-score-num">'+s+'</div><div class="bt-score-of">/ 10</div></div>'+
+    '<div class="bt-rating" style="background:'+rbg+';color:#fff">'+r+'</div>'+
+    '<ul class="bt-factors" style="text-align:left;max-width:400px;margin:16px auto 0">'+factors+'</ul>'+
+    fw+'</div>';
+}
+
+// =============================================================================
 // RISK GAUGE SVG COMPONENT
 // =============================================================================
 function renderRiskGauge(score, protoAccent) {
@@ -2142,19 +2465,17 @@ function renderVault(id){
     <div class="detail-metric proto-${v.protocol}"><div class="detail-metric-label">Age</div><div class="detail-metric-val anim-num" id="ageNum">${fmtAge(v)}</div></div>
   </div>
 
-  <div class="calc-card fade-in" style="animation-delay:.1s">
-    <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px;opacity:.5"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Investment Calculator</h3>
-    <div class="calc-grid">
-      <div class="calc-group"><label>Investment ($)</label><input type="number" class="calc-input" id="cAmt" value="10000" min="100"></div>
-      <div class="calc-group"><label>Period (days)</label><input type="number" class="calc-input" id="cDays" value="30" min="1" max="365"></div>
-      <div class="calc-group"><label>APR Override (%)</label><input type="number" class="calc-input" id="cApr" value="${((v.apy||0)*100).toFixed(2)}" step="0.01"></div>
+  <div id="btDash" class="bt-dash fade-in" style="animation-delay:.1s">
+    <div class="bt-card bt-full">
+      <h4><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Backtest Engine</h4>
+      <div class="bt-controls">
+        <div class="calc-group"><label>Investment ($)</label><input type="number" class="calc-input" id="btAmt" value="10000" min="100"></div>
+        <div class="calc-group"><label>Horizon</label><select class="calc-input" id="btDays"><option value="7">7 days</option><option value="14">14 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select></div>
+        <button class="bt-run" id="btRun" onclick="runBacktest('${id}')">Run Backtest</button>
+      </div>
+      <div id="btStatus"></div>
     </div>
-    <div class="calc-results">
-      <div class="calc-res"><div class="calc-res-label">Final Value</div><div class="calc-res-val" id="cFinal">$0</div></div>
-      <div class="calc-res"><div class="calc-res-label">Profit/Loss</div><div class="calc-res-val" id="cPnl">$0</div></div>
-      <div class="calc-res"><div class="calc-res-label">Daily Avg</div><div class="calc-res-val" id="cDaily">$0</div></div>
-      <div class="calc-res"><div class="calc-res-label">ROI</div><div class="calc-res-val" id="cRoi">0%</div></div>
-    </div>
+    <div id="btResults"></div>
   </div>
 
   ${renderExpectationBlock(v)}
@@ -2196,7 +2517,7 @@ function renderVault(id){
       </div>
     </div>
     <div class="chart-card proto-${v.protocol} with-shine">
-      <h3>⚖️ Risk Analysis</h3>
+      <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;opacity:.5"><path d="M12 22V8"/><path d="M5 12h14"/><path d="M7 12l-3 6h6l-3-6z"/><path d="M17 12l-3 6h6l-3-6z"/><path d="M12 8l4-2"/><path d="M12 8L8 6"/></svg>Risk Analysis</h3>
       <div style="padding:8px 0">
         ${renderRiskGauge(riskScore, theme.accent)}
         ${renderRiskBreakdown(v, riskScore)}
@@ -2218,27 +2539,9 @@ function renderVault(id){
   }
   setTimeout(() => animateNumber('riskScoreNum', riskScore, { format: 'int', duration: 700 }), 200);
 
-  function updateCalc(){
-    const amt=parseFloat(document.getElementById('cAmt').value)||0;
-    const days=parseInt(document.getElementById('cDays').value)||30;
-    const apr=(parseFloat(document.getElementById('cApr').value)||0)/100;
-    const rate=apr/365;
-    const final=amt*Math.pow(1+rate,days);
-    const pnl=final-amt;
-    const daily=pnl/days;
-    const roi=amt>0?pnl/amt:0;
-    document.getElementById('cFinal').textContent='$'+final.toFixed(2);
-    document.getElementById('cPnl').textContent=(pnl>=0?'+':'-')+' $'+Math.abs(pnl).toFixed(2);
-    document.getElementById('cPnl').className='calc-res-val '+(pnl>=0?'profit':'loss');
-    document.getElementById('cDaily').textContent=(daily>=0?'+':'-')+' $'+Math.abs(daily).toFixed(2);
-    document.getElementById('cDaily').className='calc-res-val '+(daily>=0?'profit':'loss');
-    document.getElementById('cRoi').textContent=(roi>=0?'+':'')+(roi*100).toFixed(2)+'%';
-    document.getElementById('cRoi').className='calc-res-val '+(roi>=0?'profit':'loss');
-  }
-  document.getElementById('cAmt').oninput=updateCalc;
-  document.getElementById('cDays').oninput=updateCalc;
-  document.getElementById('cApr').oninput=updateCalc;
-  updateCalc();
+  // Initial preview (full backtest runs only after user click)
+  const btResultsEl=document.getElementById('btResults');
+  if(btResultsEl) btResultsEl.innerHTML=btPreview(v);
 
   // Load entry intelligence for HL vaults (async, non-blocking)
   if (v.protocol === 'hyperliquid') {
