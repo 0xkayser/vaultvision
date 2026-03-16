@@ -44,7 +44,7 @@ FETCH_INTERVAL_SEC = 15 * 60  # 15 minutes — ensures APR stays fresh
 # Hyperliquid
 HL_REFERRAL_CODE = "MONETKIDAO"
 HL_REFERRAL_URL = f"https://app.hyperliquid.xyz/join/{HL_REFERRAL_CODE}"
-HL_BUILDER_ADDRESS = ""  # TODO: register builder code and set address
+HL_BUILDER_ADDRESS = "0xff94BCf0171ad504c72790E5490BFf40508aE4ab"
 HL_BUILDER_FEE_BPS = 1   # 0.01% (1 = 1/10th of a basis point)
 HL_API_URL = "https://api.hyperliquid.xyz/info"
 HL_SCRAPE_URL = "https://stats-data.hyperliquid.xyz/Mainnet/vaults"
