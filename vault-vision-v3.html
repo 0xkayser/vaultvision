@@ -2138,7 +2138,7 @@ function trackClick(vaultId, protocol, sourcePage, rankType) {
 }
 function extLinkBtn(v, sourcePage='dashboard', rankType=null){
   if(!v.vault_url)return '';
-  const url=v.referral_url||v.vault_url;
+  const url=v.vault_url;
   return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="card-ext-link" onclick="event.stopPropagation();trackClick('${v.id}','${v.protocol}','${sourcePage}',${rankType?`'${rankType}'`:'null'})" title="Open on Hyperliquid">Open ↗</a>`;
 }
 function escapeHtml(s){
@@ -2493,7 +2493,7 @@ function renderVault(id){
       </div>
     </div>
     ${v.vault_url?`<div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px">
-      <a href="${escapeHtml(v.referral_url||HL_REF_URL)}" target="_blank" rel="noopener noreferrer" class="vault-hero-btn ${v.protocol}" onclick="trackClick('${v.id}','${v.protocol}','vault_page',null)">
+      <a href="${escapeHtml(v.vault_url)}" target="_blank" rel="noopener noreferrer" class="vault-hero-btn ${v.protocol}" onclick="trackClick('${v.id}','${v.protocol}','vault_page',null)">
         Deposit via VaultVision
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/><path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/></svg>
       </a>
@@ -3947,7 +3947,7 @@ function mapSelectVault(d){
   cbtn.className='map-p-act '+(inC?'added':'primary');
   // open link (use referral URL)
   const ol=document.getElementById('map-p-open');
-  if(d.vault_url){ol.href=d.referral_url||HL_REF_URL;ol.target='_blank';}
+  if(d.vault_url){ol.href=d.vault_url;ol.target='_blank';}
   else{ol.href='#';ol.onclick=e=>{e.preventDefault();nav('vault',{id:d.id});};}
   mapShowSimilar(d);
   document.getElementById('map-p-div-section').style.display='';
