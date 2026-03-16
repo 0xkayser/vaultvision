@@ -2036,12 +2036,9 @@ def safe_get_row(row, key, default=None):
 
 
 def get_all_vaults() -> List[dict]:
-    """Get all vaults from DB, compute risk, return sorted by TVL.
-    
-    STRICT FILTERING:
-    - Drift/Lighter: exclude vaults with null TVL or TVL < $500K
-    - Hyperliquid: exclude vaults with null TVL or TVL < $500K
-    - Nado (demo): always include (exclude_from_rankings=true)
+    """Get all Hyperliquid vaults from DB, compute risk, return sorted by TVL.
+
+    FILTERING: exclude vaults with null TVL or TVL < $500K.
     """
     # Retry logic for database locked errors
     max_retries = 5
@@ -4009,7 +4006,7 @@ def enrich_hl_vaults(vaults: List[dict], max_enrich: int = 30) -> List[dict]:
         
         details = fetch_hl_vault_details(addr)
         if not details:
-            time.sleep(1)
+            time.sleep(0.2)
             continue
         
         # Use APR from official vaultDetails API (most authoritative, real-time source)
@@ -6267,9 +6264,6 @@ def run_fetch_job():
     print("[FETCH] Step 1: Fetching raw data...")
     raw_vaults_by_protocol = {
         "hyperliquid": fetch_hyperliquid(),
-        "lighter": fetch_lighter(),
-        "drift": fetch_drift(),
-        "nado": fetch_nado(),
     }
     
     # =============================================================================
@@ -6323,9 +6317,9 @@ def run_fetch_job():
                 if tvl is None or tvl < 500000:
                     continue
             
-            # APR filter (must be positive)
+            # APR filter (skip only if explicitly negative, allow zero/null for protocol vaults)
             apr = vault.get("apr")
-            if apr is None or apr <= 0:
+            if apr is not None and apr < 0:
                 continue
             
             filtered.append(vault)
