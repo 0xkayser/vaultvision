@@ -2430,10 +2430,10 @@ let _whatIfIdx=0,_whatIfTimer=null,_whatIfVaults=[];
 function initWhatIf(){
   const lp=document.getElementById('lp');
   if(!lp||lp.style.display==='none')return;
-  const all=[...PV,...UV].filter(v=>(v.tvl_usd||0)>50000&&v.r90!=null);
+  const all=[...PV,...UV].filter(v=>(v.tvl_usd||0)>50000&&v.r90!=null&&Math.abs(v.r90)<5);
   if(!all.length)return;
-  // Pick top vaults by absolute r90 (most interesting)
-  all.sort((a,b)=>Math.abs(b.r90||0)-Math.abs(a.r90||0));
+  // Pick top vaults by r90 (best performers, realistic only)
+  all.sort((a,b)=>(b.r90||0)-(a.r90||0));
   _whatIfVaults=all.slice(0,5);
   _whatIfIdx=0;
   renderWhatIfSlide(0,false);
