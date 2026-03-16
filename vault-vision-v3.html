@@ -5068,8 +5068,8 @@ async function executeTrade(){
     const assetIdx=_assetMeta.universe.findIndex(u=>u.name===assetName);
     if(assetIdx<0){alert('Asset not found');btn.disabled=false;return;}
     const szDecimals=_assetMeta.universe[assetIdx].szDecimals||2;
-    // SIZE = margin amount. Order size = margin × leverage / price (full notional)
-    const rawSz=(size*lev)/midPrice;
+    // SIZE = position size in USDC. Leverage only sets margin requirement.
+    const rawSz=size/midPrice;
     const sz=removeTrailingZeros(rawSz.toFixed(szDecimals));
     // Slippage: 0.5% for market orders
     const slippage=_tradeSide==='long'?1.005:0.995;
