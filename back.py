@@ -2052,7 +2052,7 @@ def get_all_vaults() -> List[dict]:
         try:
             conn = get_db()
             c = conn.cursor()
-            c.execute("SELECT * FROM vaults ORDER BY tvl_usd DESC")
+            c.execute("SELECT * FROM vaults WHERE protocol = 'hyperliquid' ORDER BY tvl_usd DESC")
             rows = c.fetchall()
             conn.close()
             break  # Success
@@ -7058,7 +7058,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 import io
 
                 conn = get_db()
-                cur = conn.execute("SELECT COUNT(*) as cnt, COALESCE(SUM(tvl_usd),0) as tvl, COALESCE(MAX(apr),0) as best_apr FROM vaults WHERE tvl_usd>0")
+                cur = conn.execute("SELECT COUNT(*) as cnt, COALESCE(SUM(tvl_usd),0) as tvl, COALESCE(MAX(apr),0) as best_apr FROM vaults WHERE tvl_usd>0 AND protocol='hyperliquid'")
                 row = cur.fetchone()
                 cnt = row[0] if row else 0
                 tvl = row[1] if row else 0
@@ -7112,16 +7112,16 @@ class APIHandler(BaseHTTPRequestHandler):
                 draw.text((92, 74), "VV", fill="white", font=font_logo)
                 draw.text((145, 78), "VaultVision", fill="white", font=font_bold_md)
 
-                # BETA badge
-                draw.rounded_rectangle([370, 80, 422, 104], radius=6, outline=(0, 212, 255, 180), width=1)
-                draw.text((378, 84), "BETA", fill=(0, 212, 255), font=font_sm)
+                # LIVE badge
+                draw.rounded_rectangle([370, 80, 418, 104], radius=6, fill=(16, 185, 129, 200))
+                draw.text((378, 84), "LIVE", fill=(255, 255, 255), font=font_sm)
 
                 # Headline
-                draw.text((80, 190), "Find your edge in", fill=(241, 245, 249), font=font_bold_lg)
-                draw.text((80, 255), "on-chain vaults.", fill=(0, 212, 255), font=font_bold_lg)
+                draw.text((80, 190), "Track every vault on", fill=(241, 245, 249), font=font_bold_lg)
+                draw.text((80, 255), "Hyperliquid.", fill=(0, 212, 255), font=font_bold_lg)
 
                 # Subtitle
-                draw.text((80, 330), "Compare vaults across Hyperliquid, Drift, Lighter & Nado", fill=(255, 255, 255, 102), font=font_reg)
+                draw.text((80, 330), "Risk scores \u00b7 Whale tracking \u00b7 Vault rankings", fill=(255, 255, 255, 102), font=font_reg)
 
                 # Stats boxes
                 box_y = 400
@@ -7140,15 +7140,15 @@ class APIHandler(BaseHTTPRequestHandler):
                 draw.text((500, box_y + 12), str(cnt), fill="white", font=font_bold_sm)
                 draw.text((500, box_y + 42), "VAULTS", fill=(255, 255, 255, 77), font=font_sm)
 
-                # Protocols box
-                draw.rounded_rectangle([660, box_y, 820, box_y + 72], radius=12, fill=(255, 255, 255, 10), outline=(255, 255, 255, 15))
-                draw.text((680, box_y + 12), "4", fill="white", font=font_bold_sm)
-                draw.text((680, box_y + 42), "PROTOCOLS", fill=(255, 255, 255, 77), font=font_sm)
+                # HL badge box
+                draw.rounded_rectangle([660, box_y, 820, box_y + 72], radius=12, fill=(0, 184, 87, 25), outline=(0, 184, 87, 60))
+                draw.text((680, box_y + 12), "HL", fill=(0, 184, 87), font=font_bold_sm)
+                draw.text((680, box_y + 42), "FOCUSED", fill=(255, 255, 255, 77), font=font_sm)
 
                 # Decorative dots (right side)
                 for dx, dy, c, r in [(900, 180, (0, 184, 87), 6), (930, 200, (0, 184, 87), 4),
-                                      (970, 170, (0, 184, 87), 8), (1020, 300, (255, 176, 32), 5),
-                                      (1050, 320, (255, 176, 32), 7), (980, 400, (167, 139, 250), 5)]:
+                                      (970, 170, (0, 184, 87), 8), (1020, 300, (0, 184, 87), 5),
+                                      (1050, 320, (0, 184, 87), 7), (980, 400, (0, 212, 255), 5)]:
                     draw.ellipse([dx-r, dy-r, dx+r, dy+r], fill=(*c, 100))
 
                 # URL

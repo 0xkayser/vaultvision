@@ -7,14 +7,14 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Vault Vision">
-<title>Vault Vision — Perp DEX Aggregator</title>
-<meta name="description" content="Compare on-chain vaults across perp DEX protocols. Track TVL, APR, and performance for Hyperliquid, Drift, Lighter, and Nado vaults.">
+<title>VaultVision — Vault Analytics for Hyperliquid</title>
+<meta name="description" content="Track, analyze, and compare Hyperliquid vaults. Risk scores, whale tracking, and performance rankings.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="VaultVision — Find your edge in on-chain vaults">
-<meta name="twitter:description" content="Real-time comparison, risk analysis, and visual discovery across Hyperliquid, Drift, Lighter & Nado. 50+ vaults, live APR & risk scoring.">
+<meta name="twitter:title" content="VaultVision — Vault Analytics for Hyperliquid">
+<meta name="twitter:description" content="Risk scores, whale tracking, and vault rankings for Hyperliquid. Track every HL vault.">
 <meta name="twitter:image" content="https://vaultvision.tech/og-image.png">
-<meta property="og:title" content="VaultVision — Find your edge in on-chain vaults">
-<meta property="og:description" content="Real-time comparison, risk analysis, and visual discovery across Hyperliquid, Drift, Lighter & Nado. 50+ vaults, live APR & risk scoring.">
+<meta property="og:title" content="VaultVision — Vault Analytics for Hyperliquid">
+<meta property="og:description" content="Risk scores, whale tracking, and vault rankings for Hyperliquid. Track every HL vault.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://vaultvision.tech/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -975,7 +975,7 @@ tbody tr:last-child td{border-bottom:none}
       <div class="lp-logo-mark" onclick="dismissLanding('dashboard')">
         <div class="lp-logo-icon">VV</div>
         <div class="lp-logo-text">VaultVision</div>
-        <span style="font-size:10px;padding:2px 7px;border-radius:5px;background:linear-gradient(135deg,#f59e0b,#f97316);color:#fff;font-weight:700;margin-left:6px">BETA</span>
+        <span style="font-size:10px;padding:2px 7px;border-radius:5px;background:linear-gradient(135deg,#10b981,#34d399);color:#fff;font-weight:700;margin-left:6px">LIVE</span>
       </div>
       <div class="lp-nav-links">
         <button class="lp-nav-link" onclick="dismissLanding('dashboard')">Dashboard</button>
@@ -991,10 +991,10 @@ tbody tr:last-child td{border-bottom:none}
       <div class="lp-hero-left">
         <div class="lp-tag">
           <span class="lp-live-dot"></span>
-          Live · <span id="lp-vcount">—</span> vaults · 4 protocols
+          Live · <span id="lp-vcount">—</span> Hyperliquid vaults
         </div>
-        <h1 class="lp-h1">Find your edge<br>in <em>on-chain vaults.</em></h1>
-        <p class="lp-sub">Real-time comparison, risk analysis, and visual discovery across Hyperliquid, Drift, Lighter & Nado. Know where to invest — and when to wait.</p>
+        <h1 class="lp-h1">Track every vault<br>on <em>Hyperliquid.</em></h1>
+        <p class="lp-sub">Risk scores, whale tracking, and vault rankings. Know where to deposit — and when to wait.</p>
         <div class="lp-stats">
           <div class="lp-stat"><div class="lp-stat-val" id="lp-tvl">—</div><div class="lp-stat-lbl">Total TVL</div></div>
           <div class="lp-stat-div"></div>
@@ -1002,7 +1002,7 @@ tbody tr:last-child td{border-bottom:none}
           <div class="lp-stat-div"></div>
           <div class="lp-stat"><div class="lp-stat-val" id="lp-vcnt">—</div><div class="lp-stat-lbl">Active Vaults</div></div>
           <div class="lp-stat-div"></div>
-          <div class="lp-stat"><div class="lp-stat-val">4</div><div class="lp-stat-lbl">Protocols</div></div>
+          <div class="lp-stat"><div class="lp-stat-val" style="background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">HL</div><div class="lp-stat-lbl">Focused</div></div>
         </div>
         <div class="lp-ctas">
           <button class="lp-cta-p" onclick="dismissLanding('dashboard')">Open Dashboard →</button>
@@ -1029,7 +1029,7 @@ tbody tr:last-child td{border-bottom:none}
         <div class="lp-fc" onclick="dismissLanding('dashboard')">
           <div class="lp-fc-icon" style="background:rgba(0,212,255,.1)"><svg viewBox="0 0 24 24" fill="none" stroke="#00d4ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></div>
           <div class="lp-fc-title">Discover</div>
-          <div class="lp-fc-desc">Browse 50+ vaults across 4 protocols in one place. Filter by APR, TVL, risk score, and age.</div>
+          <div class="lp-fc-desc">Browse every Hyperliquid vault. Filter by APR, TVL, risk score, and age.</div>
           <div class="lp-fc-link" style="color:#00d4ff">Open Dashboard →</div>
         </div>
         <div class="lp-fc" onclick="dismissLanding('analytics')">
@@ -1041,7 +1041,7 @@ tbody tr:last-child td{border-bottom:none}
         <div class="lp-fc" onclick="dismissLanding('map')">
           <div class="lp-fc-icon" style="background:rgba(0,255,136,.1)"><svg viewBox="0 0 24 24" fill="none" stroke="#00ff88" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="8" cy="18" r="2"/><circle cx="17" cy="17" r="2"/><line x1="7.5" y1="7.5" x2="16.5" y2="16.5" opacity=".4"/><line x1="7.8" y1="6.5" x2="16" y2="8" opacity=".4"/><line x1="8.5" y1="16.2" x2="15.2" y2="17" opacity=".4"/></svg></div>
           <div class="lp-fc-title">Map</div>
-          <div class="lp-fc-desc">See the full vault landscape. Explore by protocol clusters or scatter by Risk vs Return to find the best zone.</div>
+          <div class="lp-fc-desc">See the full vault landscape. Scatter by Risk vs Return to find the best zone.</div>
           <div class="lp-fc-link" style="color:#00ff88">Explore Map →</div>
         </div>
         <div class="lp-fc" onclick="dismissLanding('compare')">
@@ -1053,14 +1053,11 @@ tbody tr:last-child td{border-bottom:none}
       </div>
     </div>
 
-    <!-- PROTOCOLS -->
+    <!-- PROTOCOL -->
     <div class="lp-protos">
-      <div class="lp-protos-lbl">Supported protocols</div>
+      <div class="lp-protos-lbl">Built for</div>
       <div class="lp-proto-badges">
         <div class="lp-proto-b"><div class="lp-proto-dot" style="background:#00b857"></div><span class="lp-proto-name">Hyperliquid</span><span class="lp-proto-count" id="lp-hl-cnt">—</span></div>
-        <div class="lp-proto-b"><div class="lp-proto-dot" style="background:#FFB020"></div><span class="lp-proto-name">Drift</span><span class="lp-proto-count" id="lp-dr-cnt">—</span></div>
-        <div class="lp-proto-b"><div class="lp-proto-dot" style="background:#A78BFA"></div><span class="lp-proto-name">Lighter</span><span class="lp-proto-count" id="lp-li-cnt">—</span></div>
-        <div class="lp-proto-b"><div class="lp-proto-dot" style="background:#8899bb"></div><span class="lp-proto-name">Nado</span><span class="lp-proto-count" id="lp-na-cnt">—</span></div>
       </div>
     </div>
 
@@ -1072,15 +1069,15 @@ tbody tr:last-child td{border-bottom:none}
         <button class="lp-footer-link" onclick="dismissLanding('map')">Vault Map</button>
         <button class="lp-footer-link" onclick="dismissLanding('compare')">Compare</button>
       </div>
-      <div class="lp-footer-copy">VaultVision · Live on-chain data · Nado · Lighter · Hyperliquid · Drift</div>
+      <div class="lp-footer-copy">VaultVision · Vault analytics for Hyperliquid</div>
     </div>
 
   </div><!-- /lp-wrap -->
 </div><!-- /lp -->
 
 <header class="header"><div class="header-inner">
-<div class="logo" onclick="showLanding()"><div class="logo-icon">VV</div><div class="logo-text">Vault<span>Vision</span><span class="badge beta">BETA</span></div></div>
-<div class="header-tagline">Compare on-chain vaults across perp protocols</div>
+<div class="logo" onclick="showLanding()"><div class="logo-icon">VV</div><div class="logo-text">Vault<span>Vision</span><span class="badge" style="background:linear-gradient(135deg,#10b981,#34d399)">LIVE</span></div></div>
+<div class="header-tagline">Vault analytics for Hyperliquid</div>
 <div style="display:flex;align-items:center;gap:12px">
 <nav class="nav" id="mainNav"><button class="nav-btn active" data-p="dashboard">Dashboard</button><button class="nav-btn" data-p="analytics">Analytics</button><button class="nav-btn" data-p="compare">Compare</button><button class="nav-btn" data-p="map">Map</button></nav>
 <button class="theme-toggle" id="themeToggle" title="Toggle theme"><svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
@@ -1095,10 +1092,7 @@ tbody tr:last-child td{border-bottom:none}
     <div class="mini-map-head-left">
       <h2 class="section-title" style="margin:0">Vault Map <span class="badge" style="margin-left:6px">Live</span></h2>
       <div class="mini-map-filters" id="mm-filters">
-        <button class="mini-map-filter active" data-mm="all">All</button>
-        <button class="mini-map-filter" data-mm="hyperliquid">HL</button>
-        <button class="mini-map-filter" data-mm="drift">Drift</button>
-        <button class="mini-map-filter" data-mm="lighter">Lighter</button>
+        <button class="mini-map-filter active" data-mm="hyperliquid">Hyperliquid</button>
       </div>
     </div>
     <button class="mini-map-open-btn" onclick="nav('map')">Explore full map →</button>
@@ -1110,7 +1104,7 @@ tbody tr:last-child td{border-bottom:none}
 <section class="section"><div class="section-header"><h2 class="section-title">User Vaults<span class="badge">Community</span></h2><div class="pills" id="dashPills"></div></div><div class="grid" id="userGrid"></div></section>
 <section class="section" id="bestRiskSection"><div class="section-header"><h2 class="section-title">Best Risk-Adjusted<span class="badge">Return/Risk</span></h2></div><div class="table-wrap"><table id="bestRiskTable"><thead><tr><th>#</th><th>Vault</th><th>Protocol</th><th>Score</th><th>Risk</th><th>Return</th><th>TVL</th></tr></thead><tbody id="bestRiskTbody"></tbody></table></div></section>
 </div>
-<div class="page" id="pg-analytics"><section class="section"><div class="section-header"><h2 class="section-title">Vault Analytics<span class="badge">Rankings</span></h2></div><div class="pills" id="anaPills" style="margin-bottom:24px"></div><div class="table-wrap"><table id="anaTable"><thead><tr><th data-s="rank">#</th><th data-s="vault_name">Vault</th><th data-s="protocol">Protocol</th><th>Data</th><th data-s="tvl_usd" class="sorted">TVL ↓</th><th data-s="apy">APR ↓</th><th data-s="age_days">Age ↓</th><th data-s="r30">30D ↓</th><th data-s="risk_score">Risk ↓</th><th>Action</th></tr></thead><tbody id="anaTbody"></tbody></table></div></section></div>
+<div class="page" id="pg-analytics"><section class="section"><div class="section-header"><h2 class="section-title">Vault Analytics<span class="badge">Rankings</span></h2></div><div class="pills" id="anaPills" style="margin-bottom:24px"></div><div class="table-wrap"><table id="anaTable"><thead><tr><th data-s="rank">#</th><th data-s="vault_name">Vault</th><th>Data</th><th data-s="tvl_usd" class="sorted">TVL ↓</th><th data-s="apy">APR ↓</th><th data-s="age_days">Age ↓</th><th data-s="r30">30D ↓</th><th data-s="risk_score">Risk ↓</th><th>Action</th></tr></thead><tbody id="anaTbody"></tbody></table></div></section></div>
 <div class="page" id="pg-compare"><section class="section"><div class="section-header"><h2 class="section-title">Compare Vaults<span class="badge">Select 2-4</span></h2></div><div class="compare-sel" id="compSel"></div><div class="compare-grid" id="compGrid"></div></section></div>
 <div class="page" id="pg-vault"><button class="back-btn" onclick="nav('analytics')">← Back to Analytics</button><div id="vaultContent"></div></div>
 
@@ -1124,11 +1118,7 @@ tbody tr:last-child td{border-bottom:none}
         <button class="map-mode-tab" id="map-tab-scatter" onclick="setMapMode('scatter')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><line x1="4" y1="20" x2="4" y2="4"/><line x1="4" y1="20" x2="20" y2="20"/><circle cx="9" cy="14" r="2" fill="currentColor" opacity=".5"/><circle cx="14" cy="9" r="2" fill="currentColor" opacity=".5"/><circle cx="17" cy="15" r="2" fill="currentColor" opacity=".5"/></svg>Risk / Return</button>
       </div>
       <div class="map-pills" id="map-proto-pills">
-        <div class="map-pill active" data-mp="all">All</div>
-        <div class="map-pill" data-mp="hyperliquid"><div class="map-pill-dot" style="background:#00b857"></div>HL</div>
-        <div class="map-pill" data-mp="drift"><div class="map-pill-dot" style="background:#FFB020"></div>Drift</div>
-        <div class="map-pill" data-mp="lighter"><div class="map-pill-dot" style="background:#A78BFA"></div>Lighter</div>
-        <div class="map-pill" data-mp="nado"><div class="map-pill-dot" style="background:#8899bb"></div>Nado</div>
+        <div class="map-pill active" data-mp="hyperliquid"><div class="map-pill-dot" style="background:#00b857"></div>Hyperliquid</div>
       </div>
     </div>
     <div class="map-tb-right">
@@ -1232,7 +1222,7 @@ tbody tr:last-child td{border-bottom:none}
   <div id="map-node-tip"></div>
 </div>
 </main>
-<footer class="footer"><span class="live-dot"></span>Live Data — Nado · Lighter · Hyperliquid · Drift<br><span id="lastUpd" style="opacity:0.7"></span></footer>
+<footer class="footer"><span class="live-dot"></span>Live Data — Hyperliquid<br><span id="lastUpd" style="opacity:0.7"></span></footer>
 <script>
 const API_BASE='';
 let PV=[],UV=[];
@@ -2064,7 +2054,7 @@ const fmtUsd=v=>{if(v==null||isNaN(v))return'N/A';if(Math.abs(v)>=1e9)return'$'+
 const fmtPct=v=>{if(v==null||isNaN(v))return'N/A';return(v*100).toFixed(2)+'%';};
 const fmtPctS=v=>{if(v==null||isNaN(v))return'N/A';const p=v*100;return(p>=0?'+':'')+p.toFixed(2)+'%';};
 
-let curPage='dashboard',dashF='all',anaF='all',sortK='tvl_usd',sortD='desc',selComp=new Set();
+let curPage='dashboard',dashF='hyperliquid',anaF='hyperliquid',sortK='tvl_usd',sortD='desc',selComp=new Set();
 
 function nav(p,prm={}){
   curPage=p;
@@ -2151,10 +2141,8 @@ function renderDash(){
   document.getElementById('sCnt').textContent=a.length;
   document.getElementById('sCntS').textContent=PV.length+' Protocol · '+UV.length+' User';
   document.getElementById('protoGrid').innerHTML=PV.sort((a,b)=>b.tvl_usd-a.tvl_usd).map(protoCard).join('');
-  const protos=['all',...new Set(UV.map(v=>v.protocol))];
-  document.getElementById('dashPills').innerHTML=protos.map(p=>`<button class="pill ${dashF===p?'active':''}" data-f="${p}">${p==='all'?'All':p}</button>`).join('');
-  document.querySelectorAll('#dashPills .pill').forEach(b=>{b.onclick=()=>{dashF=b.dataset.f;renderDash();};});
-  let flt=dashF==='all'?UV:UV.filter(v=>v.protocol===dashF);
+  document.getElementById('dashPills').innerHTML='';
+  let flt=UV;
   document.getElementById('userGrid').innerHTML=flt.sort((a,b)=>b.apy-a.apy).map(userCard).join('');
   // Render Best Risk-Adjusted section
   renderBestRisk();
@@ -2184,8 +2172,7 @@ function renderBestRisk(){
     return `<tr>
       <td><strong>${rank}</strong></td>
       <td class="name-link" onclick="nav('vault',{id:'${v.id}'})">${v.vault_name}${badgeHtml}</td>
-      <td><span class="card-proto ${v.protocol}">${v.protocol}</span></td>
-      <td>${score!=null?score.toFixed(3):'N/A'}</td>
+      <td>${score!=null?score.toFixed(3):'N/A'}
       <td class="${riskColor(v.risk_score)}">${v.risk_score!=null?v.risk_score+'/100':'N/A'}</td>
       <td class="${(v.r30||v.apy||0)>=0?'positive':'negative'}">${ret}</td>
       <td>${fmtTvl(v.tvl_usd)}</td>
@@ -2194,11 +2181,9 @@ function renderBestRisk(){
 }
 
 function renderAna(){
-  const protos=['all',...new Set(all().map(v=>v.protocol))];
-  document.getElementById('anaPills').innerHTML=protos.map(p=>`<button class="pill ${anaF===p?'active':''}" data-f="${p}">${p==='all'?'All':p}</button>`).join('');
-  document.querySelectorAll('#anaPills .pill').forEach(b=>{b.onclick=()=>{anaF=b.dataset.f;renderAna();};});
+  document.getElementById('anaPills').innerHTML='';
   // Filter: exclude vaults with exclude_from_rankings=true from analytics rankings
-  let vaults=anaF==='all'?all():all().filter(v=>v.protocol===anaF);
+  let vaults=all();
   vaults=vaults.filter(v=>!v.exclude_from_rankings);
   vaults.sort((a,b)=>{
     const gv=(v,k)=>{
@@ -2223,7 +2208,6 @@ function renderAna(){
     return `<tr>
     <td>${i+1}${rankBadge}</td>
     <td class="name-link" onclick="nav('vault',{id:'${v.id}'})">${v.vault_name}</td>
-    <td><span class="card-proto ${v.protocol}">${v.protocol}</span></td>
     <td>${dataQualityBadge(v.data_quality)}</td>
     <td>${fmtTvl(v.tvl_usd)}</td>
     <td class="${(v.apy||0)>=0?'positive':'negative'}">${fmtPct(v.apy)}</td>
@@ -2453,7 +2437,7 @@ function renderVault(id){
       </div>
     </div>
     ${v.vault_url?`<a href="${escapeHtml(v.vault_url)}" target="_blank" rel="noopener noreferrer" class="vault-hero-btn ${v.protocol}" onclick="trackClick('${v.id}','${v.protocol}','vault_page',null)">
-      Open on ${v.protocol.charAt(0).toUpperCase()+v.protocol.slice(1)}
+      Deposit via VaultVision
       <svg viewBox="0 0 20 20" fill="currentColor"><path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/><path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/></svg>
     </a>`:''}
   </div>
@@ -2791,9 +2775,9 @@ function initTheme() {
   if (saved) {
     document.documentElement.setAttribute('data-theme', saved);
     toggle.innerHTML = saved === 'dark' ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
-  } else if (prefersDark) {
+  } else {
     document.documentElement.setAttribute('data-theme', 'dark');
-    toggle.textContent = '☀️';
+    toggle.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
   }
   
   toggle.addEventListener('click', () => {
@@ -2886,8 +2870,7 @@ function fillLandingStats(){
   if(el('lp-vcount'))el('lp-vcount').textContent = all.length;
   // Protocol counts
   const pc={};all.forEach(v=>{pc[v.protocol]=(pc[v.protocol]||0)+1;});
-  const pmap={hyperliquid:'lp-hl-cnt',drift:'lp-dr-cnt',lighter:'lp-li-cnt',nado:'lp-na-cnt'};
-  Object.entries(pmap).forEach(([p,id])=>{ if(el(id)) el(id).textContent=pc[p]?pc[p]+' vaults':'—'; });
+  if(el('lp-hl-cnt')) el('lp-hl-cnt').textContent = all.length + ' vaults';
   // Top vault cards
   renderLandingVaults(all);
 }
