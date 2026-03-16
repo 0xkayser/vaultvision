@@ -599,16 +599,8 @@ def normalize_vault(raw_vault: dict) -> dict:
         if protocol == "hyperliquid":
             # Hyperliquid API APR is already decimal (e.g., 1.28 = 128%, 17.51 = 1751%)
             # Keep as-is, but guard for rare percent-style values (>= 100 -> divide by 100).
-            vault_name = raw_vault.get("vault_name", "")
-            if "Long HYPE" in vault_name or "Hyperliquidity Provider" in vault_name:
-                print(f"[HL APR DEBUG] {vault_name[:40]}: raw={apr}, ", end="")
             if apr >= 100:
                 apr = apr / 100
-                if "Long HYPE" in vault_name or "Hyperliquidity Provider" in vault_name:
-                    print(f"normalized={apr} (÷100)")
-            else:
-                if "Long HYPE" in vault_name or "Hyperliquidity Provider" in vault_name:
-                    print(f"normalized={apr} (keep as is)")
         else:
             # Other protocols: normalize if > 1.0 (likely percentage format)
             if apr > 1.0:
@@ -681,7 +673,7 @@ def upsert_vault(vault: dict):
                     source_kind, data_quality, verified,
                     name, is_protocol, age_days, tvl_usd, apr, pnl_30d, pnl_90d
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(pk) DO UPDATE SET
                     vault_name=excluded.vault_name,
                     vault_id=excluded.vault_id,
@@ -3849,10 +3841,6 @@ def fetch_hl_vaults_from_scraper() -> List[dict]:
                 tvl = float(summary.get("tvl", 0) or 0)
                 apr_raw = item.get("apr")
                 apr = float(apr_raw) if apr_raw is not None else None
-                # Log raw APR for debugging (first 3 vaults only)
-                if len(vaults) < 3 and apr is not None:
-                    print(f"[HL DEBUG] Raw APR for {name[:30]}: {apr} (type: {type(apr_raw).__name__})")
-                # Keep raw value - normalization happens in normalize_vault()
             except:
                 continue
             
@@ -4106,7 +4094,7 @@ def enrich_hl_vaults(vaults: List[dict], max_enrich: int = 30) -> List[dict]:
             print(f"[HL] No history for {vault['name']}, will use snapshots fallback")
         
         enriched += 1
-        time.sleep(2)  # Rate limit
+        time.sleep(0.5)  # Rate limit
     
     return vaults
 
