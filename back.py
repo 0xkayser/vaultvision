@@ -44,6 +44,8 @@ FETCH_INTERVAL_SEC = 15 * 60  # 15 minutes — ensures APR stays fresh
 # Hyperliquid
 HL_REFERRAL_CODE = "MONETKIDAO"
 HL_REFERRAL_URL = f"https://app.hyperliquid.xyz/join/{HL_REFERRAL_CODE}"
+HL_BUILDER_ADDRESS = ""  # TODO: register builder code and set address
+HL_BUILDER_FEE_BPS = 1   # 0.01% (1 = 1/10th of a basis point)
 HL_API_URL = "https://api.hyperliquid.xyz/info"
 HL_SCRAPE_URL = "https://stats-data.hyperliquid.xyz/Mainnet/vaults"
 HL_MIN_TVL = 500_000  # Expanded filter: >500K TVL for user vaults
@@ -7414,6 +7416,18 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(e), "signals": []}, 500)
             return
 
+        # GET /api/trading/config — builder code and chain config for frontend
+        if path == "/api/trading/config":
+            self.send_json({
+                "builder_address": HL_BUILDER_ADDRESS,
+                "fee_bps": HL_BUILDER_FEE_BPS,
+                "chain_id": 999,
+                "rpc": "https://rpc.hyperliquid.xyz/evm",
+                "api": "https://api.hyperliquid.xyz",
+                "referral_url": HL_REFERRAL_URL,
+            })
+            return
+
         if path.startswith("/api/v1/"):
             v1_cleanup_rate_limits()
             client_ip = self.client_address[0] if self.client_address else "unknown"
@@ -8494,7 +8508,39 @@ class APIHandler(BaseHTTPRequestHandler):
             
             print(f"[CLICK] Recorded: {vault_id} / {protocol} = {success}")
             self.send_json({"ok": success})
-        
+
+        elif path == "/api/trading/log":
+            try:
+                data = json.loads(body) if body else {}
+                wallet_hash = str(data.get("wallet_hash", ""))[:16]
+                action_type = str(data.get("action_type", ""))[:32]
+                asset = str(data.get("asset", ""))[:16]
+                size_usd = float(data.get("size_usd", 0))
+                source_page = str(data.get("source_page", ""))[:32]
+                conn = get_db()
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS trade_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ts INTEGER,
+                        wallet_hash TEXT,
+                        action_type TEXT,
+                        asset TEXT,
+                        size_usd REAL,
+                        source_page TEXT
+                    )
+                """)
+                conn.execute(
+                    "INSERT INTO trade_events (ts, wallet_hash, action_type, asset, size_usd, source_page) VALUES (?,?,?,?,?,?)",
+                    (int(time.time()), wallet_hash, action_type, asset, size_usd, source_page)
+                )
+                conn.commit()
+                conn.close()
+                print(f"[TRADE] {action_type}: {asset} ${size_usd:.0f} from {source_page}")
+                self.send_json({"ok": True})
+            except Exception as e:
+                print(f"[TRADE ERROR] {e}")
+                self.send_json({"ok": False, "error": str(e)}, 500)
+
         else:
             self.send_json({"error": "Not found"}, 404)
 

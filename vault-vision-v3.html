@@ -81,6 +81,86 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text"
 .theme-toggle:hover{background:var(--sky-100);transform:scale(1.05)}
 [data-theme="dark"] .theme-toggle{background:rgba(255,255,255,0.05)}
 [data-theme="dark"] .theme-toggle:hover{background:rgba(255,255,255,0.1)}
+/* WALLET */
+.wallet-btn{height:40px;border:none;border-radius:12px;cursor:pointer;display:flex;align-items:center;gap:8px;
+  padding:0 16px;font-size:12px;font-weight:600;font-family:inherit;transition:all .3s;
+  background:linear-gradient(135deg,rgba(0,212,255,.12),rgba(99,102,241,.12));color:#00d4ff;
+  border:1px solid rgba(0,212,255,.2);}
+.wallet-btn:hover{background:linear-gradient(135deg,rgba(0,212,255,.2),rgba(99,102,241,.2));transform:translateY(-1px);}
+.wallet-btn.connected{background:rgba(16,185,129,.1);color:#10b981;border-color:rgba(16,185,129,.2);}
+.wallet-btn .wallet-dot{width:6px;height:6px;border-radius:50%;background:#10b981;flex-shrink:0;}
+.wallet-btn .wallet-icon{width:16px;height:16px;flex-shrink:0;}
+[data-theme="light"] .wallet-btn{background:rgba(0,140,200,.06);color:#0284c7;border-color:rgba(0,140,200,.15);}
+[data-theme="light"] .wallet-btn.connected{background:rgba(16,185,129,.06);color:#059669;border-color:rgba(16,185,129,.15);}
+.wallet-dropdown{position:absolute;top:calc(100% + 8px);right:0;background:var(--bg-card-solid);
+  border:1px solid var(--border-light);border-radius:12px;padding:6px;min-width:200px;
+  box-shadow:0 8px 32px rgba(0,0,0,.25);z-index:1000;display:none;}
+.wallet-dropdown.show{display:block;}
+.wallet-dd-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;
+  cursor:pointer;font-size:12px;color:var(--text-secondary);transition:background .2s;border:none;background:none;width:100%;font-family:inherit;}
+.wallet-dd-item:hover{background:rgba(0,212,255,.06);}
+.wallet-dd-addr{font-size:11px;color:var(--text-muted);font-family:monospace;}
+.wallet-dd-bal{font-size:13px;font-weight:700;color:var(--text-primary);}
+/* DEPOSIT MODAL */
+.deposit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2000;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px);}
+.deposit-overlay.show{display:flex;}
+.deposit-modal{background:var(--bg-card-solid);border:1px solid var(--border-light);border-radius:20px;
+  padding:28px;width:90%;max-width:420px;position:relative;box-shadow:0 16px 64px rgba(0,0,0,.4);}
+.deposit-modal-title{font-size:16px;font-weight:800;margin-bottom:4px;color:var(--text-primary);}
+.deposit-modal-sub{font-size:12px;color:var(--text-secondary);margin-bottom:20px;}
+.deposit-modal-close{position:absolute;top:16px;right:16px;background:none;border:none;cursor:pointer;
+  color:var(--text-muted);font-size:20px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;}
+.deposit-modal-close:hover{background:rgba(255,255,255,.05);}
+.deposit-input-wrap{margin-bottom:16px;}
+.deposit-input-label{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+.deposit-input{width:100%;padding:14px 16px;border-radius:12px;border:1px solid var(--border-light);
+  background:rgba(255,255,255,.03);color:var(--text-primary);font-size:18px;font-weight:700;font-family:inherit;outline:none;box-sizing:border-box;}
+.deposit-input:focus{border-color:rgba(0,212,255,.4);}
+.deposit-avail{font-size:11px;color:var(--text-muted);margin-top:4px;}
+.deposit-info{display:flex;justify-content:space-between;font-size:12px;color:var(--text-secondary);padding:10px 0;border-top:1px solid var(--border-light);margin-bottom:16px;}
+.deposit-submit{width:100%;padding:14px;border:none;border-radius:12px;font-size:14px;font-weight:700;
+  cursor:pointer;font-family:inherit;transition:all .2s;
+  background:linear-gradient(135deg,#00d4ff,#6366f1);color:#fff;}
+.deposit-submit:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,212,255,.3);}
+.deposit-submit:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none;}
+.deposit-fee-note{font-size:10px;color:var(--text-muted);text-align:center;margin-top:12px;}
+/* TRADE FAB */
+.trade-fab{position:fixed;bottom:24px;right:24px;z-index:900;padding:14px 22px;border:none;border-radius:16px;
+  cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;
+  background:linear-gradient(135deg,#00d4ff,#6366f1);color:#fff;
+  box-shadow:0 4px 24px rgba(0,212,255,.3);transition:all .3s;display:none;}
+.trade-fab:hover{transform:translateY(-2px) scale(1.02);box-shadow:0 8px 32px rgba(0,212,255,.4);}
+.trade-fab.visible{display:flex;align-items:center;gap:8px;}
+/* TRADE PANEL */
+.trade-panel{position:fixed;bottom:0;right:24px;width:340px;z-index:950;
+  background:var(--bg-card-solid);border:1px solid var(--border-light);border-bottom:none;
+  border-radius:20px 20px 0 0;box-shadow:0 -8px 40px rgba(0,0,0,.3);
+  transform:translateY(100%);transition:transform .3s ease;padding:24px;}
+.trade-panel.open{transform:translateY(0);}
+.trade-panel-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.trade-panel-title{font-size:14px;font-weight:800;color:var(--text-primary);}
+.trade-panel-close{background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;padding:4px 8px;border-radius:6px;}
+.trade-panel-close:hover{background:rgba(255,255,255,.05);}
+.trade-side-btns{display:flex;gap:4px;margin-bottom:14px;}
+.trade-side-btn{flex:1;padding:10px;border:1px solid var(--border-light);border-radius:10px;
+  cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;background:none;color:var(--text-secondary);transition:all .2s;}
+.trade-side-btn.active.long{background:rgba(16,185,129,.12);color:#10b981;border-color:rgba(16,185,129,.3);}
+.trade-side-btn.active.short{background:rgba(244,63,94,.12);color:#f43f5e;border-color:rgba(244,63,94,.3);}
+.trade-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.trade-row label{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;}
+.trade-select,.trade-input{padding:10px 12px;border-radius:10px;border:1px solid var(--border-light);
+  background:rgba(255,255,255,.03);color:var(--text-primary);font-size:13px;font-family:inherit;outline:none;}
+.trade-select{min-width:120px;cursor:pointer;}
+.trade-input{width:100px;font-weight:600;text-align:right;}
+.trade-submit{width:100%;padding:14px;border:none;border-radius:12px;font-size:14px;font-weight:700;
+  cursor:pointer;font-family:inherit;transition:all .2s;margin-top:8px;}
+.trade-submit.long{background:linear-gradient(135deg,#10b981,#34d399);color:#fff;}
+.trade-submit.short{background:linear-gradient(135deg,#f43f5e,#fb7185);color:#fff;}
+.trade-submit:hover{transform:translateY(-1px);}
+.trade-submit:disabled{opacity:.5;cursor:not-allowed;transform:none;}
+.trade-powered{font-size:10px;color:var(--text-muted);text-align:center;margin-top:12px;}
+@media(max-width:640px){.trade-panel{right:0;left:0;width:100%;border-radius:20px 20px 0 0;}
+  .trade-fab{bottom:16px;right:16px;}}
 .main{max-width:1400px;margin:0 auto;padding:32px}
 .page{display:none}.page.active{display:block}
 .hero-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:48px}
@@ -793,7 +873,7 @@ tbody tr:last-child td{border-bottom:none}
 [data-theme="light"] .signals-empty{color:rgba(0,0,0,.3);}
 /* PORTFOLIO SIM */
 /* TRENDING BADGE */
-.card-trending{position:absolute;top:8px;right:8px;font-size:9px;font-weight:700;padding:2px 8px;
+.card-trending{position:absolute;top:44px;right:12px;font-size:9px;font-weight:700;padding:2px 8px;
   border-radius:6px;z-index:1;letter-spacing:.3px;line-height:1.4;pointer-events:none;}
 .card-trending.green{background:rgba(16,185,129,.15);color:#10b981;border:1px solid rgba(16,185,129,.2);}
 .card-trending.red{background:rgba(244,63,94,.15);color:#f43f5e;border:1px solid rgba(244,63,94,.2);}
@@ -1216,6 +1296,18 @@ tbody tr:last-child td{border-bottom:none}
 <div class="header-tagline">Vault analytics for Hyperliquid</div>
 <div style="display:flex;align-items:center;gap:12px">
 <nav class="nav" id="mainNav"><button class="nav-btn active" data-p="dashboard">Dashboard</button><button class="nav-btn" data-p="analytics">Analytics</button><button class="nav-btn" data-p="compare">Compare</button><button class="nav-btn" data-p="map">Map</button></nav>
+<div style="position:relative" id="walletWrap">
+<button class="wallet-btn" id="walletBtn" onclick="toggleWalletMenu()">
+  <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+  <span id="walletLabel">Connect</span>
+</button>
+<div class="wallet-dropdown" id="walletDropdown">
+  <div id="walletInfo"></div>
+  <button class="wallet-dd-item" onclick="copyWalletAddr()">Copy Address</button>
+  <button class="wallet-dd-item" onclick="viewOnHL()">View on Hyperliquid</button>
+  <button class="wallet-dd-item" onclick="disconnectWallet()" style="color:#f43f5e">Disconnect</button>
+</div>
+</div>
 <button class="theme-toggle" id="themeToggle" title="Toggle theme"><svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
 </div>
 </div></header>
@@ -1375,6 +1467,62 @@ tbody tr:last-child td{border-bottom:none}
 </div>
 </main>
 <footer class="footer"><span class="live-dot"></span>Live Data — Hyperliquid<br><span id="lastUpd" style="opacity:0.7"></span></footer>
+
+<!-- DEPOSIT MODAL -->
+<div class="deposit-overlay" id="depositOverlay" onclick="if(event.target===this)closeDeposit()">
+  <div class="deposit-modal">
+    <button class="deposit-modal-close" onclick="closeDeposit()">&times;</button>
+    <div class="deposit-modal-title" id="depositTitle">Deposit into Vault</div>
+    <div class="deposit-modal-sub" id="depositSub">via VaultVision</div>
+    <div class="deposit-input-wrap">
+      <div class="deposit-input-label">Amount (USDC)</div>
+      <input class="deposit-input" id="depositAmt" type="number" placeholder="0.00" min="1" step="1">
+      <div class="deposit-avail" id="depositAvail">Available: —</div>
+    </div>
+    <div class="deposit-info">
+      <span>Lock period</span><span id="depositLock">—</span>
+    </div>
+    <div class="deposit-info" style="border-top:none;padding-top:0">
+      <span>Current APR</span><span id="depositApr" style="color:#10b981">—</span>
+    </div>
+    <button class="deposit-submit" id="depositSubmit" onclick="executeDeposit()" disabled>Connect Wallet First</button>
+    <div class="deposit-fee-note">0.01% builder fee supports free VaultVision analytics</div>
+  </div>
+</div>
+
+<!-- TRADE FAB -->
+<button class="trade-fab" id="tradeFab" onclick="openTradePanel()">⟷ Trade</button>
+
+<!-- TRADE PANEL -->
+<div class="trade-panel" id="tradePanel">
+  <div class="trade-panel-header">
+    <div class="trade-panel-title">Quick Trade</div>
+    <button class="trade-panel-close" onclick="closeTradePanel()">&times;</button>
+  </div>
+  <div class="trade-row">
+    <label>Asset</label>
+    <select class="trade-select" id="tradeAsset"><option value="BTC">BTC</option><option value="ETH">ETH</option><option value="SOL">SOL</option><option value="HYPE">HYPE</option></select>
+  </div>
+  <div class="trade-side-btns">
+    <button class="trade-side-btn long active" id="tradeLong" onclick="setTradeSide('long')">Long</button>
+    <button class="trade-side-btn short" id="tradeShort" onclick="setTradeSide('short')">Short</button>
+  </div>
+  <div class="trade-row">
+    <label>Size (USDC)</label>
+    <input class="trade-input" id="tradeSize" type="number" placeholder="100" min="1">
+  </div>
+  <div class="trade-row">
+    <label>Leverage</label>
+    <select class="trade-select" id="tradeLev"><option value="1">1x</option><option value="2">2x</option><option value="3">3x</option><option value="5">5x</option><option value="10">10x</option></select>
+  </div>
+  <div class="trade-row" style="margin-top:8px">
+    <span style="font-size:11px;color:var(--text-muted)">Builder fee</span>
+    <span style="font-size:11px;color:var(--text-muted)">0.01%</span>
+  </div>
+  <button class="trade-submit long" id="tradeSubmit" onclick="executeTrade()" disabled>Connect Wallet</button>
+  <div class="trade-powered">Powered by VaultVision · Builder Code</div>
+</div>
+
 <script>
 const API_BASE='';
 const HL_REF_URL='https://app.hyperliquid.xyz/join/MONETKIDAO';
@@ -2783,12 +2931,12 @@ function renderVault(id){
         </div>
       </div>
     </div>
-    ${v.vault_url?`<div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px">
-      <a href="${escapeHtml(v.vault_url)}" target="_blank" rel="noopener noreferrer" class="vault-hero-btn ${v.protocol}" onclick="trackClick('${v.id}','${v.protocol}','vault_page',null)">
-        Deposit via VaultVision
-        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/><path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/></svg>
-      </a>
-      <span style="font-size:10px;color:rgba(255,255,255,.3);padding-left:2px">Opens Hyperliquid · Supports free analytics</span>
+    ${v.vault_url?`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <button class="vault-hero-btn ${v.protocol}" onclick="openDeposit('${v.id}')" style="border:none;cursor:pointer;font-family:inherit">
+        Deposit
+        <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clip-rule="evenodd"/></svg>
+      </button>
+      <a href="${escapeHtml(v.vault_url)}" target="_blank" rel="noopener noreferrer" style="font-size:12px;color:rgba(255,255,255,.4);text-decoration:none" onclick="trackClick('${v.id}','${v.protocol}','vault_page',null)">Open on HL ↗</a>
     </div>`:''}
   </div>
 
@@ -4383,12 +4531,229 @@ function mde(e,d){
   if(!e.active&&mapSim)mapSim.alphaTarget(0);d.fx=null;d.fy=null;
 }
 
+// =============================================================================
+// PHASE 3: WALLET MODULE
+// =============================================================================
+const HL_API='https://api.hyperliquid.xyz';
+const HL_CHAIN_ID=999;
+let _walletAddr=null,_walletBalance=null,_walletProvider=null;
+
+async function connectWallet(){
+  if(!window.ethereum){alert('Install MetaMask or a Web3 wallet to continue.');return;}
+  try{
+    const accounts=await window.ethereum.request({method:'eth_requestAccounts'});
+    if(!accounts||!accounts.length)return;
+    _walletAddr=accounts[0].toLowerCase();
+    _walletProvider=window.ethereum;
+    localStorage.setItem('vv-wallet',_walletAddr);
+    updateWalletUI();
+    fetchWalletBalance();
+    // Listen for account changes
+    window.ethereum.on('accountsChanged',(accs)=>{
+      if(!accs.length){disconnectWallet();return;}
+      _walletAddr=accs[0].toLowerCase();
+      localStorage.setItem('vv-wallet',_walletAddr);
+      updateWalletUI();
+      fetchWalletBalance();
+    });
+  }catch(e){console.error('Wallet connect error:',e);}
+}
+
+function disconnectWallet(){
+  _walletAddr=null;_walletBalance=null;_walletProvider=null;
+  localStorage.removeItem('vv-wallet');
+  updateWalletUI();
+  closeWalletDropdown();
+}
+
+async function fetchWalletBalance(){
+  if(!_walletAddr)return;
+  try{
+    const r=await fetch(HL_API+'/info',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({type:'clearinghouseState',user:_walletAddr})});
+    const data=await r.json();
+    if(data&&data.marginSummary){
+      _walletBalance=parseFloat(data.marginSummary.accountValue)||0;
+    } else if(data&&data.crossMarginSummary){
+      _walletBalance=parseFloat(data.crossMarginSummary.accountValue)||0;
+    }
+    updateWalletUI();
+  }catch(e){console.error('Balance fetch error:',e);}
+}
+
+function updateWalletUI(){
+  const btn=document.getElementById('walletBtn');
+  const label=document.getElementById('walletLabel');
+  const fab=document.getElementById('tradeFab');
+  const depositBtn=document.getElementById('depositSubmit');
+  if(!btn)return;
+  if(_walletAddr){
+    btn.classList.add('connected');
+    const short=_walletAddr.slice(0,6)+'...'+_walletAddr.slice(-4);
+    label.innerHTML='<span class="wallet-dot"></span>'+short;
+    if(fab)fab.classList.add('visible');
+    if(depositBtn){depositBtn.disabled=false;depositBtn.textContent='Deposit';}
+    // Update wallet info in dropdown
+    const info=document.getElementById('walletInfo');
+    if(info){
+      info.innerHTML=`<div style="padding:10px 14px">
+        <div class="wallet-dd-addr">${_walletAddr}</div>
+        ${_walletBalance!=null?`<div class="wallet-dd-bal">$${_walletBalance.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} USDC</div>`:''}
+      </div>`;
+    }
+  }else{
+    btn.classList.remove('connected');
+    label.textContent='Connect';
+    if(fab)fab.classList.remove('visible');
+    if(depositBtn){depositBtn.disabled=true;depositBtn.textContent='Connect Wallet First';}
+  }
+  // Update trade submit button
+  const tradeBtn=document.getElementById('tradeSubmit');
+  if(tradeBtn){
+    tradeBtn.disabled=!_walletAddr;
+    tradeBtn.textContent=_walletAddr?'Place Order':'Connect Wallet';
+  }
+}
+
+function toggleWalletMenu(){
+  if(!_walletAddr){connectWallet();return;}
+  const dd=document.getElementById('walletDropdown');
+  dd.classList.toggle('show');
+}
+function closeWalletDropdown(){
+  const dd=document.getElementById('walletDropdown');
+  if(dd)dd.classList.remove('show');
+}
+document.addEventListener('click',(e)=>{
+  const wrap=document.getElementById('walletWrap');
+  if(wrap&&!wrap.contains(e.target))closeWalletDropdown();
+});
+
+function copyWalletAddr(){
+  if(_walletAddr)navigator.clipboard.writeText(_walletAddr).then(()=>{
+    const label=document.getElementById('walletLabel');
+    const orig=label.innerHTML;label.innerHTML='Copied!';
+    setTimeout(()=>{label.innerHTML=orig;},1500);
+  });
+  closeWalletDropdown();
+}
+function viewOnHL(){
+  if(_walletAddr)window.open('https://app.hyperliquid.xyz/explorer/address/'+_walletAddr,'_blank');
+  closeWalletDropdown();
+}
+
+// Auto-reconnect on page load
+function autoConnectWallet(){
+  const saved=localStorage.getItem('vv-wallet');
+  if(saved&&window.ethereum){
+    window.ethereum.request({method:'eth_accounts'}).then(accs=>{
+      if(accs.some(a=>a.toLowerCase()===saved)){
+        _walletAddr=saved;_walletProvider=window.ethereum;
+        updateWalletUI();fetchWalletBalance();
+      }
+    }).catch(()=>{});
+  }
+}
+
+// =============================================================================
+// PHASE 3: DEPOSIT MODAL
+// =============================================================================
+let _depositVault=null;
+function openDeposit(vaultId){
+  const v=[...PV,...UV].find(x=>x.id===vaultId);
+  if(!v)return;
+  _depositVault=v;
+  document.getElementById('depositTitle').textContent='Deposit into '+v.vault_name;
+  document.getElementById('depositSub').textContent=v.protocol.toUpperCase()+' Vault';
+  document.getElementById('depositLock').textContent=(v.redeem_period_days||1)+' day'+(v.redeem_period_days>1?'s':'');
+  const apr=v.apy||v.apr||0;
+  document.getElementById('depositApr').textContent=(apr*100).toFixed(1)+'%';
+  document.getElementById('depositAmt').value='';
+  document.getElementById('depositAvail').textContent='Available: '+(_walletBalance!=null?'$'+_walletBalance.toLocaleString(undefined,{maximumFractionDigits:2}):'Connect wallet');
+  document.getElementById('depositOverlay').classList.add('show');
+}
+function closeDeposit(){
+  document.getElementById('depositOverlay').classList.remove('show');
+  _depositVault=null;
+}
+async function executeDeposit(){
+  if(!_walletAddr){connectWallet();return;}
+  if(!_depositVault)return;
+  const amt=parseFloat(document.getElementById('depositAmt').value);
+  if(!amt||amt<=0){alert('Enter a valid amount');return;}
+  const btn=document.getElementById('depositSubmit');
+  btn.disabled=true;btn.textContent='Signing...';
+  try{
+    // vaultTransfer requires L1 signing — construct the action
+    const action={type:'vaultTransfer',vaultAddress:_depositVault.vault_id||_depositVault.id,isDeposit:true,usd:Math.round(amt*1e6)};
+    const nonce=Date.now();
+    // For now, redirect to HL with pre-filled info (full signing requires HL SDK integration)
+    const url=_depositVault.vault_url||'https://app.hyperliquid.xyz/vaults/'+(_depositVault.vault_id||_depositVault.id);
+    window.open(url,'_blank');
+    // Log the intent
+    fetch(API_BASE+'/api/trading/log',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({wallet_hash:_walletAddr.slice(0,10),action_type:'deposit_intent',asset:'USDC',size_usd:amt,source_page:'vault_detail'})
+    }).catch(()=>{});
+    btn.textContent='Redirected to HL';
+    setTimeout(()=>{btn.disabled=false;btn.textContent='Deposit';},3000);
+  }catch(e){
+    console.error('Deposit error:',e);
+    btn.disabled=false;btn.textContent='Deposit';
+    alert('Error: '+e.message);
+  }
+}
+
+// =============================================================================
+// PHASE 3: TRADE PANEL
+// =============================================================================
+let _tradeSide='long';
+function openTradePanel(){
+  document.getElementById('tradePanel').classList.add('open');
+  document.getElementById('tradeFab').style.display='none';
+}
+function closeTradePanel(){
+  document.getElementById('tradePanel').classList.remove('open');
+  if(_walletAddr)document.getElementById('tradeFab').style.display='';
+}
+function setTradeSide(side){
+  _tradeSide=side;
+  document.getElementById('tradeLong').classList.toggle('active',side==='long');
+  document.getElementById('tradeShort').classList.toggle('active',side==='short');
+  const btn=document.getElementById('tradeSubmit');
+  btn.className='trade-submit '+side;
+  btn.textContent=_walletAddr?(side==='long'?'Long':'Short'):'Connect Wallet';
+}
+async function executeTrade(){
+  if(!_walletAddr){connectWallet();return;}
+  const asset=document.getElementById('tradeAsset').value;
+  const size=parseFloat(document.getElementById('tradeSize').value);
+  const lev=parseInt(document.getElementById('tradeLev').value);
+  if(!size||size<=0){alert('Enter trade size');return;}
+  const btn=document.getElementById('tradeSubmit');
+  btn.disabled=true;btn.textContent='Signing...';
+  try{
+    // For now, redirect to HL trading page (full order signing requires HL SDK)
+    window.open('https://app.hyperliquid.xyz/trade/'+asset,'_blank');
+    // Log trade intent
+    fetch(API_BASE+'/api/trading/log',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({wallet_hash:_walletAddr.slice(0,10),action_type:'trade_intent',asset:asset,
+        size_usd:size*lev,side:_tradeSide,leverage:lev,source_page:'trade_panel'})
+    }).catch(()=>{});
+    btn.textContent='Sent to HL';
+    setTimeout(()=>{btn.disabled=false;btn.textContent=_tradeSide==='long'?'Long':'Short';},3000);
+  }catch(e){
+    console.error('Trade error:',e);
+    btn.disabled=false;btn.textContent=_tradeSide==='long'?'Long':'Short';
+  }
+}
+
 // Init: load data then navigate
 (async function(){
-  // Initialize theme and tooltips
+  // Initialize theme, tooltips, wallet
   initTheme();
   initRefBanner();
   initTooltips();
+  autoConnectWallet();
   
   // Show/hide landing page before data loads
   initLanding();
