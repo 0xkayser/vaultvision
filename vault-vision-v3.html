@@ -704,7 +704,22 @@ tbody tr:last-child td{border-bottom:none}
   border:1px solid rgba(255,255,255,.06);border-radius:20px;padding:18px 22px;
   display:flex;flex-direction:column;}
 .proto-sidebar .section-header{margin-bottom:12px;}
-.proto-sidebar .grid{flex:1;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
+.proto-sidebar #protoGrid{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:16px;}
+.hlp-analytics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+.hlp-an-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px 14px;text-align:center;}
+[data-theme="light"] .hlp-an-card{background:rgba(0,0,0,.02);border-color:rgba(0,0,0,.06);}
+.hlp-an-label{font-size:10px;font-weight:600;color:rgba(255,255,255,.35);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}
+[data-theme="light"] .hlp-an-label{color:rgba(0,0,0,.4);}
+.hlp-an-val{font-size:18px;font-weight:700;color:rgba(255,255,255,.9);}
+[data-theme="light"] .hlp-an-val{color:rgba(0,0,0,.85);}
+.hlp-an-val.positive{color:#10b981;}
+.hlp-an-val.negative{color:#f43f5e;}
+.hlp-an-val.low{color:#10b981;}
+.hlp-an-val.moderate{color:#f59e0b;}
+.hlp-an-val.high{color:#f43f5e;}
+.hlp-an-sub{font-size:9px;color:rgba(255,255,255,.25);margin-top:2px;}
+[data-theme="light"] .hlp-an-sub{color:rgba(0,0,0,.3);}
+@media(max-width:768px){.hlp-analytics{grid-template-columns:repeat(2,1fr);}}
 [data-theme="light"] .proto-sidebar{background:linear-gradient(145deg,rgba(240,244,252,.95),rgba(230,236,248,.92));border-color:rgba(0,0,0,.06);}
 .mini-map-card{
   background:linear-gradient(145deg, rgba(8,12,24,.95), rgba(12,16,28,.92));
@@ -1105,8 +1120,9 @@ tbody tr:last-child td{border-bottom:none}
     <div class="mini-map-gradient"></div>
   </div>
   <div class="proto-sidebar">
-    <div class="section-header"><h2 class="section-title">Protocol Vaults<span class="badge">Official</span></h2></div>
-    <div class="grid" id="protoGrid"></div>
+    <div class="section-header"><h2 class="section-title">Protocol Vault<span class="badge">Official</span></h2></div>
+    <div id="protoGrid"></div>
+    <div class="hlp-analytics" id="hlpAnalytics"></div>
   </div>
 </div>
 <section class="section"><div class="section-header"><h2 class="section-title">User Vaults<span class="badge">Community</span></h2><div class="pills" id="dashPills"></div></div><div class="grid" id="userGrid"></div></section>
@@ -2133,6 +2149,23 @@ function renderDash(){
   document.getElementById('sCnt').textContent=a.length;
   document.getElementById('sCntS').textContent=PV.length+' Protocol · '+UV.length+' User';
   document.getElementById('protoGrid').innerHTML=PV.sort((a,b)=>b.tvl_usd-a.tvl_usd).map(protoCard).join('');
+  // HLP Analytics showcase
+  const hlp=PV.find(v=>v.vault_name&&v.vault_name.includes('HLP'))||PV[0];
+  if(hlp){
+    const rs=hlp.risk_score!=null?hlp.risk_score:'—';
+    const rb=hlp.risk_band||'';
+    const rClass=rs<=30?'low':rs>=70?'high':'moderate';
+    const rank=hlp.rankings?.risk_adjusted?.rank;
+    const entry=hlp.entry_label||'';
+    const entryClass=entry==='GOOD_ENTRY'?'positive':entry==='BAD_ENTRY'?'negative':'moderate';
+    const entryTxt=entry==='GOOD_ENTRY'?'Good':entry==='BAD_ENTRY'?'Caution':'Neutral';
+    const vol=hlp.volatility_30d!=null?(hlp.volatility_30d*100).toFixed(2)+'%':'—';
+    document.getElementById('hlpAnalytics').innerHTML=`
+      <div class="hlp-an-card"><div class="hlp-an-label">Risk Score</div><div class="hlp-an-val ${rClass}">${rs}<span style="font-size:11px;opacity:.5">/100</span></div><div class="hlp-an-sub">${rb||'—'}</div></div>
+      <div class="hlp-an-card"><div class="hlp-an-label">Rank</div><div class="hlp-an-val">#${rank||'—'}</div><div class="hlp-an-sub">Risk-Adjusted</div></div>
+      <div class="hlp-an-card"><div class="hlp-an-label">Entry</div><div class="hlp-an-val ${entryClass}">${entryTxt||'—'}</div><div class="hlp-an-sub">Timing Signal</div></div>
+      <div class="hlp-an-card"><div class="hlp-an-label">Volatility</div><div class="hlp-an-val">${vol}</div><div class="hlp-an-sub">30D</div></div>`;
+  }
   document.getElementById('dashPills').innerHTML='';
   let flt=UV;
   document.getElementById('userGrid').innerHTML=flt.sort((a,b)=>b.apy-a.apy).map(userCard).join('');
