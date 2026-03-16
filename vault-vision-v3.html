@@ -1055,9 +1055,9 @@ tbody tr:last-child td{border-bottom:none}
 
     <!-- PROTOCOL -->
     <div class="lp-protos">
-      <div class="lp-protos-lbl">Built for</div>
+      <div class="lp-protos-lbl">Powered by</div>
       <div class="lp-proto-badges">
-        <div class="lp-proto-b"><div class="lp-proto-dot" style="background:#00b857"></div><span class="lp-proto-name">Hyperliquid</span><span class="lp-proto-count" id="lp-hl-cnt">—</span></div>
+        <div class="lp-proto-b" style="padding:8px 20px;border:1px solid rgba(0,184,87,.3);border-radius:12px;background:rgba(0,184,87,.06)"><div class="lp-proto-dot" style="background:#00b857"></div><span class="lp-proto-name" style="font-size:1rem;font-weight:600">Hyperliquid</span><span class="lp-proto-count" id="lp-hl-cnt" style="font-size:.85rem;opacity:.7">—</span></div>
       </div>
     </div>
 
@@ -1085,7 +1085,7 @@ tbody tr:last-child td{border-bottom:none}
 </div></header>
 <main class="main">
 <div class="page active" id="pg-dashboard">
-<section class="hero-stats"><div class="stat-card"><div class="stat-label">Total TVL</div><div class="stat-value highlight" id="sTvl">$0</div><div class="stat-sub">Across all protocols</div></div><div class="stat-card"><div class="stat-label">Best APR</div><div class="stat-value" id="sApr">0%</div><div class="stat-sub" id="sAprV">-</div></div><div class="stat-card"><div class="stat-label">Active Vaults</div><div class="stat-value" id="sCnt">0</div><div class="stat-sub" id="sCntS">-</div></div><div class="stat-card"><div class="stat-label">Protocols</div><div class="stat-value">4</div><div class="stat-sub">Nado · Lighter · HL · Drift</div></div></section>
+<section class="hero-stats"><div class="stat-card"><div class="stat-label">Total TVL</div><div class="stat-value highlight" id="sTvl">$0</div><div class="stat-sub">Hyperliquid vaults</div></div><div class="stat-card"><div class="stat-label">Best APR</div><div class="stat-value" id="sApr">0%</div><div class="stat-sub" id="sAprV">-</div></div><div class="stat-card"><div class="stat-label">Active Vaults</div><div class="stat-value" id="sCnt">0</div><div class="stat-sub" id="sCntS">-</div></div><div class="stat-card"><div class="stat-label">Protocol</div><div class="stat-value" style="background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">HL</div><div class="stat-sub">Hyperliquid Focused</div></div></section>
 <!-- MINI MAP WIDGET -->
 <div class="mini-map-card section">
   <div class="mini-map-head">
@@ -1102,7 +1102,7 @@ tbody tr:last-child td{border-bottom:none}
 </div>
 <section class="section"><div class="section-header"><h2 class="section-title">Protocol Vaults<span class="badge">Official</span></h2></div><div class="grid" id="protoGrid"></div></section>
 <section class="section"><div class="section-header"><h2 class="section-title">User Vaults<span class="badge">Community</span></h2><div class="pills" id="dashPills"></div></div><div class="grid" id="userGrid"></div></section>
-<section class="section" id="bestRiskSection"><div class="section-header"><h2 class="section-title">Best Risk-Adjusted<span class="badge">Return/Risk</span></h2></div><div class="table-wrap"><table id="bestRiskTable"><thead><tr><th>#</th><th>Vault</th><th>Protocol</th><th>Score</th><th>Risk</th><th>Return</th><th>TVL</th></tr></thead><tbody id="bestRiskTbody"></tbody></table></div></section>
+<section class="section" id="bestRiskSection"><div class="section-header"><h2 class="section-title">Best Risk-Adjusted<span class="badge">Return/Risk</span></h2></div><div class="table-wrap"><table id="bestRiskTable"><thead><tr><th>#</th><th>Vault</th><th>Score</th><th>Risk</th><th>Return</th><th>TVL</th></tr></thead><tbody id="bestRiskTbody"></tbody></table></div></section>
 </div>
 <div class="page" id="pg-analytics"><section class="section"><div class="section-header"><h2 class="section-title">Vault Analytics<span class="badge">Rankings</span></h2></div><div class="pills" id="anaPills" style="margin-bottom:24px"></div><div class="table-wrap"><table id="anaTable"><thead><tr><th data-s="rank">#</th><th data-s="vault_name">Vault</th><th>Data</th><th data-s="tvl_usd" class="sorted">TVL ↓</th><th data-s="apy">APR ↓</th><th data-s="age_days">Age ↓</th><th data-s="r30">30D ↓</th><th data-s="risk_score">Risk ↓</th><th>Action</th></tr></thead><tbody id="anaTbody"></tbody></table></div></section></div>
 <div class="page" id="pg-compare"><section class="section"><div class="section-header"><h2 class="section-title">Compare Vaults<span class="badge">Select 2-4</span></h2></div><div class="compare-sel" id="compSel"></div><div class="compare-grid" id="compGrid"></div></section></div>
@@ -2142,7 +2142,7 @@ function renderBestRisk(){
     }).slice(0,10);
   const riskColor=r=>r<=30?'positive':r>=70?'negative':'';
   if(vaults.length===0){
-    document.getElementById('bestRiskTbody').innerHTML='<tr><td colspan="7" style="text-align:center;opacity:0.6">No risk-adjusted rankings yet. Run fetch job.</td></tr>';
+    document.getElementById('bestRiskTbody').innerHTML='<tr><td colspan="6" style="text-align:center;opacity:0.6">No risk-adjusted rankings yet. Run fetch job.</td></tr>';
     return;
   }
   document.getElementById('bestRiskTbody').innerHTML=vaults.map(v=>{
