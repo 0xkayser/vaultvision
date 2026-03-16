@@ -1150,9 +1150,6 @@ tbody tr:last-child td{border-bottom:none}
   <div class="map-legend">
     <div class="map-leg-ttl">Protocol</div>
     <div class="map-leg-row"><div class="map-leg-dot" style="background:#00b857"></div>Hyperliquid</div>
-    <div class="map-leg-row"><div class="map-leg-dot" style="background:#FFB020"></div>Drift</div>
-    <div class="map-leg-row"><div class="map-leg-dot" style="background:#A78BFA"></div>Lighter</div>
-    <div class="map-leg-row"><div class="map-leg-dot" style="background:#8899bb"></div>Nado</div>
     <div class="map-leg-sep"></div>
     <div class="map-leg-ttl">Entry Signal</div>
     <div class="map-leg-sig"><div class="map-leg-dot" style="background:#10b981"></div>Good entry</div>
@@ -2024,27 +2021,14 @@ async function loadHistory(id,days=90){
 
 function useFallback(){
 PV=[
-{id:"nado-nlp",protocol:"nado",vault_name:"Nado Liquidity Provider (NLP)",vault_id:"Nado Protocol",tvl_usd:1999928,apy:2.7121,age_days:180,is_protocol:true,r30:0.226,r90:0.68,risk_score:75,source_kind:"mock",data_quality:"mock"},
-{id:"lighter-llp",protocol:"lighter",vault_name:"Lighter Liquidity Provider (LLP)",vault_id:"Lighter Protocol",tvl_usd:8500000,apy:0.2214,op_fee:"0%",age_days:365,is_protocol:true,r30:0.018,r90:0.055,risk_score:55,source_kind:"mock",data_quality:"mock"},
-{id:"hl-hlp",protocol:"hyperliquid",vault_name:"Hyperliquidity Provider (HLP)",vault_id:"0xdfc24b077bc1425ad1dea75bcb6f8158e10df303",tvl_usd:269001600.88,apy:0.0529,age_days:400,is_protocol:true,r30:0.0044,r90:0.013,risk_score:22,source_kind:"official_api",data_quality:"full"}
+{id:"hl-hlp",protocol:"hyperliquid",vault_name:"Hyperliquidity Provider (HLP)",vault_id:"0xdfc24b077bc1425ad1dea75bcb6f8158e10df303",tvl_usd:426000000,apy:0.0113,age_days:400,is_protocol:true,r30:0.0044,r90:0.013,risk_score:22,source_kind:"official_api",data_quality:"full"}
 ];
 UV=[
-{id:"lighter-edge",protocol:"lighter",vault_name:"Edge & Hedge (L/S Factors)",leader:"0x4262...Af8c",tvl_usd:3252852.52,op_fee:"20%",apy:-0.0311,age_days:126,r30:-0.003,r90:-0.009,risk_score:65,source_kind:"mock",data_quality:"mock"},
-{id:"lighter-guinea",protocol:"lighter",vault_name:"Guinea Pool",leader:"0x423c...a411",tvl_usd:1175275.49,op_fee:"30%",apy:-0.8349,age_days:152,r30:-0.07,r90:-0.21,risk_score:85,source_kind:"mock",data_quality:"mock"},
-{id:"lighter-nyp",protocol:"lighter",vault_name:"NYP- Not YOUR pool",leader:"0xB322...D51f",tvl_usd:1058926.54,op_fee:"10%",apy:1.1355,age_days:9,r30:0.095,r90:null,risk_score:55,source_kind:"mock",data_quality:"mock"},
-{id:"lighter-alpha",protocol:"lighter",vault_name:"Alleged Alpha",leader:"0xCD7a...896e",tvl_usd:546972.70,op_fee:"25%",apy:0.10,age_days:19,r30:0.008,r90:null,risk_score:60,source_kind:"mock",data_quality:"mock"},
-{id:"hl-growi",protocol:"hyperliquid",vault_name:"Growi HF",leader:"0x7789...f60d",tvl_usd:7447476.26,age_days:95,apy:0.4142,r30:0.034,r90:0.105,risk_score:45,source_kind:"official_api",data_quality:"full"},
-{id:"hl-ultron",protocol:"hyperliquid",vault_name:"Ultron",leader:"0x8d3f...c056",tvl_usd:5245523.36,age_days:120,apy:0.4525,r30:0.038,r90:0.115,risk_score:42,source_kind:"official_api",data_quality:"full"},
-{id:"hl-alpha",protocol:"hyperliquid",vault_name:"Alpha Momentum",leader:"TopTrader",tvl_usd:8500000,age_days:85,apy:0.32,r30:0.028,r90:0.095,risk_score:48,source_kind:"official_api",data_quality:"full"},
-{id:"hl-btc",protocol:"hyperliquid",vault_name:"BTC Scalping Pro",leader:"ScalpMaster",tvl_usd:12000000,age_days:145,apy:0.55,r30:0.042,r90:0.138,risk_score:38,source_kind:"official_api",data_quality:"full"},
-{id:"hl-delta",protocol:"hyperliquid",vault_name:"Delta Neutral Fund",leader:"NeutralKing",tvl_usd:4200000,age_days:60,apy:0.18,r30:0.015,r90:0.052,risk_score:52,source_kind:"official_api",data_quality:"full"},
-{id:"hl-eth",protocol:"hyperliquid",vault_name:"ETH Momentum",leader:"ETHMaxi",tvl_usd:3100000,age_days:75,apy:0.28,r30:0.023,r90:0.072,risk_score:50,source_kind:"official_api",data_quality:"full"},
-{id:"hl-vol",protocol:"hyperliquid",vault_name:"Volatility Harvester",leader:"VolTrader",tvl_usd:2800000,age_days:110,apy:0.38,r30:0.032,r90:0.098,risk_score:46,source_kind:"official_api",data_quality:"full"},
-{id:"drift-jit",protocol:"drift",vault_name:"JIT Maker Vault",leader:"JITMaker",tvl_usd:6800000,age_days:180,apy:0.24,r30:0.022,r90:0.068,risk_score:55,source_kind:"mock",data_quality:"mock"},
-{id:"drift-sol",protocol:"drift",vault_name:"SOL Perp Strategy",leader:"SolanaWhale",tvl_usd:3500000,age_days:90,apy:0.38,r30:0.035,r90:0.112,risk_score:50,source_kind:"mock",data_quality:"mock"},
-{id:"drift-multi",protocol:"drift",vault_name:"Multi-Asset Neutral",leader:"DeltaGuru",tvl_usd:9200000,age_days:200,apy:0.15,r30:0.012,r90:0.042,risk_score:50,source_kind:"mock",data_quality:"mock"},
-{id:"drift-fund",protocol:"drift",vault_name:"Funding Rate Arb",leader:"FundingKing",tvl_usd:4500000,age_days:65,apy:0.22,r30:0.018,r90:0.058,risk_score:55,source_kind:"mock",data_quality:"mock"},
-{id:"drift-basis",protocol:"drift",vault_name:"Basis Trade Pro",leader:"BasisBoy",tvl_usd:2100000,age_days:45,apy:0.19,r30:0.016,r90:0.048,risk_score:58,source_kind:"mock",data_quality:"mock"}
+{id:"hl-growi",protocol:"hyperliquid",vault_name:"Growi HF",leader:"0x7789...f60d",tvl_usd:8900000,age_days:95,apy:0.6588,r30:0.034,r90:0.105,risk_score:45,source_kind:"official_api",data_quality:"full"},
+{id:"hl-systemic",protocol:"hyperliquid",vault_name:"Systemic Strategies HyperGrowth",leader:"0x1234...5678",tvl_usd:8200000,age_days:120,apy:2.4476,r30:0.038,r90:0.115,risk_score:42,source_kind:"official_api",data_quality:"full"},
+{id:"hl-neet",protocol:"hyperliquid",vault_name:"Not In Employment Education or Training",leader:"0xabcd...ef01",tvl_usd:5600000,age_days:85,apy:2.1519,r30:0.028,r90:0.095,risk_score:48,source_kind:"official_api",data_quality:"full"},
+{id:"hl-drkmttr",protocol:"hyperliquid",vault_name:"drkmttr",leader:"0x5678...9abc",tvl_usd:5300000,age_days:145,apy:2.2332,r30:0.042,r90:0.138,risk_score:38,source_kind:"official_api",data_quality:"full"},
+{id:"hl-ultron",protocol:"hyperliquid",vault_name:"Ultron",leader:"0x8d3f...c056",tvl_usd:3300000,age_days:110,apy:1.4832,r30:0.032,r90:0.098,risk_score:46,source_kind:"official_api",data_quality:"full"}
 ];
 }
 
