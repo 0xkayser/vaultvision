@@ -720,6 +720,24 @@ tbody tr:last-child td{border-bottom:none}
 .hlp-an-sub{font-size:9px;color:rgba(255,255,255,.25);margin-top:2px;}
 [data-theme="light"] .hlp-an-sub{color:rgba(0,0,0,.3);}
 @media(max-width:768px){.hlp-analytics{grid-template-columns:repeat(2,1fr);}}
+/* REFERRAL BANNER */
+.ref-banner{margin-bottom:20px;}
+.ref-banner-inner{display:flex;align-items:center;gap:16px;padding:14px 20px;
+  background:linear-gradient(135deg,rgba(0,212,255,.08),rgba(0,255,136,.08));
+  border:1px solid rgba(0,212,255,.2);border-radius:14px;position:relative;}
+[data-theme="light"] .ref-banner-inner{background:linear-gradient(135deg,rgba(0,140,200,.06),rgba(0,180,90,.06));border-color:rgba(0,140,200,.15);}
+.ref-banner-text{flex:1;font-size:13px;color:rgba(255,255,255,.7);line-height:1.4;}
+.ref-banner-text strong{color:rgba(255,255,255,.95);}
+[data-theme="light"] .ref-banner-text{color:rgba(0,0,0,.6);}
+[data-theme="light"] .ref-banner-text strong{color:rgba(0,0,0,.85);}
+.ref-banner-btn{padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;
+  background:linear-gradient(135deg,#00d4ff,#00ff88);color:#000;
+  text-decoration:none;white-space:nowrap;transition:all .2s;font-family:inherit;}
+.ref-banner-btn:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,212,255,.3);}
+.ref-banner-close{position:absolute;top:8px;right:8px;background:none;border:none;
+  color:rgba(255,255,255,.3);font-size:14px;cursor:pointer;padding:4px;line-height:1;}
+[data-theme="light"] .ref-banner-close{color:rgba(0,0,0,.3);}
+@media(max-width:640px){.ref-banner-inner{flex-direction:column;text-align:center;gap:10px;}}
 [data-theme="light"] .proto-sidebar{background:linear-gradient(145deg,rgba(240,244,252,.95),rgba(230,236,248,.92));border-color:rgba(0,0,0,.06);}
 .mini-map-card{
   background:linear-gradient(145deg, rgba(8,12,24,.95), rgba(12,16,28,.92));
@@ -1030,6 +1048,7 @@ tbody tr:last-child td{border-bottom:none}
         <div class="lp-ctas">
           <button class="lp-cta-p" onclick="dismissLanding('dashboard')">Open Dashboard →</button>
           <button class="lp-cta-s" onclick="dismissLanding('map')">Vault Map</button>
+          <a href="https://app.hyperliquid.xyz/join/MONETKIDAO" target="_blank" rel="noopener noreferrer" class="lp-cta-s" style="text-decoration:none;color:rgba(255,255,255,.6)" onclick="trackClick('referral','hyperliquid','landing',null)">Start on Hyperliquid ↗</a>
           <button class="lp-cta-g" onclick="dismissLanding('analytics')">Analytics</button>
         </div>
       </div>
@@ -1109,6 +1128,16 @@ tbody tr:last-child td{border-bottom:none}
 <main class="main">
 <div class="page active" id="pg-dashboard">
 <section class="hero-stats"><div class="stat-card"><div class="stat-label">Total TVL</div><div class="stat-value highlight" id="sTvl">$0</div><div class="stat-sub">Hyperliquid vaults</div></div><div class="stat-card"><div class="stat-label">Best APR</div><div class="stat-value" id="sApr">0%</div><div class="stat-sub" id="sAprV">-</div></div><div class="stat-card"><div class="stat-label">Active Vaults</div><div class="stat-value" id="sCnt">0</div><div class="stat-sub" id="sCntS">-</div></div><div class="stat-card"><div class="stat-label">Protocol</div><div class="stat-value" style="background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">HL</div><div class="stat-sub">Hyperliquid Focused</div></div></section>
+<!-- REFERRAL BANNER -->
+<div class="ref-banner" id="refBanner" style="display:none">
+  <div class="ref-banner-inner">
+    <div class="ref-banner-text">
+      <strong>New to Hyperliquid?</strong> Start trading on the fastest perp DEX. Track vaults, earn yield, trade with zero gas.
+    </div>
+    <a href="https://app.hyperliquid.xyz/join/MONETKIDAO" target="_blank" rel="noopener noreferrer" class="ref-banner-btn" onclick="trackClick('referral','hyperliquid','dashboard_banner',null)">Start on Hyperliquid →</a>
+    <button class="ref-banner-close" onclick="dismissRefBanner()" title="Dismiss">✕</button>
+  </div>
+</div>
 <!-- MAP + PROTOCOL ROW -->
 <div class="map-proto-row">
   <div class="mini-map-card" style="cursor:pointer" onclick="nav('map')">
@@ -1246,6 +1275,7 @@ tbody tr:last-child td{border-bottom:none}
 <footer class="footer"><span class="live-dot"></span>Live Data — Hyperliquid<br><span id="lastUpd" style="opacity:0.7"></span></footer>
 <script>
 const API_BASE='';
+const HL_REF_URL='https://app.hyperliquid.xyz/join/MONETKIDAO';
 let PV=[],UV=[];
 
 // =============================================================================
@@ -2108,7 +2138,8 @@ function trackClick(vaultId, protocol, sourcePage, rankType) {
 }
 function extLinkBtn(v, sourcePage='dashboard', rankType=null){
   if(!v.vault_url)return '';
-  return `<a href="${escapeHtml(v.vault_url)}" target="_blank" rel="noopener noreferrer" class="card-ext-link" onclick="event.stopPropagation();trackClick('${v.id}','${v.protocol}','${sourcePage}',${rankType?`'${rankType}'`:'null'})" title="${escapeHtml(v.vault_url_label||'Open')}">Open ↗</a>`;
+  const url=v.referral_url||v.vault_url;
+  return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="card-ext-link" onclick="event.stopPropagation();trackClick('${v.id}','${v.protocol}','${sourcePage}',${rankType?`'${rankType}'`:'null'})" title="Open on Hyperliquid">Open ↗</a>`;
 }
 function escapeHtml(s){
   if(!s)return '';
@@ -2461,10 +2492,13 @@ function renderVault(id){
         </div>
       </div>
     </div>
-    ${v.vault_url?`<a href="${escapeHtml(v.vault_url)}" target="_blank" rel="noopener noreferrer" class="vault-hero-btn ${v.protocol}" onclick="trackClick('${v.id}','${v.protocol}','vault_page',null)">
-      Deposit via VaultVision
-      <svg viewBox="0 0 20 20" fill="currentColor"><path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/><path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/></svg>
-    </a>`:''}
+    ${v.vault_url?`<div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px">
+      <a href="${escapeHtml(v.referral_url||HL_REF_URL)}" target="_blank" rel="noopener noreferrer" class="vault-hero-btn ${v.protocol}" onclick="trackClick('${v.id}','${v.protocol}','vault_page',null)">
+        Deposit via VaultVision
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/><path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/></svg>
+      </a>
+      <span style="font-size:10px;color:rgba(255,255,255,.3);padding-left:2px">Opens Hyperliquid · Supports free analytics</span>
+    </div>`:''}
   </div>
 
   <div class="detail-metrics fade-in" style="animation-delay:.05s">
@@ -2816,6 +2850,20 @@ function initTheme() {
     // Add transition animation
     document.body.style.transition = 'background 0.5s, color 0.3s';
   });
+}
+
+// =============================================================================
+// REFERRAL BANNER
+// =============================================================================
+function initRefBanner(){
+  if(localStorage.getItem('vv-ref-dismissed')) return;
+  const b=document.getElementById('refBanner');
+  if(b) b.style.display='block';
+}
+function dismissRefBanner(){
+  localStorage.setItem('vv-ref-dismissed','1');
+  const b=document.getElementById('refBanner');
+  if(b) b.style.display='none';
 }
 
 // =============================================================================
@@ -3315,6 +3363,7 @@ function mapBuildData(){
     risk_band:v.risk_band||'moderate',
     age_label:v.age_label||(v.age_days?v.age_days+'d':'?'),
     vault_url:v.vault_url||null,
+    referral_url:v.referral_url||HL_REF_URL,
     entry_signal:mapGetEntry(v),
     data_quality:v.data_quality||'mock',
     _sel:false,
@@ -3896,9 +3945,9 @@ function mapSelectVault(d){
   const cbtn=document.getElementById('map-p-compare');
   cbtn.textContent=inC?'✓ Added':'+ Compare';
   cbtn.className='map-p-act '+(inC?'added':'primary');
-  // open link
+  // open link (use referral URL)
   const ol=document.getElementById('map-p-open');
-  if(d.vault_url){ol.href=d.vault_url;ol.target='_blank';}
+  if(d.vault_url){ol.href=d.referral_url||HL_REF_URL;ol.target='_blank';}
   else{ol.href='#';ol.onclick=e=>{e.preventDefault();nav('vault',{id:d.id});};}
   mapShowSimilar(d);
   document.getElementById('map-p-div-section').style.display='';
@@ -4044,6 +4093,7 @@ function mde(e,d){
 (async function(){
   // Initialize theme and tooltips
   initTheme();
+  initRefBanner();
   initTooltips();
   
   // Show/hide landing page before data loads

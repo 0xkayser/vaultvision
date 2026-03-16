@@ -42,6 +42,8 @@ DEFAULT_PORT = 8787
 FETCH_INTERVAL_SEC = 15 * 60  # 15 minutes — ensures APR stays fresh
 
 # Hyperliquid
+HL_REFERRAL_CODE = "MONETKIDAO"
+HL_REFERRAL_URL = f"https://app.hyperliquid.xyz/join/{HL_REFERRAL_CODE}"
 HL_API_URL = "https://api.hyperliquid.xyz/info"
 HL_SCRAPE_URL = "https://stats-data.hyperliquid.xyz/Mainnet/vaults"
 HL_MIN_TVL = 500_000  # Expanded filter: >500K TVL for user vaults
@@ -100,6 +102,7 @@ def build_vault_url(protocol: str, vault_id: str, name: str = None, is_protocol_
         "vault_url_label": None,
         "vault_url_kind": None,
         "vault_url_is_guess": False,
+        "referral_url": HL_REFERRAL_URL,
     }
     
     if protocol == "hyperliquid":
@@ -8489,12 +8492,17 @@ def _has_recent_vault_data(max_age_sec: int = 1800) -> bool:
 def run_fetch_loop(initial_delay_sec: int = 0):
     """Background fetch loop."""
     if initial_delay_sec > 0:
+        print(f"[FETCH] Waiting {initial_delay_sec}s before first fetch...")
         time.sleep(initial_delay_sec)
     while True:
         try:
+            print("[FETCH] Starting fetch cycle...")
             run_fetch_job()
+            print("[FETCH] Fetch cycle complete.")
         except Exception as e:
-            print(f"[FETCH] Error: {e}")
+            print(f"[FETCH] Error in fetch loop: {e}")
+            import traceback
+            traceback.print_exc()
         time.sleep(FETCH_INTERVAL_SEC)
 
 
