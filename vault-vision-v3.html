@@ -738,6 +738,74 @@ tbody tr:last-child td{border-bottom:none}
   color:rgba(255,255,255,.3);font-size:14px;cursor:pointer;padding:4px;line-height:1;}
 [data-theme="light"] .ref-banner-close{color:rgba(0,0,0,.3);}
 @media(max-width:640px){.ref-banner-inner{flex-direction:column;text-align:center;gap:10px;}}
+/* SIGNALS FEED */
+.signals-feed{margin-bottom:24px;overflow:hidden;position:relative;}
+.signals-feed-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.signals-feed-header h2{margin:0;font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px;}
+.signals-feed-live{width:6px;height:6px;border-radius:50%;background:#10b981;animation:livePulse 2s ease-in-out infinite;}
+@keyframes livePulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(16,185,129,.5)}50%{opacity:.7;box-shadow:0 0 0 6px rgba(16,185,129,0)}}
+.signals-scroll{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;scroll-behavior:smooth;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.signals-scroll::-webkit-scrollbar{display:none;}
+.signal-card{flex:0 0 240px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);
+  border-radius:14px;padding:14px 16px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden;}
+.signal-card:hover{border-color:rgba(255,255,255,.15);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.2);}
+[data-theme="light"] .signal-card{background:rgba(0,0,0,.02);border-color:rgba(0,0,0,.06);}
+[data-theme="light"] .signal-card:hover{border-color:rgba(0,0,0,.12);}
+.signal-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
+.signal-card.green::before{background:linear-gradient(90deg,#10b981,#34d399);}
+.signal-card.red::before{background:linear-gradient(90deg,#f43f5e,#fb7185);}
+.signal-card.yellow::before{background:linear-gradient(90deg,#f59e0b,#fbbf24);}
+.signal-icon{font-size:18px;margin-bottom:6px;}
+.signal-vault{font-size:12px;font-weight:700;color:rgba(255,255,255,.9);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+[data-theme="light"] .signal-vault{color:rgba(0,0,0,.85);}
+.signal-msg{font-size:11px;color:rgba(255,255,255,.5);margin-bottom:6px;line-height:1.3;}
+[data-theme="light"] .signal-msg{color:rgba(0,0,0,.45);}
+.signal-time{font-size:10px;color:rgba(255,255,255,.25);}
+[data-theme="light"] .signal-time{color:rgba(0,0,0,.25);}
+.signals-empty{text-align:center;padding:20px;color:rgba(255,255,255,.3);font-size:13px;}
+[data-theme="light"] .signals-empty{color:rgba(0,0,0,.3);}
+/* PORTFOLIO SIM */
+.portfolio-sim{margin-bottom:24px;background:linear-gradient(135deg,rgba(0,212,255,.06),rgba(99,102,241,.06));
+  border:1px solid rgba(0,212,255,.12);border-radius:16px;padding:20px 24px;position:relative;overflow:hidden;}
+[data-theme="light"] .portfolio-sim{background:linear-gradient(135deg,rgba(0,140,200,.04),rgba(99,102,241,.04));border-color:rgba(0,140,200,.1);}
+.portfolio-sim-title{font-size:12px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;}
+[data-theme="light"] .portfolio-sim-title{color:rgba(0,0,0,.4);}
+.portfolio-sim-main{font-size:16px;font-weight:600;color:rgba(255,255,255,.9);margin-bottom:4px;line-height:1.4;}
+[data-theme="light"] .portfolio-sim-main{color:rgba(0,0,0,.85);}
+.portfolio-sim-result{font-size:28px;font-weight:800;margin-bottom:2px;}
+.portfolio-sim-sub{font-size:12px;color:rgba(255,255,255,.35);margin-bottom:14px;}
+[data-theme="light"] .portfolio-sim-sub{color:rgba(0,0,0,.35);}
+.portfolio-sim-ctas{display:flex;gap:10px;flex-wrap:wrap;}
+.portfolio-sim-cta{padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;
+  cursor:pointer;transition:all .2s;text-decoration:none;font-family:inherit;border:none;}
+.portfolio-sim-cta.primary{background:rgba(0,212,255,.15);color:#00d4ff;}
+.portfolio-sim-cta.primary:hover{background:rgba(0,212,255,.25);}
+.portfolio-sim-cta.secondary{background:rgba(255,255,255,.05);color:rgba(255,255,255,.6);}
+.portfolio-sim-cta.secondary:hover{background:rgba(255,255,255,.1);}
+[data-theme="light"] .portfolio-sim-cta.primary{background:rgba(0,140,200,.08);color:#0284c7;}
+[data-theme="light"] .portfolio-sim-cta.secondary{background:rgba(0,0,0,.04);color:rgba(0,0,0,.5);}
+/* TRENDING BADGE */
+.card-trending{position:absolute;top:8px;right:8px;font-size:9px;font-weight:700;padding:2px 8px;
+  border-radius:6px;z-index:1;letter-spacing:.3px;line-height:1.4;pointer-events:none;}
+.card-trending.green{background:rgba(16,185,129,.15);color:#10b981;border:1px solid rgba(16,185,129,.2);}
+.card-trending.red{background:rgba(244,63,94,.15);color:#f43f5e;border:1px solid rgba(244,63,94,.2);}
+.card-trending.yellow{background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.2);}
+/* SIMILAR VAULTS */
+.similar-vaults{margin-top:24px;padding-top:24px;border-top:1px solid rgba(255,255,255,.06);}
+[data-theme="light"] .similar-vaults{border-top-color:rgba(0,0,0,.06);}
+.similar-vaults h3{font-size:14px;font-weight:700;margin:0 0 14px 0;display:flex;align-items:center;gap:8px;}
+.similar-vaults-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+@media(max-width:768px){.similar-vaults-grid{grid-template-columns:1fr;}}
+.similar-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);
+  border-radius:14px;padding:14px 16px;cursor:pointer;transition:all .2s;}
+.similar-card:hover{border-color:rgba(255,255,255,.15);transform:translateY(-2px);}
+[data-theme="light"] .similar-card{background:rgba(0,0,0,.02);border-color:rgba(0,0,0,.06);}
+.similar-card-name{font-size:13px;font-weight:700;color:rgba(255,255,255,.9);margin-bottom:4px;}
+[data-theme="light"] .similar-card-name{color:rgba(0,0,0,.85);}
+.similar-card-stats{display:flex;gap:12px;font-size:11px;color:rgba(255,255,255,.45);}
+[data-theme="light"] .similar-card-stats{color:rgba(0,0,0,.4);}
+.similar-card-stat-val{font-weight:600;color:rgba(255,255,255,.7);}
+[data-theme="light"] .similar-card-stat-val{color:rgba(0,0,0,.6);}
 [data-theme="light"] .proto-sidebar{background:linear-gradient(145deg,rgba(240,244,252,.95),rgba(230,236,248,.92));border-color:rgba(0,0,0,.06);}
 .mini-map-card{
   background:linear-gradient(145deg, rgba(8,12,24,.95), rgba(12,16,28,.92));
@@ -1138,6 +1206,16 @@ tbody tr:last-child td{border-bottom:none}
     <button class="ref-banner-close" onclick="dismissRefBanner()" title="Dismiss">✕</button>
   </div>
 </div>
+<!-- LIVE SIGNALS FEED -->
+<div class="signals-feed" id="signalsFeed">
+  <div class="signals-feed-header">
+    <h2><span class="signals-feed-live"></span> Live Signals</h2>
+    <span style="font-size:10px;color:rgba(255,255,255,.3)">Auto-updates every 60s</span>
+  </div>
+  <div class="signals-scroll" id="signalsScroll"></div>
+</div>
+<!-- PORTFOLIO SIMULATOR -->
+<div class="portfolio-sim" id="portfolioSim"></div>
 <!-- MAP + PROTOCOL ROW -->
 <div class="map-proto-row">
   <div class="mini-map-card" style="cursor:pointer" onclick="nav('map')">
@@ -2202,6 +2280,10 @@ function renderDash(){
   document.getElementById('userGrid').innerHTML=flt.sort((a,b)=>b.apy-a.apy).map(userCard).join('');
   // Render Best Risk-Adjusted section
   renderBestRisk();
+  // Phase 2: signals feed + portfolio sim
+  renderSignalsFeed();
+  startSignalsAutoRefresh();
+  renderPortfolioSim();
 }
 
 function renderBestRisk(){
@@ -2234,6 +2316,142 @@ function renderBestRisk(){
       <td>${fmtTvl(v.tvl_usd)}</td>
     </tr>`;
   }).join('');
+}
+
+// =============================================================================
+// PHASE 2: LIVE SIGNALS FEED
+// =============================================================================
+let _signalsCache=[];
+const SIGNAL_META={
+  APR_SPIKE:{icon:'🔥',label:'APR Spike',color:'green'},
+  APR_DROP:{icon:'📉',label:'APR Drop',color:'red'},
+  TVL_SPIKE:{icon:'💰',label:'TVL Surge',color:'yellow'},
+  OUTFLOW:{icon:'🚨',label:'Outflow',color:'red'},
+  RISK_JUMP:{icon:'⚠️',label:'Risk Jump',color:'red'},
+  ENTRY_GOOD:{icon:'✅',label:'Good Entry',color:'green'},
+  ENTRY_BAD:{icon:'🔴',label:'Bad Entry',color:'red'},
+};
+function timeAgo(ts){
+  const d=Math.floor((Date.now()/1000)-ts);
+  if(d<60)return 'just now';
+  if(d<3600)return Math.floor(d/60)+'m ago';
+  if(d<86400)return Math.floor(d/3600)+'h ago';
+  return Math.floor(d/86400)+'d ago';
+}
+function renderSignalsFeed(){
+  const el=document.getElementById('signalsScroll');
+  if(!el)return;
+  fetch(API_BASE+'/api/signals/recent?limit=20').then(r=>r.json()).then(signals=>{
+    _signalsCache=signals;
+    if(!signals||signals.length===0){
+      el.innerHTML='<div class="signals-empty">All quiet · No signals in last 24h</div>';
+      return;
+    }
+    el.innerHTML=signals.map(s=>{
+      const meta=SIGNAL_META[s.signal_type]||{icon:'📊',label:s.signal_type,color:'yellow'};
+      return `<div class="signal-card ${meta.color}" onclick="nav('vault',{id:'${s.vault_id}'})">
+        <div class="signal-icon">${meta.icon}</div>
+        <div class="signal-vault">${s.vault_name||s.vault_id?.slice(0,12)}</div>
+        <div class="signal-msg">${s.message||s.why||meta.label}</div>
+        <div class="signal-time">${timeAgo(s.ts)}</div>
+      </div>`;
+    }).join('');
+    // Apply trending badges to vault cards
+    applyTrendingBadges(signals);
+  }).catch(()=>{
+    el.innerHTML='<div class="signals-empty">Could not load signals</div>';
+  });
+}
+// Auto-refresh signals every 60s
+let _signalsInterval=null;
+function startSignalsAutoRefresh(){
+  if(_signalsInterval)clearInterval(_signalsInterval);
+  _signalsInterval=setInterval(()=>{
+    if(document.visibilityState==='visible'&&location.hash===''||location.hash==='#dashboard')renderSignalsFeed();
+  },60000);
+}
+
+// =============================================================================
+// PHASE 2: TRENDING BADGES ON VAULT CARDS
+// =============================================================================
+function applyTrendingBadges(signals){
+  if(!signals||!signals.length)return;
+  // Build map: vault_id → latest signal
+  const sigMap={};
+  for(const s of signals){
+    if(!sigMap[s.vault_id])sigMap[s.vault_id]=s;
+  }
+  // Apply badges to all .card elements
+  document.querySelectorAll('.card, .card.protocol').forEach(card=>{
+    const onclick=card.getAttribute('onclick')||'';
+    const m=onclick.match(/id:'([^']+)'/);
+    if(!m)return;
+    const vid=m[1];
+    const sig=sigMap[vid];
+    if(!sig)return;
+    // Don't add duplicate badge
+    if(card.querySelector('.card-trending'))return;
+    const meta=SIGNAL_META[sig.signal_type]||{icon:'📊',label:sig.signal_type,color:'yellow'};
+    const badge=document.createElement('div');
+    badge.className='card-trending '+meta.color;
+    badge.textContent=meta.icon+' '+meta.label;
+    card.style.position='relative';
+    card.appendChild(badge);
+  });
+}
+
+// =============================================================================
+// PHASE 2: PORTFOLIO SIMULATOR
+// =============================================================================
+function renderPortfolioSim(){
+  const el=document.getElementById('portfolioSim');
+  if(!el)return;
+  const hlp=PV.find(v=>v.vault_name&&v.vault_name.includes('HLP'))||PV[0];
+  if(!hlp){el.style.display='none';return;}
+  const r90=hlp.r90||0;
+  const invest=10000;
+  const result=invest*(1+r90);
+  const pnl=result-invest;
+  const pnlPct=(r90*100).toFixed(1);
+  const isPos=pnl>=0;
+  el.innerHTML=`
+    <div class="portfolio-sim-title">💡 What If?</div>
+    <div class="portfolio-sim-main">If you deposited <strong>$${invest.toLocaleString()}</strong> in <strong>${hlp.vault_name}</strong> 90 days ago...</div>
+    <div class="portfolio-sim-result ${isPos?'positive':'negative'}">$${result.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})} <span style="font-size:16px;font-weight:600">(${isPos?'+':''}${pnlPct}%)</span></div>
+    <div class="portfolio-sim-sub">Based on actual 90-day vault performance</div>
+    <div class="portfolio-sim-ctas">
+      <button class="portfolio-sim-cta primary" onclick="nav('vault',{id:'${hlp.id}'})">Explore ${hlp.vault_name} →</button>
+      <button class="portfolio-sim-cta secondary" onclick="nav('analytics')">Compare All Vaults →</button>
+    </div>`;
+}
+
+// =============================================================================
+// PHASE 2: SIMILAR VAULTS (vault detail page)
+// =============================================================================
+function renderSimilarVaults(currentVault){
+  const a=all().filter(v=>v.id!==currentVault.id);
+  if(a.length<2)return '';
+  // Score similarity: close TVL + close risk
+  const scored=a.map(v=>{
+    const tvlDiff=Math.abs((v.tvl_usd||0)-(currentVault.tvl_usd||0))/Math.max(currentVault.tvl_usd||1,1);
+    const riskDiff=Math.abs((v.risk_score||50)-(currentVault.risk_score||50))/100;
+    return {v,score:tvlDiff*0.6+riskDiff*0.4};
+  }).sort((a,b)=>a.score-b.score).slice(0,3);
+  const cards=scored.map(({v})=>{
+    const riskColor=v.risk_score<=30?'positive':v.risk_score>=70?'negative':'';
+    return `<div class="similar-card" onclick="nav('vault',{id:'${v.id}'})">
+      <div class="similar-card-name">${v.vault_name}</div>
+      <div class="similar-card-stats">
+        <span>TVL: <span class="similar-card-stat-val">${fmtTvl(v.tvl_usd)}</span></span>
+        <span>Risk: <span class="similar-card-stat-val ${riskColor}">${v.risk_score!=null?v.risk_score+'/100':'N/A'}</span></span>
+        <span>APR: <span class="similar-card-stat-val ${(v.apy||0)>=0?'positive':'negative'}">${fmtPct(v.apy)}</span></span>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="similar-vaults fade-in">
+    <h3>🔗 Similar Vaults <span class="badge">By TVL & Risk</span></h3>
+    <div class="similar-vaults-grid">${cards}</div>
+  </div>`;
 }
 
 function renderAna(){
@@ -2568,6 +2786,7 @@ function renderVault(id){
       </div>
     </div>
   </div>
+  ${renderSimilarVaults(v)}
   `;
   
   // Animate numbers on load (Hero + metrics)
