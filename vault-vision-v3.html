@@ -4552,37 +4552,38 @@ function hlKeccak256(data){
 
 // --- HL SDK: Msgpack action hash ---
 function hlActionHash(action, vaultAddress, nonce){
-  // 1. Normalize trailing zeros from p/s fields
-  const normalized=JSON.parse(JSON.stringify(action));
-  function normTrailingZeros(obj){
-    if(!obj||typeof obj!=='object')return;
-    if(Array.isArray(obj)){obj.forEach(normTrailingZeros);return;}
-    for(const k of Object.keys(obj)){
-      if((k==='p'||k==='s')&&typeof obj[k]==='string'){
-        obj[k]=obj[k].replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'');
-      }else if(typeof obj[k]==='object') normTrailingZeros(obj[k]);
+  // Match official HL SDK: https://github.com/nktkas/hyperliquid/blob/main/src/signing/mod.ts
+  // 1. Remove undefined keys + convert large ints to BigInt for correct msgpack encoding
+  function removeUndefined(obj){
+    if(Array.isArray(obj))return obj.map(removeUndefined);
+    if(typeof obj==='object'&&obj!==null){
+      const r={};for(const k in obj){if(obj[k]!==undefined)r[k]=removeUndefined(obj[k]);}return r;
     }
+    return obj;
   }
-  normTrailingZeros(normalized);
+  function largeIntToBigInt(obj){
+    if(typeof obj==='number'&&Number.isInteger(obj)&&(obj>=0x100000000||obj<-0x80000000))return BigInt(obj);
+    if(Array.isArray(obj))return obj.map(largeIntToBigInt);
+    if(typeof obj==='object'&&obj!==null){
+      const r={};for(const k in obj)r[k]=largeIntToBigInt(obj[k]);return r;
+    }
+    return obj;
+  }
+  const cleaned=largeIntToBigInt(removeUndefined(action));
   // 2. Msgpack encode
-  const encoded=MessagePack.encode(normalized);
-  // 3. Build buffer: msgpack + nonce(8 bytes LE) + vaultFlag(1) + [vaultAddr(20)]
-  const parts=[encoded];
-  // nonce as 8 bytes little-endian
+  const encoded=MessagePack.encode(cleaned);
+  // 3. Nonce as 8 bytes BIG-ENDIAN (official HL SDK uses DataView.setBigUint64 = big-endian)
   const nonceBuf=new Uint8Array(8);
-  let n=BigInt(nonce);
-  for(let i=0;i<8;i++){nonceBuf[i]=Number(n&0xFFn);n>>=8n;}
-  parts.push(nonceBuf);
-  // vault flag
-  parts.push(new Uint8Array([vaultAddress?1:0]));
-  // If vault address, append 20 bytes
+  new DataView(nonceBuf.buffer).setBigUint64(0,BigInt(nonce));
+  // 4. Vault flag (1 byte) + optional vault address (20 bytes)
+  const parts=[encoded,nonceBuf,new Uint8Array([vaultAddress?1:0])];
   if(vaultAddress){
     const addrClean=vaultAddress.toLowerCase().replace('0x','');
     const addrBytes=new Uint8Array(20);
     for(let i=0;i<20;i++)addrBytes[i]=parseInt(addrClean.substr(i*2,2),16);
     parts.push(addrBytes);
   }
-  // Concat all parts
+  // 5. Concat + keccak256
   const totalLen=parts.reduce((s,p)=>s+p.length,0);
   const buf=new Uint8Array(totalLen);
   let off=0;for(const p of parts){buf.set(p,off);off+=p.length;}
@@ -4621,7 +4622,7 @@ async function hlSignL1Action(action, vaultAddress, nonce){
 // --- HL SDK: Sign ApproveBuilderFee ---
 async function hlSignApproveBuilderFee(builderAddr, maxFeeRate, nonce){
   const domain={name:'HyperliquidSignTransaction',version:'1',
-    chainId:HL_IS_MAINNET?42161:421614,
+    chainId:421614, // signatureChainId=0x66eee (can be any chain per HL SDK)
     verifyingContract:'0x0000000000000000000000000000000000000000'};
   const types={
     'HyperliquidTransaction:ApproveBuilderFee':[
@@ -4669,7 +4670,7 @@ async function hlEnsureBuilderFeeApproved(){
   const maxFeeRate='0.01%'; // 1 bps
   const sig=await hlSignApproveBuilderFee(HL_BUILDER_ADDR,maxFeeRate,nonce);
   const action={type:'approveBuilderFee',builder:HL_BUILDER_ADDR.toLowerCase(),maxFeeRate:maxFeeRate,nonce:nonce,
-    hyperliquidChain:HL_IS_MAINNET?'Mainnet':'Testnet',signatureChainId:'0xa4b1'};
+    hyperliquidChain:HL_IS_MAINNET?'Mainnet':'Testnet',signatureChainId:'0x66eee'};
   await hlExchange(action,sig,nonce);
   return true;
 }
