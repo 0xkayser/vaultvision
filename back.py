@@ -7897,6 +7897,26 @@ class APIHandler(BaseHTTPRequestHandler):
             else:
                 self.send_json({"error": "Invalid vault ID"}, 400)
 
+        elif path.startswith("/api/vault/") and "/positions" in path:
+            # Real-time vault positions from HL clearinghouseState
+            parts = path.split("/")
+            vault_id = parts[3] if len(parts) > 3 else None
+            if vault_id:
+                try:
+                    # Extract vault address from vault_id (format: "hyperliquid:0x...")
+                    addr = vault_id.split(":")[-1] if ":" in vault_id else vault_id
+                    cs = fetch_hl_clearinghouse_state(addr)
+                    if cs:
+                        parsed = parse_hl_positions(cs)
+                        self.send_json(parsed)
+                    else:
+                        self.send_json({"error": "Could not fetch positions", "positions": []}, 404)
+                except Exception as e:
+                    print(f"[POSITIONS] Error: {e}", flush=True)
+                    self.send_json({"error": str(e), "positions": []}, 500)
+            else:
+                self.send_json({"error": "Invalid vault ID"}, 400)
+
         elif path.startswith("/api/vault/") and "/entry" in path:
             parts = path.split("/")
             vault_id = parts[3] if len(parts) > 3 else None
@@ -8568,9 +8588,12 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "Not found"}, 404)
 
 
+class ReusableHTTPServer(HTTPServer):
+    allow_reuse_address = True
+
 def run_server(port: int):
     """Run HTTP server."""
-    server = HTTPServer(("0.0.0.0", port), APIHandler)
+    server = ReusableHTTPServer(("0.0.0.0", port), APIHandler)
     print(f"[SERVER] Running on http://0.0.0.0:{port}")
     server.serve_forever()
 

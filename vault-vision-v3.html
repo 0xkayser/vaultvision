@@ -380,6 +380,28 @@ tbody tr:last-child td{border-bottom:none}
 .pos-health-val.warn{color:#fbbf24}
 .pos-health-val.danger{color:#f43f5e}
 .pos-health-val.ok{color:#10b981}
+/* Hedge Card */
+.hedge-pos-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border-light);font-size:13px}
+.hedge-pos-row:last-child{border-bottom:none}
+.hedge-coin{font-weight:700;min-width:44px;color:var(--text-primary)}
+.hedge-dir{font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;text-transform:uppercase}
+.hedge-dir.long{background:rgba(16,185,129,.15);color:#10b981}
+.hedge-dir.short{background:rgba(244,63,94,.15);color:#f43f5e}
+.hedge-size{flex:1;text-align:right;color:var(--text-secondary);font-size:12px}
+.hedge-btn-sm{padding:4px 10px;font-size:11px;font-weight:600;border:1px solid var(--border-light);background:var(--nav-bg);color:var(--text-primary);border-radius:6px;cursor:pointer;transition:all .2s}
+.hedge-btn-sm:hover{background:var(--sky-100);border-color:var(--sky-400)}
+.hedge-coverage{display:flex;gap:4px;margin:10px 0 8px}
+.hedge-cov-btn{flex:1;padding:6px 0;text-align:center;font-size:12px;font-weight:600;border:1px solid var(--border-light);background:var(--nav-bg);color:var(--text-secondary);border-radius:6px;cursor:pointer;transition:all .2s}
+.hedge-cov-btn.active{background:var(--sky-100);border-color:var(--sky-400);color:var(--text-primary)}
+.hedge-actions{display:flex;gap:6px;margin-top:10px}
+.hedge-action-btn{flex:1;padding:8px 0;text-align:center;font-size:12px;font-weight:700;border:none;border-radius:8px;cursor:pointer;transition:all .2s}
+.hedge-action-btn.longs{background:linear-gradient(135deg,#f43f5e,#fb7185);color:#fff}
+.hedge-action-btn.shorts{background:linear-gradient(135deg,#10b981,#34d399);color:#fff}
+.hedge-action-btn:hover{opacity:.85;transform:translateY(-1px)}
+.hedge-action-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.hedge-note{font-size:10px;color:var(--text-muted);text-align:center;margin-top:8px}
+.hedge-margin-row{display:flex;align-items:center;gap:8px;margin:6px 0}
+.hedge-margin-input{flex:1;padding:6px 10px;font-size:13px;font-weight:600;border:1px solid var(--border-light);background:var(--bg-card-solid);color:var(--text-primary);border-radius:6px;font-family:inherit}
 .flow-tape-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-light)}
 .flow-tape-row:last-child{border-bottom:none}
 .flow-tape-label{font-size:12px;color:var(--text-secondary)}
@@ -2213,7 +2235,31 @@ function renderEntryIntel(v) {
         Last updated: ${ei.ts ? new Date(ei.ts * 1000).toLocaleString() : 'N/A'}
       </div>
     </div>
-  </div>`;
+  </div>
+  <!-- HEDGE EXPOSURE CARD (full-width, below intel grid) -->
+  ${posState === 'real' ? `
+  <div class="entry-card fade-in" style="animation-delay:.3s;margin-bottom:32px" id="hedgeCard">
+    <h4 style="margin-bottom:12px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:3px;opacity:.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      Hedge Exposure
+    </h4>
+    <div id="hedgePositions"><div style="text-align:center;padding:20px;color:var(--text-muted)">Loading positions...</div></div>
+    <div class="hedge-coverage" id="hedgeCoverage" style="display:none">
+      <button class="hedge-cov-btn" onclick="setHedgeCoverage(0.25)">25%</button>
+      <button class="hedge-cov-btn active" onclick="setHedgeCoverage(0.50)">50%</button>
+      <button class="hedge-cov-btn" onclick="setHedgeCoverage(1.0)">100%</button>
+    </div>
+    <div class="hedge-margin-row" id="hedgeMarginRow" style="display:none">
+      <span style="font-size:12px;color:var(--text-secondary)">Your margin (USDC)</span>
+      <input class="hedge-margin-input" id="hedgeMargin" type="number" placeholder="100" min="10" style="max-width:120px;text-align:right">
+    </div>
+    <div class="hedge-actions" id="hedgeActions" style="display:none">
+      <button class="hedge-action-btn longs" id="hedgeAllLongsBtn" onclick="executeHedge('long')">Short All Longs</button>
+      <button class="hedge-action-btn shorts" id="hedgeAllShortsBtn" onclick="executeHedge('short')">Long All Shorts</button>
+    </div>
+    <div class="hedge-note">0.01% builder fee per order &middot; Powered by VaultVision</div>
+  </div>
+  ` : ''}`;
 }
 
 // RISK BREAKDOWN COMPONENT (with tooltips)
@@ -3047,6 +3093,10 @@ function renderVault(id){
         }
         // Animate score count-up
         animateNumber('entryScoreNum', ei.entry_score, {format:'int'});
+        // Load positions for hedge card
+        if(document.getElementById('hedgeCard')){
+          fetchVaultPositions(id);
+        }
       }
     }).catch(() => {});
   }
@@ -5110,6 +5160,164 @@ async function executeTrade(){
     btn.disabled=false;btn.textContent=_tradeSide==='long'?'Long':'Short';
     if(e.message&&e.message.includes('User rejected'))return;
     alert('Trade error: '+(e.message||e));
+  }
+}
+
+// =============================================================================
+// PHASE 4: ONE-CLICK HEDGE
+// =============================================================================
+let _hedgePositions=[], _hedgeCoverage=0.5, _hedgeVaultId=null;
+
+function fmtUsdShort(v){
+  if(v==null)return'N/A';
+  const a=Math.abs(v);
+  if(a>=1e9)return'$'+(v/1e9).toFixed(1)+'B';
+  if(a>=1e6)return'$'+(v/1e6).toFixed(1)+'M';
+  if(a>=1e3)return'$'+(v/1e3).toFixed(1)+'K';
+  return'$'+v.toFixed(0);
+}
+
+async function fetchVaultPositions(vaultId){
+  _hedgeVaultId=vaultId;
+  const container=document.getElementById('hedgePositions');
+  if(!container)return;
+  try{
+    const r=await fetch(API_BASE+'/api/vault/'+encodeURIComponent(vaultId)+'/positions');
+    const data=await r.json();
+    if(!data.positions||data.positions.length===0){
+      container.innerHTML='<div style="text-align:center;padding:16px;color:var(--text-muted)">No open positions</div>';
+      return;
+    }
+    _hedgePositions=data.positions.filter(p=>p.direction!=='flat');
+    // Sort by size descending
+    _hedgePositions.sort((a,b)=>b.size_usd-a.size_usd);
+    // Render position rows
+    let html='';
+    _hedgePositions.forEach((p,i)=>{
+      html+=`<div class="hedge-pos-row">
+        <span class="hedge-coin">${p.coin}</span>
+        <span class="hedge-dir ${p.direction}">${p.direction}</span>
+        <span class="hedge-size">${fmtUsdShort(p.size_usd)}</span>
+        <button class="hedge-btn-sm" onclick="executeHedgeSingle(${i})">Hedge</button>
+      </div>`;
+    });
+    container.innerHTML=html;
+    // Show coverage + actions if wallet connected
+    const hasLongs=_hedgePositions.some(p=>p.direction==='long');
+    const hasShorts=_hedgePositions.some(p=>p.direction==='short');
+    document.getElementById('hedgeCoverage').style.display='flex';
+    document.getElementById('hedgeMarginRow').style.display='flex';
+    document.getElementById('hedgeActions').style.display='flex';
+    document.getElementById('hedgeAllLongsBtn').style.display=hasLongs?'':'none';
+    document.getElementById('hedgeAllShortsBtn').style.display=hasShorts?'':'none';
+  }catch(e){
+    console.error('Fetch positions error:',e);
+    container.innerHTML='<div style="text-align:center;padding:16px;color:var(--text-muted)">Failed to load positions</div>';
+  }
+}
+
+function setHedgeCoverage(pct){
+  _hedgeCoverage=pct;
+  document.querySelectorAll('.hedge-cov-btn').forEach(b=>{
+    b.classList.toggle('active',parseFloat(b.textContent)===pct*100);
+  });
+}
+
+async function executeHedgeSingle(idx){
+  if(!_walletAddr){connectWallet();return;}
+  const p=_hedgePositions[idx];
+  if(!p)return;
+  const btn=event.target;
+  btn.disabled=true;btn.textContent='...';
+  try{
+    if(!_assetMeta)await loadAssetMeta();
+    const mids=await hlGetMids();
+    const assetIdx=_assetMeta.universe.findIndex(u=>u.name===p.coin);
+    if(assetIdx<0){alert('Asset '+p.coin+' not found on HL perps');btn.disabled=false;btn.textContent='Hedge';return;}
+    const midPrice=parseFloat(mids[p.coin]);
+    if(!midPrice){alert('No price for '+p.coin);btn.disabled=false;btn.textContent='Hedge';return;}
+    const szDecimals=_assetMeta.universe[assetIdx].szDecimals||2;
+    // Hedge = opposite direction, coverage% of vault's position, 1x leverage
+    const margin=parseFloat(document.getElementById('hedgeMargin').value)||100;
+    const hedgeNotional=p.size_usd*_hedgeCoverage;
+    // User's margin limits the hedge: actual notional = min(hedgeNotional, margin)
+    const actualNotional=Math.min(hedgeNotional,margin);
+    const rawSz=actualNotional/midPrice;
+    const sz=removeTrailingZeros(rawSz.toFixed(szDecimals));
+    if(parseFloat(sz)<=0){alert('Size too small');btn.disabled=false;btn.textContent='Hedge';return;}
+    const isBuy=p.direction==='short'; // hedge = opposite
+    const slippage=isBuy?1.005:0.995;
+    const px=hlFormatPrice(midPrice*slippage);
+    await hlEnsureBuilderFeeApproved();
+    await hlUpdateLeverage(assetIdx,1,false);
+    const result=await hlPlaceOrder(assetIdx,isBuy,px,sz,{limit:{tif:'Ioc'}});
+    console.log('[Hedge] Result:',result);
+    // Log
+    fetch(API_BASE+'/api/trading/log',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({wallet_hash:_walletAddr.slice(0,10),action_type:'hedge_single',asset:p.coin,size_usd:actualNotional,source_page:'vault_detail'})
+    }).catch(()=>{});
+    btn.textContent='Done!';btn.style.background='var(--gradient-positive)';btn.style.color='#fff';
+    setTimeout(()=>{btn.disabled=false;btn.textContent='Hedge';btn.style.background='';btn.style.color='';},3000);
+  }catch(e){
+    console.error('Hedge error:',e);
+    btn.disabled=false;btn.textContent='Hedge';
+    if(e.message&&e.message.includes('User rejected'))return;
+    alert('Hedge error: '+(e.message||e));
+  }
+}
+
+async function executeHedge(direction){
+  if(!_walletAddr){connectWallet();return;}
+  const positions=_hedgePositions.filter(p=>p.direction===direction);
+  if(positions.length===0)return;
+  const btnId=direction==='long'?'hedgeAllLongsBtn':'hedgeAllShortsBtn';
+  const btn=document.getElementById(btnId);
+  btn.disabled=true;
+  const origText=btn.textContent;
+  try{
+    if(!_assetMeta)await loadAssetMeta();
+    const mids=await hlGetMids();
+    const margin=parseFloat(document.getElementById('hedgeMargin').value)||100;
+    await hlEnsureBuilderFeeApproved();
+    let filled=0,total=positions.length;
+    // Split margin proportionally across positions
+    const totalExposure=positions.reduce((s,p)=>s+p.size_usd,0);
+    for(let i=0;i<positions.length;i++){
+      const p=positions[i];
+      btn.textContent=`${i+1}/${total}...`;
+      const assetIdx=_assetMeta.universe.findIndex(u=>u.name===p.coin);
+      if(assetIdx<0)continue;
+      const midPrice=parseFloat(mids[p.coin]);
+      if(!midPrice)continue;
+      const szDecimals=_assetMeta.universe[assetIdx].szDecimals||2;
+      // Proportional margin allocation
+      const posShare=p.size_usd/totalExposure;
+      const posMargin=margin*posShare;
+      const hedgeNotional=p.size_usd*_hedgeCoverage;
+      const actualNotional=Math.min(hedgeNotional,posMargin);
+      const rawSz=actualNotional/midPrice;
+      const sz=removeTrailingZeros(rawSz.toFixed(szDecimals));
+      if(parseFloat(sz)<=0)continue;
+      const isBuy=p.direction==='short';
+      const slippage=isBuy?1.005:0.995;
+      const px=hlFormatPrice(midPrice*slippage);
+      try{
+        await hlUpdateLeverage(assetIdx,1,false);
+        await hlPlaceOrder(assetIdx,isBuy,px,sz,{limit:{tif:'Ioc'}});
+        filled++;
+      }catch(orderErr){console.error('Hedge order error for',p.coin,orderErr);}
+    }
+    // Log
+    fetch(API_BASE+'/api/trading/log',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({wallet_hash:_walletAddr.slice(0,10),action_type:'hedge_all_'+direction,asset:positions.map(p=>p.coin).join(','),size_usd:margin,source_page:'vault_detail'})
+    }).catch(()=>{});
+    btn.textContent=`${filled}/${total} filled!`;
+    setTimeout(()=>{btn.disabled=false;btn.textContent=origText;},4000);
+  }catch(e){
+    console.error('Hedge all error:',e);
+    btn.disabled=false;btn.textContent=origText;
+    if(e.message&&e.message.includes('User rejected'))return;
+    alert('Hedge error: '+(e.message||e));
   }
 }
 
