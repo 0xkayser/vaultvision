@@ -7416,6 +7416,29 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(e), "signals": []}, 500)
             return
 
+        # GET /api/hl/balance?user=0x... — proxy HL clearinghouseState (avoids CORS)
+        if path == "/api/hl/balance":
+            user = query.get("user", [None])[0]
+            if not user:
+                self.send_json({"error": "Missing user param"}, 400)
+                return
+            try:
+                r = requests.post("https://api.hyperliquid.xyz/info",
+                    json={"type": "clearinghouseState", "user": user.lower()},
+                    timeout=10)
+                data = r.json()
+                ms = data.get("marginSummary", {})
+                cms = data.get("crossMarginSummary", {})
+                self.send_json({
+                    "accountValue": ms.get("accountValue") or cms.get("accountValue", "0"),
+                    "withdrawable": data.get("withdrawable", "0"),
+                    "totalRawUsd": ms.get("totalRawUsd") or cms.get("totalRawUsd", "0"),
+                    "totalNtlPos": ms.get("totalNtlPos") or cms.get("totalNtlPos", "0"),
+                })
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+            return
+
         # GET /api/trading/config — builder code and chain config for frontend
         if path == "/api/trading/config":
             self.send_json({

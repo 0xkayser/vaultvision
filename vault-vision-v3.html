@@ -4569,13 +4569,11 @@ function disconnectWallet(){
 async function fetchWalletBalance(){
   if(!_walletAddr)return;
   try{
-    const r=await fetch(HL_API+'/info',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({type:'clearinghouseState',user:_walletAddr})});
+    // Use our proxy to avoid CORS issues with HL API
+    const r=await fetch(API_BASE+'/api/hl/balance?user='+encodeURIComponent(_walletAddr));
     const data=await r.json();
-    if(data&&data.marginSummary){
-      _walletBalance=parseFloat(data.marginSummary.accountValue)||0;
-    } else if(data&&data.crossMarginSummary){
-      _walletBalance=parseFloat(data.crossMarginSummary.accountValue)||0;
+    if(data&&!data.error){
+      _walletBalance=parseFloat(data.accountValue)||0;
     }
     updateWalletUI();
   }catch(e){console.error('Balance fetch error:',e);}
