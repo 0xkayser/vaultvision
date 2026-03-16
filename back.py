@@ -215,6 +215,7 @@ def init_db():
             vault_name TEXT NOT NULL,
             vault_type TEXT NOT NULL DEFAULT 'user',  -- protocol/user/strategy
             deposit_asset TEXT DEFAULT 'USDC',
+            redeem_period_days INTEGER,
             external_url TEXT,
             -- Metadata
             leader TEXT,
@@ -246,6 +247,7 @@ def init_db():
         ("vault_name", "TEXT"),
         ("vault_type", "TEXT DEFAULT 'user'"),
         ("deposit_asset", "TEXT DEFAULT 'USDC'"),
+        ("redeem_period_days", "INTEGER"),
         ("external_url", "TEXT"),
         ("created_ts", "INTEGER"),
         ("status", "TEXT DEFAULT 'active'"),
@@ -619,6 +621,7 @@ def normalize_vault(raw_vault: dict) -> dict:
         "vault_name": raw_vault.get("vault_name") or raw_vault.get("name", ""),
         "vault_type": vault_type,
         "deposit_asset": raw_vault.get("deposit_asset", "USDC"),
+        "redeem_period_days": raw_vault.get("redeem_period_days"),
         "external_url": raw_vault.get("vault_url") or raw_vault.get("external_url"),
         "leader": raw_vault.get("leader"),
         "created_ts": raw_vault.get("created_ts") or raw_vault.get("created_at"),
@@ -673,7 +676,7 @@ def upsert_vault(vault: dict):
             c = conn.cursor()
             c.execute("""
                 INSERT INTO vaults (
-                    pk, protocol, vault_id, vault_name, vault_type, deposit_asset, external_url,
+                    pk, protocol, vault_id, vault_name, vault_type, deposit_asset, redeem_period_days, external_url,
                     leader, created_ts, first_seen_ts, updated_ts, status, ban_reason,
                     source_kind, data_quality, verified,
                     name, is_protocol, age_days, tvl_usd, apr, pnl_30d, pnl_90d
@@ -684,6 +687,7 @@ def upsert_vault(vault: dict):
                     vault_id=excluded.vault_id,
                     vault_type=excluded.vault_type,
                     deposit_asset=excluded.deposit_asset,
+                    redeem_period_days=excluded.redeem_period_days,
                     external_url=excluded.external_url,
                     leader=excluded.leader,
                     created_ts=excluded.created_ts,
@@ -708,6 +712,7 @@ def upsert_vault(vault: dict):
                 canonical["vault_name"],
                 canonical["vault_type"],
                 canonical["deposit_asset"],
+                canonical["redeem_period_days"],
                 canonical["external_url"],
                 canonical["leader"],
                 canonical["created_ts"],
@@ -2131,6 +2136,7 @@ def get_all_vaults() -> List[dict]:
         vault_name = safe_get_row(row, "vault_name") or safe_get_row(row, "name", "")
         vault_type = safe_get_row(row, "vault_type") or ("protocol" if safe_get_row(row, "is_protocol") else "user")
         deposit_asset = safe_get_row(row, "deposit_asset") or "USDC"
+        redeem_period_days = safe_get_row(row, "redeem_period_days")
         external_url = safe_get_row(row, "external_url")
         status = safe_get_row(row, "status", "active")
         
@@ -2141,6 +2147,7 @@ def get_all_vaults() -> List[dict]:
             "vault_id": safe_get_row(row, "vault_id") or "",
             "vault_type": vault_type,
             "deposit_asset": deposit_asset,
+            "redeem_period_days": int(redeem_period_days) if redeem_period_days is not None else None,
             "external_url": external_url,
             "leader": safe_get_row(row, "leader") or "",
             "is_protocol": bool(safe_get_row(row, "is_protocol", 0)),  # Legacy compatibility
@@ -5465,6 +5472,51 @@ def parse_drift_value(text: str) -> Optional[float]:
         return None
 
 
+def extract_drift_redeem_period_days(cfg: dict) -> Optional[int]:
+    """Extract Drift redeem period (days) from vault config.
+
+    Drift config shape can vary over time, so we probe common key variants.
+    If value looks like seconds, convert to days (ceil-like via +86399 // 86400).
+    """
+    if not isinstance(cfg, dict):
+        return None
+
+    candidates = [
+        cfg.get("redeemPeriodDays"),
+        cfg.get("redeem_period_days"),
+        cfg.get("redeemPeriod"),
+        cfg.get("redeem_period"),
+    ]
+
+    # Check one level nested objects too (future-proofing API shape changes)
+    for key in ("params", "config", "vaultConfig"):
+        nested = cfg.get(key)
+        if isinstance(nested, dict):
+            candidates.extend([
+                nested.get("redeemPeriodDays"),
+                nested.get("redeem_period_days"),
+                nested.get("redeemPeriod"),
+                nested.get("redeem_period"),
+            ])
+
+    for raw in candidates:
+        if raw is None:
+            continue
+        try:
+            value = int(float(raw))
+        except (TypeError, ValueError):
+            continue
+        if value <= 0:
+            continue
+
+        # If API returns seconds, normalize to days.
+        if value > 1000:
+            return int((value + 86399) // 86400)
+        return value
+
+    return None
+
+
 def _refresh_drift_tvl_cache_background() -> None:
     """Background refresh of Drift TVL cache.
     
@@ -5529,6 +5581,7 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                 "is_usdc": is_usdc,
                 "is_hidden": is_hidden,
                 "temporary_apy": cfg.get("temporaryApy"),  # Target APY from config (more reliable for new vaults)
+                "redeem_period_days": extract_drift_redeem_period_days(cfg),
             }
             
             if is_usdc and not is_hidden:
@@ -5707,6 +5760,7 @@ def discover_drift_usdc_strategy_vaults() -> List[dict]:
                 "data_quality": "full",  # Real TVL from Drift Data API
                 "verified": True,  # Real API data
                 "deposit_asset": "USDC",
+                "redeem_period_days": cfg.get("redeem_period_days"),
                 "discovery_source": "drift_data_api",
                 "tvl_source": tvl_method,
             }
@@ -6526,6 +6580,7 @@ def v1_get_vault_cards(protocol: str = None, limit: int = 200) -> list:
             "vault_name": vault_name,
             "vault_type": (row["vault_type"] if row["vault_type"] else "user"),
             "deposit_asset": (row["deposit_asset"] if row["deposit_asset"] else "USDC"),
+            "redeem_period_days": (int(row["redeem_period_days"]) if row["redeem_period_days"] is not None else None),
             "tvl_usd": float(tvl) if tvl else None,
             "apr": float(row["apr"]) if row["apr"] else None,
             "age_days": age_days,
@@ -6574,6 +6629,7 @@ def v1_get_vault_detail(vault_id: str) -> Optional[dict]:
         "vault_name": vault_name,
         "vault_type": (row["vault_type"] if row["vault_type"] else "user"),
         "deposit_asset": (row["deposit_asset"] if row["deposit_asset"] else "USDC"),
+        "redeem_period_days": (int(row["redeem_period_days"]) if row["redeem_period_days"] is not None else None),
         "tvl_usd": float(row["tvl_usd"]) if row["tvl_usd"] else None,
         "apr": float(row["apr"]) if row["apr"] else None,
         "age_days": age_days,
@@ -6996,8 +7052,11 @@ class APIHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         
         # OG image for social previews
-        if path == "/og-image.svg":
+        if path in ("/og-image.png", "/og-image.svg"):
             try:
+                from PIL import Image, ImageDraw, ImageFont
+                import io
+
                 conn = get_db()
                 cur = conn.execute("SELECT COUNT(*) as cnt, COALESCE(SUM(tvl_usd),0) as tvl, COALESCE(MAX(apr),0) as best_apr FROM vaults WHERE tvl_usd>0")
                 row = cur.fetchone()
@@ -7006,57 +7065,105 @@ class APIHandler(BaseHTTPRequestHandler):
                 best = row[2] if row else 0
                 tvl_str = f"${tvl/1e6:.0f}M" if tvl >= 1e6 else f"${tvl/1e3:.0f}K"
                 apr_str = f"{best*100:.1f}%"
-                svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0a0e1a"/><stop offset="100%" stop-color="#0d1424"/></linearGradient>
-    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#00d4ff"/><stop offset="100%" stop-color="#00ff88"/></linearGradient>
-    <linearGradient id="gn" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#00b857"/><stop offset="100%" stop-color="#00ff6e"/></linearGradient>
-    <filter id="gl"><feGaussianBlur stdDeviation="40" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-  </defs>
-  <rect width="1200" height="630" fill="url(#bg)"/>
-  <circle cx="200" cy="320" r="180" fill="#00d4ff" opacity="0.03" filter="url(#gl)"/>
-  <circle cx="900" cy="250" r="220" fill="#00ff88" opacity="0.025" filter="url(#gl)"/>
-  <circle cx="600" cy="500" r="150" fill="#A78BFA" opacity="0.02" filter="url(#gl)"/>
-  <!-- Decorative nodes -->
-  <circle cx="850" cy="180" r="6" fill="#00b857" opacity="0.5"/><circle cx="870" cy="200" r="4" fill="#00b857" opacity="0.35"/>
-  <circle cx="920" cy="170" r="8" fill="#00b857" opacity="0.4"/><circle cx="890" cy="220" r="3" fill="#00b857" opacity="0.3"/>
-  <line x1="850" y1="180" x2="870" y2="200" stroke="#00b857" stroke-opacity="0.15" stroke-width="1"/>
-  <line x1="870" y1="200" x2="920" y2="170" stroke="#00b857" stroke-opacity="0.12" stroke-width="1"/>
-  <circle cx="1000" cy="350" r="5" fill="#FFB020" opacity="0.4"/><circle cx="1030" cy="370" r="7" fill="#FFB020" opacity="0.35"/>
-  <circle cx="1060" cy="340" r="4" fill="#FFB020" opacity="0.3"/>
-  <line x1="1000" y1="350" x2="1030" y2="370" stroke="#FFB020" stroke-opacity="0.12" stroke-width="1"/>
-  <circle cx="950" cy="450" r="5" fill="#A78BFA" opacity="0.35"/><circle cx="980" cy="470" r="3" fill="#A78BFA" opacity="0.3"/>
-  <!-- Logo -->
-  <rect x="80" y="70" width="52" height="52" rx="14" fill="url(#acc)"/>
-  <text x="106" y="105" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="22" font-weight="700" fill="white" text-anchor="middle">VV</text>
-  <text x="148" y="103" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="24" font-weight="700" fill="white">VaultVision</text>
-  <rect x="340" y="84" width="52" height="24" rx="6" fill="rgba(0,212,255,0.12)" stroke="rgba(0,212,255,0.3)" stroke-width="1"/>
-  <text x="366" y="101" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="11" font-weight="700" fill="#00d4ff" text-anchor="middle">BETA</text>
-  <!-- Headline -->
-  <text x="80" y="240" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="56" font-weight="900" fill="#f1f5f9" letter-spacing="-1.5">Find your edge in</text>
-  <text x="80" y="310" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="56" font-weight="900" fill="url(#acc)" letter-spacing="-1.5">on-chain vaults.</text>
-  <!-- Subtitle -->
-  <text x="80" y="370" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="20" fill="rgba(255,255,255,0.4)">Compare vaults across Hyperliquid, Drift, Lighter &amp; Nado</text>
-  <!-- Stats bar -->
-  <rect x="80" y="430" width="260" height="72" rx="14" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-  <text x="120" y="460" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="22" font-weight="800" fill="url(#acc)">{tvl_str}</text>
-  <text x="120" y="482" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="10" fill="rgba(255,255,255,0.3)" letter-spacing="0.8">TOTAL TVL</text>
-  <rect x="220" y="445" width="1" height="40" fill="rgba(255,255,255,0.06)"/>
-  <text x="255" y="460" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="22" font-weight="800" fill="#10b981">{apr_str}</text>
-  <text x="255" y="482" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="10" fill="rgba(255,255,255,0.3)" letter-spacing="0.8">BEST APR</text>
-  <rect x="370" y="430" width="160" height="72" rx="14" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-  <text x="410" y="460" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="22" font-weight="800" fill="white">{cnt}</text>
-  <text x="410" y="482" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="10" fill="rgba(255,255,255,0.3)" letter-spacing="0.8">ACTIVE VAULTS</text>
-  <text x="490" y="460" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="22" font-weight="800" fill="white">4</text>
-  <text x="490" y="482" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="10" fill="rgba(255,255,255,0.3)" letter-spacing="0.8">PROTOCOLS</text>
-  <!-- URL -->
-  <text x="80" y="570" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="16" fill="rgba(255,255,255,0.2)">vaultvision.tech</text>
-</svg>'''
+
+                W, H = 1200, 630
+                img = Image.new("RGB", (W, H), (10, 14, 26))
+                draw = ImageDraw.Draw(img)
+
+                # Background gradient overlay
+                for y in range(H):
+                    r = int(10 + (13 - 10) * y / H)
+                    g = int(14 + (20 - 14) * y / H)
+                    b = int(26 + (36 - 26) * y / H)
+                    draw.line([(0, y), (W, y)], fill=(r, g, b))
+
+                # Subtle glow circles
+                glow_img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+                glow_draw = ImageDraw.Draw(glow_img)
+                glow_draw.ellipse([20, 140, 380, 500], fill=(0, 212, 255, 8))
+                glow_draw.ellipse([680, 30, 1120, 470], fill=(0, 255, 136, 6))
+                img.paste(Image.alpha_composite(Image.new("RGBA", (W, H), (10, 14, 26, 255)), glow_img).convert("RGB"))
+
+                draw = ImageDraw.Draw(img)
+
+                # Try to load fonts: Linux (DejaVu) → macOS (Helvetica) → default
+                def _load_font(size, bold=False):
+                    paths = [
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                        "/System/Library/Fonts/Helvetica.ttc",
+                        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                    ]
+                    for p in paths:
+                        try:
+                            return ImageFont.truetype(p, size)
+                        except OSError:
+                            continue
+                    return ImageFont.load_default()
+
+                font_bold_lg = _load_font(52, bold=True)
+                font_bold_md = _load_font(28, bold=True)
+                font_bold_sm = _load_font(22, bold=True)
+                font_reg = _load_font(18)
+                font_sm = _load_font(13)
+                font_logo = _load_font(20, bold=True)
+
+                # Logo box
+                draw.rounded_rectangle([80, 65, 132, 117], radius=12, fill=(0, 180, 220))
+                draw.text((92, 74), "VV", fill="white", font=font_logo)
+                draw.text((145, 78), "VaultVision", fill="white", font=font_bold_md)
+
+                # BETA badge
+                draw.rounded_rectangle([370, 80, 422, 104], radius=6, outline=(0, 212, 255, 180), width=1)
+                draw.text((378, 84), "BETA", fill=(0, 212, 255), font=font_sm)
+
+                # Headline
+                draw.text((80, 190), "Find your edge in", fill=(241, 245, 249), font=font_bold_lg)
+                draw.text((80, 255), "on-chain vaults.", fill=(0, 212, 255), font=font_bold_lg)
+
+                # Subtitle
+                draw.text((80, 330), "Compare vaults across Hyperliquid, Drift, Lighter & Nado", fill=(255, 255, 255, 102), font=font_reg)
+
+                # Stats boxes
+                box_y = 400
+                # TVL box
+                draw.rounded_rectangle([80, box_y, 280, box_y + 72], radius=12, fill=(255, 255, 255, 10), outline=(255, 255, 255, 15))
+                draw.text((100, box_y + 12), tvl_str, fill=(0, 212, 255), font=font_bold_sm)
+                draw.text((100, box_y + 42), "TOTAL TVL", fill=(255, 255, 255, 77), font=font_sm)
+
+                # APR box
+                draw.rounded_rectangle([300, box_y, 460, box_y + 72], radius=12, fill=(255, 255, 255, 10), outline=(255, 255, 255, 15))
+                draw.text((320, box_y + 12), apr_str, fill=(16, 185, 129), font=font_bold_sm)
+                draw.text((320, box_y + 42), "BEST APR", fill=(255, 255, 255, 77), font=font_sm)
+
+                # Vaults box
+                draw.rounded_rectangle([480, box_y, 640, box_y + 72], radius=12, fill=(255, 255, 255, 10), outline=(255, 255, 255, 15))
+                draw.text((500, box_y + 12), str(cnt), fill="white", font=font_bold_sm)
+                draw.text((500, box_y + 42), "VAULTS", fill=(255, 255, 255, 77), font=font_sm)
+
+                # Protocols box
+                draw.rounded_rectangle([660, box_y, 820, box_y + 72], radius=12, fill=(255, 255, 255, 10), outline=(255, 255, 255, 15))
+                draw.text((680, box_y + 12), "4", fill="white", font=font_bold_sm)
+                draw.text((680, box_y + 42), "PROTOCOLS", fill=(255, 255, 255, 77), font=font_sm)
+
+                # Decorative dots (right side)
+                for dx, dy, c, r in [(900, 180, (0, 184, 87), 6), (930, 200, (0, 184, 87), 4),
+                                      (970, 170, (0, 184, 87), 8), (1020, 300, (255, 176, 32), 5),
+                                      (1050, 320, (255, 176, 32), 7), (980, 400, (167, 139, 250), 5)]:
+                    draw.ellipse([dx-r, dy-r, dx+r, dy+r], fill=(*c, 100))
+
+                # URL
+                draw.text((80, 545), "vaultvision.tech", fill=(255, 255, 255, 51), font=font_reg)
+
+                # Encode to PNG
+                buf = io.BytesIO()
+                img.save(buf, format="PNG", optimize=True)
+                png_bytes = buf.getvalue()
+
                 self.send_response(200)
-                self.send_header("Content-Type", "image/svg+xml")
+                self.send_header("Content-Type", "image/png")
                 self.send_header("Cache-Control", "public, max-age=300")
                 self.end_headers()
-                self.wfile.write(svg.encode("utf-8"))
+                self.wfile.write(png_bytes)
                 return
             except Exception as e:
                 self.send_error(500, f"OG image error: {e}")
@@ -7077,7 +7184,211 @@ class APIHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_error(500, f"Error serving HTML: {e}")
                 return
-        
+
+        # Serve paper trading dashboard
+        if path == "/paper-trading" or path == "/paper-trading.html":
+            try:
+                html_path = os.path.join(os.path.dirname(__file__), "paper-trading.html")
+                with open(html_path, "r", encoding="utf-8") as f:
+                    html_content = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                self.wfile.write(html_content.encode("utf-8"))
+                return
+            except Exception as e:
+                self.send_error(500, f"Error serving paper trading: {e}")
+                return
+
+        # Paper Trading API
+        if path == "/api/paper-trading/status":
+            try:
+                import paper_trade as pt
+                strategy_param = "optimal"
+                if "?" in self.path:
+                    qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                    strategy_param = qs.get("strategy", ["optimal"])[0]
+                state = pt.load_state(strategy_param)
+                vaults = pt.load_live_vaults()
+                ts = pt.now_ts()
+                equity = pt.mark_to_market(state, vaults)
+
+                # Enrich positions with live data
+                positions = []
+                for pos in state.get("positions", []):
+                    pk = pos["vault_pk"]
+                    v = vaults.get(pk, {})
+                    current_val = v.get("current_val", pos.get("entry_val", 0))
+                    if current_val and pos.get("entry_val", 0) > 0:
+                        growth = (current_val - pos["entry_val"]) / pos["entry_val"]
+                        pnl_pct = growth * (1 - 0.10) if growth > 0 else growth
+                    else:
+                        pnl_pct = 0
+                    held_days = (ts - pos.get("entry_ts", ts)) / 86400
+                    positions.append({
+                        "vault_pk": pk,
+                        "vault_name": pos.get("vault_name", ""),
+                        "protocol": v.get("protocol", "hyperliquid"),
+                        "entry_date": pos.get("entry_date", ""),
+                        "capital_in": pos.get("raw_alloc", 0),
+                        "current_value": pos.get("capital", 0) * (1 + pnl_pct),
+                        "pnl_pct": pnl_pct,
+                        "held_days": held_days,
+                        "hold_limit": pt.STRATEGIES.get(strategy_param, {}).get("hold_days", 14),
+                    })
+
+                peak = max((e["equity"] for e in state.get("equity_log", [{"equity": equity}])), default=equity)
+                dd = (equity - peak) / peak if peak > 0 else 0
+
+                # Risk metrics from closed trades
+                closed = state.get("closed_trades", [])
+                wins = sum(1 for t in closed if t.get("pnl", 0) > 0)
+                win_rate = (wins / len(closed) * 100) if closed else None
+                avg_pnl = (sum(t.get("pnl_pct", 0) for t in closed) / len(closed)) if closed else None
+
+                # Data freshness
+                conn_check = sqlite3.connect(DB_PATH)
+                fr = conn_check.execute("SELECT MAX(ts) FROM pnl_history").fetchone()
+                data_ts = fr[0] if fr and fr[0] else 0
+                conn_check.close()
+
+                self.send_json({
+                    "status": state.get("status", "ACTIVE"),
+                    "initial_capital": state.get("initial_capital", 10000),
+                    "cash": state.get("cash", 0),
+                    "equity": equity,
+                    "total_return_pct": (equity - state.get("initial_capital", 10000)) / state.get("initial_capital", 10000) * 100,
+                    "peak_equity": peak,
+                    "drawdown_pct": dd * 100,
+                    "start_date": state.get("start_date", ""),
+                    "days_active": len(state.get("equity_log", [])),
+                    "total_trades": state.get("total_trades", 0),
+                    "total_slippage": state.get("total_slippage", 0),
+                    "positions": positions,
+                    "closed_trades": closed[-20:],
+                    "equity_log": state.get("equity_log", []),
+                    "alerts": state.get("alerts", []),
+                    "risk_metrics": {
+                        "max_drawdown_pct": dd * 100,
+                        "win_rate": win_rate,
+                        "avg_trade_pnl": avg_pnl,
+                        "total_closed": len(closed),
+                        "backtest_sharpe": 10.68,
+                        "backtest_dd": -6.5,
+                        "backtest_30d_return": 59.5,
+                    },
+                    "data_freshness_ts": data_ts,
+                })
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+            return
+
+        if path == "/api/paper-trading/signals":
+            try:
+                import paper_trade as pt
+                # Support ?strategy=X param
+                strategy_param = "optimal"
+                if "?" in self.path:
+                    qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                    strategy_param = qs.get("strategy", ["optimal"])[0]
+                vaults = pt.load_live_vaults()
+                ts = pt.now_ts()
+                state = pt.load_state(strategy_param)
+                held_pks = {p["vault_pk"] for p in state.get("positions", [])}
+
+                score_fn, threshold = pt.SCORING_FUNCTIONS.get(strategy_param, (pt.score_optimal, 2.5))
+
+                vault_signals = []
+                for pk, v in vaults.items():
+                    conf, reasons = score_fn(v, ts)
+                    vault_signals.append({
+                        "pk": pk,
+                        "name": v.get("name", ""),
+                        "protocol": v.get("protocol", "hyperliquid"),
+                        "tvl": v.get("tvl", 0),
+                        "apr": v.get("apr", 0),
+                        "confidence": conf,
+                        "meets_threshold": conf >= threshold,
+                        "is_held": pk in held_pks,
+                        "reasons": reasons,
+                    })
+                vault_signals.sort(key=lambda x: x["confidence"], reverse=True)
+                self.send_json({"ts": ts, "threshold": threshold, "strategy": strategy_param, "vaults": vault_signals})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+            return
+
+        # Paper Trading API — compare all strategies
+        if path == "/api/paper-trading/compare":
+            try:
+                import paper_trade as pt
+                vaults = pt.load_live_vaults()
+                ts = pt.now_ts()
+                strategies = []
+                for sname in pt.ALL_STRATEGY_NAMES:
+                    state = pt.load_state(sname)
+                    equity = pt.mark_to_market(state, vaults)
+                    peak = max((e["equity"] for e in state.get("equity_log", [{"equity": equity}])), default=equity)
+                    dd = (equity - peak) / peak if peak > 0 else 0
+                    ret = (equity - state.get("initial_capital", 10000)) / state.get("initial_capital", 10000)
+                    strat_info = pt.STRATEGIES[sname]
+                    closed = state.get("closed_trades", [])
+                    wins = sum(1 for t in closed if t.get("pnl", 0) > 0)
+                    strategies.append({
+                        "key": sname,
+                        "name": strat_info["name"],
+                        "color": strat_info["color"],
+                        "verdict": strat_info["verdict"],
+                        "description": strat_info["description"],
+                        "equity": equity,
+                        "return_pct": ret * 100,
+                        "drawdown_pct": dd * 100,
+                        "positions": len(state.get("positions", [])),
+                        "max_pos": strat_info["max_pos"],
+                        "trades": state.get("total_trades", 0),
+                        "win_rate": (wins / len(closed) * 100) if closed else None,
+                        "status": state.get("status", "ACTIVE"),
+                        "equity_log": state.get("equity_log", []),
+                    })
+                strategies.sort(key=lambda x: x["return_pct"], reverse=True)
+
+                # v2: HLP benchmark
+                hlp_data = pt.get_hlp_benchmark(vaults)
+                hlp_return = None
+                if hlp_data:
+                    # Use earliest strategy start as benchmark start
+                    start_ts = None
+                    for sname in pt.ALL_STRATEGY_NAMES:
+                        st = pt.load_state(sname)
+                        if st.get("equity_log"):
+                            sts = st["equity_log"][0].get("ts")
+                            if sts and (start_ts is None or sts < start_ts):
+                                start_ts = sts
+                    if start_ts:
+                        hlp_start = pt.get_val(hlp_data["values"], start_ts, 86400 * 3)
+                        if hlp_start and hlp_start > 0:
+                            hlp_return = (hlp_data["current_val"] - hlp_start) / hlp_start * 100
+
+                # v2: Position overlap
+                vault_counts = {}
+                for sname in pt.ALL_STRATEGY_NAMES:
+                    st = pt.load_state(sname)
+                    for p in st.get("positions", []):
+                        vn = p.get("vault_name", "?")
+                        vault_counts[vn] = vault_counts.get(vn, 0) + 1
+                overlaps = [{"vault": v, "count": c} for v, c in vault_counts.items() if c >= 3]
+
+                self.send_json({
+                    "ts": ts,
+                    "strategies": strategies,
+                    "hlp_benchmark_pct": hlp_return,
+                    "position_overlaps": overlaps,
+                })
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+            return
+
         # =====================================================================
         # V1 API — stable, versioned, read-only endpoints for external consumers
         # =====================================================================
@@ -8099,6 +8410,35 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "Invalid JSON"}, 400)
             return
         
+        if path == "/api/paper-trading/run":
+            try:
+                import paper_trade as pt
+                results, vaults = pt.run_all_strategies()
+                summary = []
+                for sname, r in results.items():
+                    strat = pt.STRATEGIES[sname]
+                    equity = r["equity"]
+                    ret = (equity - pt.INITIAL_CAPITAL) / pt.INITIAL_CAPITAL
+                    action_list = []
+                    for a in r["actions"]:
+                        action_list.append({
+                            "type": a[0], "vault": a[1],
+                            "value": a[2], "reasons": list(a[3]) if len(a) > 3 else []
+                        })
+                    summary.append({
+                        "strategy": sname,
+                        "name": strat["name"],
+                        "equity": equity,
+                        "return_pct": ret * 100,
+                        "actions": action_list,
+                        "status": r["state"].get("status", "ACTIVE"),
+                    })
+                summary.sort(key=lambda x: x["return_pct"], reverse=True)
+                self.send_json({"ok": True, "strategies": summary})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+            return
+
         if path == "/api/track/click":
             # Record outbound click event
             vault_id = data.get("vault_id")
