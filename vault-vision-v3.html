@@ -698,13 +698,13 @@ tbody tr:last-child td{border-bottom:none}
 /* ═══════════════════════════════════════════════
    MINI MAP (Dashboard widget)
 ═══════════════════════════════════════════════ */
-.map-proto-row{display:grid;grid-template-columns:1fr 380px;gap:24px;margin-bottom:32px;align-items:stretch;}
+.map-proto-row{display:grid;grid-template-columns:280px 1fr;gap:24px;margin-bottom:32px;align-items:stretch;}
 @media(max-width:1024px){.map-proto-row{grid-template-columns:1fr;}}
 .proto-sidebar{background:linear-gradient(145deg,rgba(8,12,24,.95),rgba(12,16,28,.92));
   border:1px solid rgba(255,255,255,.06);border-radius:20px;padding:18px 22px;
   display:flex;flex-direction:column;}
 .proto-sidebar .section-header{margin-bottom:12px;}
-.proto-sidebar .grid{flex:1;display:flex;flex-direction:column;gap:12px;}
+.proto-sidebar .grid{flex:1;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
 [data-theme="light"] .proto-sidebar{background:linear-gradient(145deg,rgba(240,244,252,.95),rgba(230,236,248,.92));border-color:rgba(0,0,0,.06);}
 .mini-map-card{
   background:linear-gradient(145deg, rgba(8,12,24,.95), rgba(12,16,28,.92));
@@ -716,7 +716,7 @@ tbody tr:last-child td{border-bottom:none}
   background:linear-gradient(145deg, rgba(240,244,252,.95), rgba(230,236,248,.92));
   border-color:rgba(0,0,0,.06);
 }
-.mini-map-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px 8px;}
+.mini-map-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 6px;}
 .mini-map-head-left{display:flex;align-items:center;gap:10px;}
 .mini-map-filters{display:flex;gap:4px;}
 .mini-map-filter{padding:4px 10px;border-radius:20px;border:1px solid rgba(255,255,255,.08);
@@ -733,7 +733,7 @@ tbody tr:last-child td{border-bottom:none}
   transition:all .18s;font-family:inherit;}
 [data-theme="light"] .mini-map-open-btn{border-color:rgba(0,0,0,.08);color:rgba(0,0,0,.4);}
 .mini-map-open-btn:hover{color:#00d4ff;border-color:rgba(0,212,255,.3);}
-#mini-map-svg{width:100%;height:220px;display:block;background:transparent;}
+#mini-map-svg{width:100%;height:160px;display:block;background:transparent;}
 .mini-map-gradient{position:absolute;bottom:0;left:0;right:0;height:50px;
   background:linear-gradient(to top,rgba(8,12,24,.9),transparent);pointer-events:none;}
 [data-theme="light"] .mini-map-gradient{background:linear-gradient(to top,rgba(240,244,252,.9),transparent);}
@@ -1096,15 +1096,10 @@ tbody tr:last-child td{border-bottom:none}
 <section class="hero-stats"><div class="stat-card"><div class="stat-label">Total TVL</div><div class="stat-value highlight" id="sTvl">$0</div><div class="stat-sub">Hyperliquid vaults</div></div><div class="stat-card"><div class="stat-label">Best APR</div><div class="stat-value" id="sApr">0%</div><div class="stat-sub" id="sAprV">-</div></div><div class="stat-card"><div class="stat-label">Active Vaults</div><div class="stat-value" id="sCnt">0</div><div class="stat-sub" id="sCntS">-</div></div><div class="stat-card"><div class="stat-label">Protocol</div><div class="stat-value" style="background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">HL</div><div class="stat-sub">Hyperliquid Focused</div></div></section>
 <!-- MAP + PROTOCOL ROW -->
 <div class="map-proto-row">
-  <div class="mini-map-card">
+  <div class="mini-map-card" style="cursor:pointer" onclick="nav('map')">
     <div class="mini-map-head">
-      <div class="mini-map-head-left">
-        <h2 class="section-title" style="margin:0">Vault Map <span class="badge" style="margin-left:6px">Live</span></h2>
-        <div class="mini-map-filters" id="mm-filters">
-          <button class="mini-map-filter active" data-mm="hyperliquid">Hyperliquid</button>
-        </div>
-      </div>
-      <button class="mini-map-open-btn" onclick="nav('map')">Explore full map →</button>
+      <h2 class="section-title" style="margin:0;font-size:13px">Vault Map</h2>
+      <span style="font-size:10px;color:rgba(255,255,255,.35);font-weight:600">Explore →</span>
     </div>
     <svg id="mini-map-svg"></svg>
     <div class="mini-map-gradient"></div>
