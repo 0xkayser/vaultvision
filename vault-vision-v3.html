@@ -4791,6 +4791,14 @@ async function hlVaultTransfer(vaultAddress,isDeposit,amountUsd){
   return hlExchange(action,sig,nonce);
 }
 
+// --- HL SDK: Set leverage + isolated margin before placing order ---
+async function hlUpdateLeverage(asset,leverage,isCross){
+  const nonce=Date.now();
+  const action={type:'updateLeverage',asset:asset,isCross:!!isCross,leverage:leverage};
+  const sig=await hlSignL1Action(action,null,nonce);
+  return hlExchange(action,sig,nonce);
+}
+
 // --- HL SDK: Place order with builder code (signed by agent wallet locally) ---
 async function hlPlaceOrder(asset,isBuy,price,size,orderType){
   const nonce=Date.now();
@@ -5060,8 +5068,8 @@ async function executeTrade(){
     const assetIdx=_assetMeta.universe.findIndex(u=>u.name===assetName);
     if(assetIdx<0){alert('Asset not found');btn.disabled=false;return;}
     const szDecimals=_assetMeta.universe[assetIdx].szDecimals||2;
-    // Calculate order size in asset units: size_usd * leverage / price
-    const rawSz=(size*lev)/midPrice;
+    // Calculate order size in asset units: size_usd / price (leverage is set separately via updateLeverage)
+    const rawSz=size/midPrice;
     const sz=removeTrailingZeros(rawSz.toFixed(szDecimals));
     // Slippage: 0.5% for market orders
     const slippage=_tradeSide==='long'?1.005:0.995;
@@ -5072,7 +5080,10 @@ async function executeTrade(){
     // Step 1: Ensure agent + builder fee approved (may prompt wallet once)
     btn.textContent=_agentWallet?'Checking fees...':'Approve in wallet...';
     await hlEnsureBuilderFeeApproved();
-    // Step 2: Place order (signed locally by agent — no wallet popup)
+    // Step 2: Set leverage (always isolated, never cross)
+    btn.textContent='Setting leverage...';
+    await hlUpdateLeverage(assetIdx,lev,false);
+    // Step 3: Place order (signed locally by agent — no wallet popup)
     btn.textContent='Placing order...';
     const result=await hlPlaceOrder(assetIdx,isBuy,px,sz,{limit:{tif:'Ioc'}});
     console.log('[Trade] Result:',result);
