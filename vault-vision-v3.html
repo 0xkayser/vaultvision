@@ -1510,8 +1510,8 @@ tbody tr:last-child td{border-bottom:none}
     <button class="trade-side-btn short" id="tradeShort" onclick="setTradeSide('short')">Short</button>
   </div>
   <div class="trade-row">
-    <label>Size (USDC)</label>
-    <input class="trade-input" id="tradeSize" type="number" placeholder="100" min="1">
+    <label>Margin (USDC)</label>
+    <input class="trade-input" id="tradeSize" type="number" placeholder="10" min="1">
   </div>
   <div class="trade-row">
     <label>Leverage</label>
@@ -5068,8 +5068,8 @@ async function executeTrade(){
     const assetIdx=_assetMeta.universe.findIndex(u=>u.name===assetName);
     if(assetIdx<0){alert('Asset not found');btn.disabled=false;return;}
     const szDecimals=_assetMeta.universe[assetIdx].szDecimals||2;
-    // SIZE = position size in USDC. Leverage only sets margin requirement.
-    const rawSz=size/midPrice;
+    // SIZE = margin (what you risk). Position = SIZE × LEVERAGE.
+    const rawSz=(size*lev)/midPrice;
     const sz=removeTrailingZeros(rawSz.toFixed(szDecimals));
     // Slippage: 0.5% for market orders
     const slippage=_tradeSide==='long'?1.005:0.995;
