@@ -4769,6 +4769,20 @@ async function hlEnsureBuilderFeeApproved(){
   return true;
 }
 
+// --- HL SDK: Format price to max 5 significant figures (HL requirement) ---
+function hlFormatPrice(px){
+  // Match Python SDK float_to_wire: round to 8 decimals, normalize, remove trailing zeros
+  const sigFigs=5;
+  if(px===0)return '0';
+  const magnitude=Math.floor(Math.log10(Math.abs(px)))+1;
+  const decimals=Math.max(0,sigFigs-magnitude);
+  const rounded=parseFloat(px.toFixed(decimals));
+  // Remove trailing zeros: "84500.0" -> "84500", "0.00123" -> "0.00123"
+  let s=rounded.toFixed(decimals);
+  if(s.includes('.')){s=s.replace(/0+$/,'').replace(/\.$/,'');}
+  return s;
+}
+
 // --- HL SDK: Execute vaultTransfer (signed by agent wallet locally) ---
 async function hlVaultTransfer(vaultAddress,isDeposit,amountUsd){
   const nonce=Date.now();
@@ -5051,7 +5065,9 @@ async function executeTrade(){
     const sz=removeTrailingZeros(rawSz.toFixed(szDecimals));
     // Slippage: 0.5% for market orders
     const slippage=_tradeSide==='long'?1.005:0.995;
-    const px=removeTrailingZeros((midPrice*slippage).toFixed(_assetMeta.universe[assetIdx].szDecimals>4?6:2));
+    // HL requires price with max 5 significant figures
+    const rawPx=midPrice*slippage;
+    const px=hlFormatPrice(rawPx);
     const isBuy=_tradeSide==='long';
     // Step 1: Ensure agent + builder fee approved (may prompt wallet once)
     btn.textContent=_agentWallet?'Checking fees...':'Approve in wallet...';
