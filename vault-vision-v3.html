@@ -698,7 +698,7 @@ tbody tr:last-child td{border-bottom:none}
 /* ═══════════════════════════════════════════════
    MINI MAP (Dashboard widget)
 ═══════════════════════════════════════════════ */
-.map-proto-row{display:grid;grid-template-columns:280px 1fr;gap:24px;margin-bottom:32px;align-items:stretch;}
+.map-proto-row{display:grid;grid-template-columns:280px 1fr;gap:24px;margin-bottom:32px;align-items:stretch;position:relative;z-index:2;}
 @media(max-width:1024px){.map-proto-row{grid-template-columns:1fr;}}
 .proto-sidebar{background:linear-gradient(145deg,rgba(8,12,24,.95),rgba(12,16,28,.92));
   border:1px solid rgba(255,255,255,.06);border-radius:20px;padding:18px 22px;
@@ -2962,8 +2962,8 @@ function renderMiniMap(){
   const all = [...PV,...UV].filter(v=>(v.tvl_usd||0)>0);
   if(!all.length) return;
 
-  const W = svgEl.clientWidth || 800;
-  const H = 220;
+  const W = svgEl.clientWidth || 280;
+  const H = 160;
   svgEl.setAttribute('width', W);
   svgEl.setAttribute('height', H);
 
