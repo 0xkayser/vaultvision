@@ -4542,7 +4542,9 @@ const HL_INFO=HL_API+'/info';
 const HL_BUILDER_ADDR='0xff94BCf0171ad504c72790E5490BFf40508aE4ab';
 const HL_BUILDER_FEE=1; // 1 = 0.01% (tenths of basis points)
 const HL_IS_MAINNET=true;
+const HL_ZERO_ADDR='0x0000000000000000000000000000000000000000';
 let _walletAddr=null,_walletBalance=null,_walletProvider=null;
+let _agentWallet=null; // ethers.Wallet — local agent keypair for L1 signing
 
 // --- HL SDK: Keccak256 using ethers.js ---
 function hlKeccak256(data){
@@ -4551,9 +4553,8 @@ function hlKeccak256(data){
 }
 
 // --- HL SDK: Msgpack action hash ---
+// Matches official HL SDK: https://github.com/nktkas/hyperliquid/blob/main/src/signing/mod.ts
 function hlActionHash(action, vaultAddress, nonce){
-  // Match official HL SDK: https://github.com/nktkas/hyperliquid/blob/main/src/signing/mod.ts
-  // 1. Remove undefined keys + convert large ints to BigInt for correct msgpack encoding
   function removeUndefined(obj){
     if(Array.isArray(obj))return obj.map(removeUndefined);
     if(typeof obj==='object'&&obj!==null){
@@ -4570,12 +4571,10 @@ function hlActionHash(action, vaultAddress, nonce){
     return obj;
   }
   const cleaned=largeIntToBigInt(removeUndefined(action));
-  // 2. Msgpack encode
   const encoded=MessagePack.encode(cleaned);
-  // 3. Nonce as 8 bytes BIG-ENDIAN (official HL SDK uses DataView.setBigUint64 = big-endian)
+  // Nonce as 8 bytes BIG-ENDIAN
   const nonceBuf=new Uint8Array(8);
   new DataView(nonceBuf.buffer).setBigUint64(0,BigInt(nonce));
-  // 4. Vault flag (1 byte) + optional vault address (20 bytes)
   const parts=[encoded,nonceBuf,new Uint8Array([vaultAddress?1:0])];
   if(vaultAddress){
     const addrClean=vaultAddress.toLowerCase().replace('0x','');
@@ -4583,18 +4582,15 @@ function hlActionHash(action, vaultAddress, nonce){
     for(let i=0;i<20;i++)addrBytes[i]=parseInt(addrClean.substr(i*2,2),16);
     parts.push(addrBytes);
   }
-  // 5. Concat + keccak256
   const totalLen=parts.reduce((s,p)=>s+p.length,0);
   const buf=new Uint8Array(totalLen);
   let off=0;for(const p of parts){buf.set(p,off);off+=p.length;}
   return hlKeccak256(buf);
 }
 
-// --- HL SDK: EIP-712 Sign via MetaMask ---
-async function hlSignTypedData(domain,types,primaryType,message){
+// --- HL SDK: EIP-712 Sign via browser wallet (for user-signed actions only) ---
+async function hlSignTypedDataWallet(domain,types,primaryType,message){
   if(!_walletAddr||!window.ethereum)throw new Error('Wallet not connected');
-  // Build EIP-712 payload (MetaMask/Rabby eth_signTypedData_v4 format)
-  // chainId must be number for proper EIP-712 hashing
   const payload={domain,types:{EIP712Domain:[
     {name:'name',type:'string'},{name:'version',type:'string'},
     {name:'chainId',type:'uint256'},{name:'verifyingContract',type:'address'}
@@ -4603,27 +4599,116 @@ async function hlSignTypedData(domain,types,primaryType,message){
     method:'eth_signTypedData_v4',
     params:[_walletAddr,JSON.stringify(payload)]
   });
-  // Parse r,s,v from 65-byte signature
   const r='0x'+sig.slice(2,66);
   const s='0x'+sig.slice(66,130);
   const v=parseInt(sig.slice(130,132),16);
   return {r,s,v};
 }
 
-// --- HL SDK: Sign L1 Action (for vaultTransfer, orders) ---
-async function hlSignL1Action(action, vaultAddress, nonce){
-  const hash=hlActionHash(action,vaultAddress,nonce);
-  const phantomAgent={source:HL_IS_MAINNET?'a':'b',connectionId:hash};
-  const domain={name:'Exchange',version:'1',chainId:1337,verifyingContract:'0x0000000000000000000000000000000000000000'};
-  const types={Agent:[{name:'source',type:'string'},{name:'connectionId',type:'bytes32'}]};
-  return hlSignTypedData(domain,types,'Agent',phantomAgent);
+// --- HL SDK: EIP-712 Sign via local agent wallet (for L1 actions — chainId 1337) ---
+async function hlSignTypedDataAgent(domain,types,primaryType,message){
+  if(!_agentWallet)throw new Error('Agent wallet not initialized');
+  const sig=await _agentWallet.signTypedData(domain,types,message);
+  const r='0x'+sig.slice(2,66);
+  const s='0x'+sig.slice(66,130);
+  const v=parseInt(sig.slice(130,132),16);
+  return {r,s,v};
 }
 
-// --- HL SDK: Sign ApproveBuilderFee ---
+// --- HL SDK: Sign L1 Action locally via agent wallet (chainId 1337 — never hits browser wallet) ---
+async function hlSignL1Action(action, vaultAddress, nonce){
+  await hlEnsureAgentWallet(); // ensures agent is created + approved
+  const hash=hlActionHash(action,vaultAddress,nonce);
+  const phantomAgent={source:HL_IS_MAINNET?'a':'b',connectionId:hash};
+  const domain={name:'Exchange',version:'1',chainId:1337,verifyingContract:HL_ZERO_ADDR};
+  const types={Agent:[{name:'source',type:'string'},{name:'connectionId',type:'bytes32'}]};
+  return hlSignTypedDataAgent(domain,types,'Agent',phantomAgent);
+}
+
+// --- Agent Wallet: Generate or restore local keypair ---
+function hlGetOrCreateAgentKey(){
+  // Agent key is per-wallet — store as vv-agent-{walletAddr}
+  const storeKey='vv-agent-'+_walletAddr;
+  let key=localStorage.getItem(storeKey);
+  if(key){
+    try{return new ethers.Wallet(key);}catch(e){localStorage.removeItem(storeKey);}
+  }
+  // Generate new random agent keypair
+  const wallet=ethers.Wallet.createRandom();
+  localStorage.setItem(storeKey,wallet.privateKey);
+  return wallet;
+}
+
+// --- Agent Wallet: Check if agent is approved on HL ---
+async function hlCheckAgentApproved(agentAddr){
+  try{
+    // Query HL for extra agents of this user
+    const r=await fetch(HL_INFO,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({type:'extraAgents',user:_walletAddr})});
+    const agents=await r.json();
+    // agents is array of {address, name, ...}
+    if(Array.isArray(agents)){
+      return agents.some(a=>a.address&&a.address.toLowerCase()===agentAddr.toLowerCase());
+    }
+    return false;
+  }catch(e){console.error('Check agent error:',e);return false;}
+}
+
+// --- Agent Wallet: Approve agent via browser wallet (user-signed, chainId 421614 — no conflict) ---
+async function hlApproveAgent(agentAddr){
+  const nonce=Date.now();
+  const domain={name:'HyperliquidSignTransaction',version:'1',
+    chainId:421614,verifyingContract:HL_ZERO_ADDR};
+  const types={
+    'HyperliquidTransaction:ApproveAgent':[
+      {name:'hyperliquidChain',type:'string'},
+      {name:'agentAddress',type:'address'},
+      {name:'agentName',type:'string'},
+      {name:'nonce',type:'uint64'}
+    ]
+  };
+  const message={
+    hyperliquidChain:HL_IS_MAINNET?'Mainnet':'Testnet',
+    agentAddress:agentAddr,
+    agentName:'',
+    nonce:nonce
+  };
+  const sig=await hlSignTypedDataWallet(domain,types,'HyperliquidTransaction:ApproveAgent',message);
+  // Send approveAgent to HL exchange
+  const action={type:'approveAgent',
+    hyperliquidChain:HL_IS_MAINNET?'Mainnet':'Testnet',
+    signatureChainId:'0x66eee',
+    agentAddress:agentAddr,
+    agentName:null,
+    nonce:nonce};
+  await hlExchange(action,sig,nonce);
+  console.log('[Agent] Approved:',agentAddr);
+}
+
+// --- Agent Wallet: Ensure agent is ready (create + approve if needed) ---
+let _agentInitPromise=null;
+async function hlEnsureAgentWallet(){
+  if(_agentWallet)return; // already initialized
+  if(_agentInitPromise)return _agentInitPromise; // avoid double-init
+  _agentInitPromise=(async()=>{
+    try{
+      const agent=hlGetOrCreateAgentKey();
+      const approved=await hlCheckAgentApproved(agent.address);
+      if(!approved){
+        console.log('[Agent] Not approved, requesting approval for:',agent.address);
+        await hlApproveAgent(agent.address);
+      }
+      _agentWallet=agent;
+      console.log('[Agent] Ready:',agent.address);
+    }finally{_agentInitPromise=null;}
+  })();
+  return _agentInitPromise;
+}
+
+// --- HL SDK: Sign user-signed actions via browser wallet (approveBuilderFee etc) ---
 async function hlSignApproveBuilderFee(builderAddr, maxFeeRate, nonce){
   const domain={name:'HyperliquidSignTransaction',version:'1',
-    chainId:421614, // signatureChainId=0x66eee (can be any chain per HL SDK)
-    verifyingContract:'0x0000000000000000000000000000000000000000'};
+    chainId:421614,verifyingContract:HL_ZERO_ADDR};
   const types={
     'HyperliquidTransaction:ApproveBuilderFee':[
       {name:'hyperliquidChain',type:'string'},
@@ -4638,7 +4723,7 @@ async function hlSignApproveBuilderFee(builderAddr, maxFeeRate, nonce){
     builder:builderAddr,
     nonce:nonce
   };
-  return hlSignTypedData(domain,types,'HyperliquidTransaction:ApproveBuilderFee',message);
+  return hlSignTypedDataWallet(domain,types,'HyperliquidTransaction:ApproveBuilderFee',message);
 }
 
 // --- HL SDK: Send to exchange endpoint ---
@@ -4667,7 +4752,7 @@ async function hlEnsureBuilderFeeApproved(){
   const approved=await hlCheckBuilderFee();
   if(approved)return true;
   const nonce=Date.now();
-  const maxFeeRate='0.01%'; // 1 bps
+  const maxFeeRate='0.01%';
   const sig=await hlSignApproveBuilderFee(HL_BUILDER_ADDR,maxFeeRate,nonce);
   const action={type:'approveBuilderFee',builder:HL_BUILDER_ADDR.toLowerCase(),maxFeeRate:maxFeeRate,nonce:nonce,
     hyperliquidChain:HL_IS_MAINNET?'Mainnet':'Testnet',signatureChainId:'0x66eee'};
@@ -4675,7 +4760,7 @@ async function hlEnsureBuilderFeeApproved(){
   return true;
 }
 
-// --- HL SDK: Execute vaultTransfer ---
+// --- HL SDK: Execute vaultTransfer (signed by agent wallet locally) ---
 async function hlVaultTransfer(vaultAddress,isDeposit,amountUsd){
   const nonce=Date.now();
   const action={type:'vaultTransfer',vaultAddress:vaultAddress,isDeposit:isDeposit,usd:amountUsd};
@@ -4683,7 +4768,7 @@ async function hlVaultTransfer(vaultAddress,isDeposit,amountUsd){
   return hlExchange(action,sig,nonce);
 }
 
-// --- HL SDK: Place order with builder code ---
+// --- HL SDK: Place order with builder code (signed by agent wallet locally) ---
 async function hlPlaceOrder(asset,isBuy,price,size,orderType){
   const nonce=Date.now();
   const wire={a:asset,b:isBuy,p:price,s:size,r:false,t:orderType||{limit:{tif:'Ioc'}}};
@@ -4726,7 +4811,7 @@ async function connectWallet(){
 }
 
 function disconnectWallet(){
-  _walletAddr=null;_walletBalance=null;_walletProvider=null;
+  _walletAddr=null;_walletBalance=null;_walletProvider=null;_agentWallet=null;
   localStorage.removeItem('vv-wallet');
   updateWalletUI();closeWalletDropdown();
 }
@@ -4856,12 +4941,12 @@ async function executeDeposit(){
   if(!amt||amt<=0){alert('Enter a valid amount');return;}
   if(_walletBalance!=null&&amt>_walletBalance){alert('Insufficient balance');return;}
   const btn=document.getElementById('depositSubmit');
-  btn.disabled=true;btn.textContent='Signing...';
+  btn.disabled=true;btn.textContent='Preparing...';
   try{
     const vaultAddr=_depositVault.vault_id||_depositVault.id;
     const usd=Math.round(amt*1e6); // 6 decimal places
-    // Step 1: Sign and send vaultTransfer
-    btn.textContent='Sign in wallet...';
+    // Agent wallet approval (one-time) + vaultTransfer (signed locally)
+    btn.textContent=_agentWallet?'Depositing...':'Approve in wallet (one-time)...';
     const result=await hlVaultTransfer(vaultAddr,true,usd);
     console.log('[VaultTransfer] Success:',result);
     // Log success
@@ -4959,11 +5044,11 @@ async function executeTrade(){
     const slippage=_tradeSide==='long'?1.005:0.995;
     const px=removeTrailingZeros((midPrice*slippage).toFixed(_assetMeta.universe[assetIdx].szDecimals>4?6:2));
     const isBuy=_tradeSide==='long';
-    // Step 1: Ensure builder fee approved
-    btn.textContent='Checking approval...';
+    // Step 1: Ensure agent + builder fee approved (may prompt wallet once)
+    btn.textContent=_agentWallet?'Checking fees...':'Approve in wallet...';
     await hlEnsureBuilderFeeApproved();
-    // Step 2: Sign and place order
-    btn.textContent='Sign in wallet...';
+    // Step 2: Place order (signed locally by agent — no wallet popup)
+    btn.textContent='Placing order...';
     const result=await hlPlaceOrder(assetIdx,isBuy,px,sz,{limit:{tif:'Ioc'}});
     console.log('[Trade] Result:',result);
     // Check if order was filled
