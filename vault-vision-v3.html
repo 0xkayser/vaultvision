@@ -4592,8 +4592,11 @@ function hlActionHash(action, vaultAddress, nonce){
 // --- HL SDK: EIP-712 Sign via MetaMask ---
 async function hlSignTypedData(domain,types,primaryType,message){
   if(!_walletAddr||!window.ethereum)throw new Error('Wallet not connected');
+  // Ensure chainId is a hex string for wallet compatibility
+  const domainCopy={...domain};
+  if(typeof domainCopy.chainId==='number')domainCopy.chainId='0x'+domainCopy.chainId.toString(16);
   // Build EIP-712 payload (MetaMask eth_signTypedData_v4 format)
-  const payload={domain,types:{EIP712Domain:[
+  const payload={domain:domainCopy,types:{EIP712Domain:[
     {name:'name',type:'string'},{name:'version',type:'string'},
     {name:'chainId',type:'uint256'},{name:'verifyingContract',type:'address'}
   ],...types},primaryType,message};
@@ -4732,14 +4735,26 @@ function disconnectWallet(){
 async function fetchWalletBalance(){
   if(!_walletAddr)return;
   try{
-    const r=await fetch(HL_INFO,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({type:'clearinghouseState',user:_walletAddr})});
-    const data=await r.json();
-    if(data&&data.marginSummary){
-      _walletBalance=parseFloat(data.marginSummary.accountValue)||0;
-    }else if(data&&data.crossMarginSummary){
-      _walletBalance=parseFloat(data.crossMarginSummary.accountValue)||0;
+    // Fetch both perps and spot balance
+    const [perpsR,spotR]=await Promise.all([
+      fetch(HL_INFO,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({type:'clearinghouseState',user:_walletAddr})}),
+      fetch(HL_INFO,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({type:'spotClearinghouseState',user:_walletAddr})})
+    ]);
+    const perps=await perpsR.json();
+    const spot=await spotR.json();
+    let total=0;
+    // Perps account value
+    if(perps&&perps.marginSummary) total+=parseFloat(perps.marginSummary.accountValue)||0;
+    else if(perps&&perps.crossMarginSummary) total+=parseFloat(perps.crossMarginSummary.accountValue)||0;
+    // Spot USDC balance (token index 0 = USDC on HL)
+    if(spot&&spot.balances){
+      for(const b of spot.balances){
+        if(b.coin==='USDC'||b.token===0) total+=parseFloat(b.total||b.hold||0);
+      }
     }
+    _walletBalance=total;
     updateWalletUI();
   }catch(e){console.error('Balance fetch error:',e);}
 }
