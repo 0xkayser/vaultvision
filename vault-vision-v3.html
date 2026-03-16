@@ -671,6 +671,33 @@ tbody tr:last-child td{border-bottom:none}
 .lp-proto-name{font-size:12px;font-weight:600;color:rgba(255,255,255,.65);}
 .lp-proto-count{font-size:11px;color:rgba(255,255,255,.3);}
 /* FOOTER */
+.lp-whatif{padding:48px 44px 40px;text-align:center;}
+.lp-whatif-inner{max-width:600px;margin:0 auto;padding:32px;border-radius:16px;
+  background:linear-gradient(135deg,rgba(0,212,255,.06),rgba(99,102,241,.06));
+  border:1px solid rgba(0,212,255,.1);position:relative;overflow:hidden;}
+.lp-whatif-label{font-size:11px;font-weight:800;letter-spacing:1.5px;color:rgba(0,212,255,.7);margin-bottom:18px;}
+.lp-whatif-line{font-size:15px;color:rgba(255,255,255,.6);margin-bottom:6px;line-height:1.5;}
+.lp-whatif-line strong{color:rgba(255,255,255,.95);}
+.lp-whatif-vault{font-size:20px;font-weight:800;color:#fff;margin-bottom:4px;
+  transition:opacity .4s,transform .4s;min-height:30px;}
+.lp-whatif-vault.fade{opacity:0;transform:translateY(8px);}
+.lp-whatif-ago{font-size:13px;color:rgba(255,255,255,.35);margin-bottom:10px;}
+.lp-whatif-result{font-size:36px;font-weight:900;margin-bottom:2px;
+  transition:opacity .4s,transform .4s;min-height:44px;}
+.lp-whatif-result.fade{opacity:0;transform:translateY(8px);}
+.lp-whatif-result.positive{color:#10b981;}
+.lp-whatif-result.negative{color:#f43f5e;}
+.lp-whatif-sub{font-size:11px;color:rgba(255,255,255,.25);margin-bottom:18px;
+  transition:opacity .4s;}
+.lp-whatif-sub.fade{opacity:0;}
+.lp-whatif-dots{display:flex;justify-content:center;gap:6px;margin-bottom:18px;}
+.lp-whatif-dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.15);
+  cursor:pointer;transition:all .3s;}
+.lp-whatif-dot.active{background:#00d4ff;transform:scale(1.3);}
+.lp-whatif-dot:hover{background:rgba(255,255,255,.4);}
+.lp-whatif-cta{display:flex;justify-content:center;}
+@media(max-width:640px){.lp-whatif{padding:32px 16px;}.lp-whatif-inner{padding:24px 18px;}
+  .lp-whatif-result{font-size:28px;}.lp-whatif-vault{font-size:17px;}}
 .lp-footer{border-top:1px solid rgba(255,255,255,.05);padding:18px 44px;
   display:flex;align-items:center;justify-content:space-between;
   max-width:1340px;margin:0 auto;width:100%;}
@@ -765,25 +792,6 @@ tbody tr:last-child td{border-bottom:none}
 .signals-empty{text-align:center;padding:20px;color:rgba(255,255,255,.3);font-size:13px;}
 [data-theme="light"] .signals-empty{color:rgba(0,0,0,.3);}
 /* PORTFOLIO SIM */
-.portfolio-sim{margin-bottom:24px;background:linear-gradient(135deg,rgba(0,212,255,.06),rgba(99,102,241,.06));
-  border:1px solid rgba(0,212,255,.12);border-radius:16px;padding:20px 24px;position:relative;overflow:hidden;}
-[data-theme="light"] .portfolio-sim{background:linear-gradient(135deg,rgba(0,140,200,.04),rgba(99,102,241,.04));border-color:rgba(0,140,200,.1);}
-.portfolio-sim-title{font-size:12px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;}
-[data-theme="light"] .portfolio-sim-title{color:rgba(0,0,0,.4);}
-.portfolio-sim-main{font-size:16px;font-weight:600;color:rgba(255,255,255,.9);margin-bottom:4px;line-height:1.4;}
-[data-theme="light"] .portfolio-sim-main{color:rgba(0,0,0,.85);}
-.portfolio-sim-result{font-size:28px;font-weight:800;margin-bottom:2px;}
-.portfolio-sim-sub{font-size:12px;color:rgba(255,255,255,.35);margin-bottom:14px;}
-[data-theme="light"] .portfolio-sim-sub{color:rgba(0,0,0,.35);}
-.portfolio-sim-ctas{display:flex;gap:10px;flex-wrap:wrap;}
-.portfolio-sim-cta{padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;
-  cursor:pointer;transition:all .2s;text-decoration:none;font-family:inherit;border:none;}
-.portfolio-sim-cta.primary{background:rgba(0,212,255,.15);color:#00d4ff;}
-.portfolio-sim-cta.primary:hover{background:rgba(0,212,255,.25);}
-.portfolio-sim-cta.secondary{background:rgba(255,255,255,.05);color:rgba(255,255,255,.6);}
-.portfolio-sim-cta.secondary:hover{background:rgba(255,255,255,.1);}
-[data-theme="light"] .portfolio-sim-cta.primary{background:rgba(0,140,200,.08);color:#0284c7;}
-[data-theme="light"] .portfolio-sim-cta.secondary{background:rgba(0,0,0,.04);color:rgba(0,0,0,.5);}
 /* TRENDING BADGE */
 .card-trending{position:absolute;top:8px;right:8px;font-size:9px;font-weight:700;padding:2px 8px;
   border-radius:6px;z-index:1;letter-spacing:.3px;line-height:1.4;pointer-events:none;}
@@ -1171,6 +1179,24 @@ tbody tr:last-child td{border-bottom:none}
       </div>
     </div>
 
+    <!-- WHAT IF SIMULATOR -->
+    <div class="lp-whatif" id="lpWhatIf">
+      <div class="lp-whatif-inner">
+        <div class="lp-whatif-label">💡 WHAT IF?</div>
+        <div class="lp-whatif-body" id="lpWhatIfBody">
+          <div class="lp-whatif-line">If you deposited <strong>$10,000</strong> in</div>
+          <div class="lp-whatif-vault" id="lpWhatIfVault">—</div>
+          <div class="lp-whatif-ago">90 days ago, you'd have</div>
+          <div class="lp-whatif-result" id="lpWhatIfResult">—</div>
+          <div class="lp-whatif-sub" id="lpWhatIfSub">Based on actual vault performance</div>
+        </div>
+        <div class="lp-whatif-dots" id="lpWhatIfDots"></div>
+        <div class="lp-whatif-cta">
+          <button class="lp-cta-p" onclick="dismissLanding('dashboard')">Explore Vaults →</button>
+        </div>
+      </div>
+    </div>
+
     <!-- FOOTER -->
     <div class="lp-footer">
       <div class="lp-footer-links">
@@ -1214,8 +1240,6 @@ tbody tr:last-child td{border-bottom:none}
   </div>
   <div class="signals-scroll" id="signalsScroll"></div>
 </div>
-<!-- PORTFOLIO SIMULATOR -->
-<div class="portfolio-sim" id="portfolioSim"></div>
 <!-- MAP + PROTOCOL ROW -->
 <div class="map-proto-row">
   <div class="mini-map-card" style="cursor:pointer" onclick="nav('map')">
@@ -2280,10 +2304,9 @@ function renderDash(){
   document.getElementById('userGrid').innerHTML=flt.sort((a,b)=>b.apy-a.apy).map(userCard).join('');
   // Render Best Risk-Adjusted section
   renderBestRisk();
-  // Phase 2: signals feed + portfolio sim
+  // Phase 2: signals feed
   renderSignalsFeed();
   startSignalsAutoRefresh();
-  renderPortfolioSim();
 }
 
 function renderBestRisk(){
@@ -2401,28 +2424,78 @@ function applyTrendingBadges(signals){
 }
 
 // =============================================================================
-// PHASE 2: PORTFOLIO SIMULATOR
+// PHASE 2: WHAT IF — DYNAMIC LANDING SIMULATOR
 // =============================================================================
-function renderPortfolioSim(){
-  const el=document.getElementById('portfolioSim');
-  if(!el)return;
-  const hlp=PV.find(v=>v.vault_name&&v.vault_name.includes('HLP'))||PV[0];
-  if(!hlp){el.style.display='none';return;}
-  const r90=hlp.r90||0;
+let _whatIfIdx=0,_whatIfTimer=null,_whatIfVaults=[];
+function initWhatIf(){
+  const lp=document.getElementById('lp');
+  if(!lp||lp.style.display==='none')return;
+  const all=[...PV,...UV].filter(v=>(v.tvl_usd||0)>50000&&v.r90!=null);
+  if(!all.length)return;
+  // Pick top vaults by absolute r90 (most interesting)
+  all.sort((a,b)=>Math.abs(b.r90||0)-Math.abs(a.r90||0));
+  _whatIfVaults=all.slice(0,5);
+  _whatIfIdx=0;
+  renderWhatIfSlide(0,false);
+  // Dots
+  const dots=document.getElementById('lpWhatIfDots');
+  if(dots){
+    dots.innerHTML=_whatIfVaults.map((_,i)=>
+      `<div class="lp-whatif-dot${i===0?' active':''}" onclick="goWhatIf(${i})"></div>`
+    ).join('');
+  }
+  // Auto-rotate
+  if(_whatIfTimer)clearInterval(_whatIfTimer);
+  _whatIfTimer=setInterval(()=>{
+    _whatIfIdx=(_whatIfIdx+1)%_whatIfVaults.length;
+    renderWhatIfSlide(_whatIfIdx,true);
+  },4000);
+}
+function goWhatIf(i){
+  _whatIfIdx=i;
+  renderWhatIfSlide(i,true);
+  // Reset timer
+  if(_whatIfTimer)clearInterval(_whatIfTimer);
+  _whatIfTimer=setInterval(()=>{
+    _whatIfIdx=(_whatIfIdx+1)%_whatIfVaults.length;
+    renderWhatIfSlide(_whatIfIdx,true);
+  },4000);
+}
+function renderWhatIfSlide(i,animate){
+  const v=_whatIfVaults[i];if(!v)return;
   const invest=10000;
+  const r90=v.r90||0;
   const result=invest*(1+r90);
-  const pnl=result-invest;
   const pnlPct=(r90*100).toFixed(1);
-  const isPos=pnl>=0;
-  el.innerHTML=`
-    <div class="portfolio-sim-title">💡 What If?</div>
-    <div class="portfolio-sim-main">If you deposited <strong>$${invest.toLocaleString()}</strong> in <strong>${hlp.vault_name}</strong> 90 days ago...</div>
-    <div class="portfolio-sim-result ${isPos?'positive':'negative'}">$${result.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})} <span style="font-size:16px;font-weight:600">(${isPos?'+':''}${pnlPct}%)</span></div>
-    <div class="portfolio-sim-sub">Based on actual 90-day vault performance</div>
-    <div class="portfolio-sim-ctas">
-      <button class="portfolio-sim-cta primary" onclick="nav('vault',{id:'${hlp.id}'})">Explore ${hlp.vault_name} →</button>
-      <button class="portfolio-sim-cta secondary" onclick="nav('analytics')">Compare All Vaults →</button>
-    </div>`;
+  const isPos=r90>=0;
+  const vaultEl=document.getElementById('lpWhatIfVault');
+  const resultEl=document.getElementById('lpWhatIfResult');
+  const subEl=document.getElementById('lpWhatIfSub');
+  if(!vaultEl||!resultEl)return;
+  if(animate){
+    vaultEl.classList.add('fade');
+    resultEl.classList.add('fade');
+    subEl.classList.add('fade');
+    setTimeout(()=>{
+      fillWhatIf(vaultEl,resultEl,subEl,v,result,pnlPct,isPos);
+      vaultEl.classList.remove('fade');
+      resultEl.classList.remove('fade');
+      subEl.classList.remove('fade');
+    },400);
+  } else {
+    fillWhatIf(vaultEl,resultEl,subEl,v,result,pnlPct,isPos);
+  }
+  // Update dots
+  document.querySelectorAll('.lp-whatif-dot').forEach((d,j)=>{
+    d.classList.toggle('active',j===i);
+  });
+}
+function fillWhatIf(vaultEl,resultEl,subEl,v,result,pnlPct,isPos){
+  vaultEl.textContent=v.vault_name||v.id;
+  resultEl.className='lp-whatif-result '+(isPos?'positive':'negative');
+  resultEl.innerHTML='$'+result.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})+
+    ' <span style="font-size:18px;font-weight:700">('+( isPos?'+':'')+pnlPct+'%)</span>';
+  subEl.textContent='Based on actual 90-day vault performance · TVL '+fmtUsd(v.tvl_usd||0);
 }
 
 // =============================================================================
@@ -3165,6 +3238,8 @@ function fillLandingStats(){
   if(el('lp-hl-cnt')) el('lp-hl-cnt').textContent = all.length + ' vaults';
   // Top vault cards
   renderLandingVaults(all);
+  // What If simulator
+  initWhatIf();
 }
 
 function renderLandingVaults(all){

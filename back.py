@@ -7378,36 +7378,40 @@ class APIHandler(BaseHTTPRequestHandler):
         # V1 API — stable, versioned, read-only endpoints for external consumers
         # =====================================================================
         # GET /api/signals/recent — lightweight signals for frontend feed
-        if path == "/api/signals/recent":
-            limit = int(query.get("limit", [20])[0])
-            limit = min(max(1, limit), 50)
-            signals = v1_compute_signals(since_ts=None, limit=limit)
-            # Simplify for frontend: add human-readable message
-            for s in signals:
-                st = s.get("signal_type", "")
-                vn = s.get("vault_name", "")
-                m = s.get("metrics", {})
-                if st == "APR_SPIKE":
-                    ch = m.get("apr_change_24h")
-                    s["message"] = f"APR {ch*100:+.0f}% in 24h" if ch else "APR spike detected"
-                elif st == "APR_DROP":
-                    ch = m.get("apr_change_24h")
-                    s["message"] = f"APR {ch*100:+.0f}% in 24h" if ch else "APR dropped"
-                elif st == "TVL_SPIKE":
-                    ch = m.get("tvl_change_24h")
-                    s["message"] = f"TVL {ch*100:+.0f}% inflow in 24h" if ch else "TVL spike"
-                elif st == "OUTFLOW":
-                    ch = m.get("tvl_change_24h")
-                    s["message"] = f"TVL {ch*100:+.0f}% outflow in 24h" if ch else "Capital outflow"
-                elif st == "RISK_JUMP":
-                    s["message"] = s.get("why", "Risk score increased")
-                elif st == "ENTRY_GOOD":
-                    s["message"] = "Entry conditions favorable"
-                elif st == "ENTRY_BAD":
-                    s["message"] = "Entry conditions deteriorating"
-                else:
-                    s["message"] = s.get("why", st)
-            self.send_json(signals)
+        if path == "/api/signals/recent" or path == "/api/signals/recent/":
+            try:
+                limit = int(query.get("limit", [20])[0])
+                limit = min(max(1, limit), 50)
+                signals = v1_compute_signals(since_ts=None, limit=limit)
+                # Simplify for frontend: add human-readable message
+                for s in signals:
+                    st = s.get("signal_type", "")
+                    vn = s.get("vault_name", "")
+                    m = s.get("metrics", {})
+                    if st == "APR_SPIKE":
+                        ch = m.get("apr_change_24h")
+                        s["message"] = f"APR {ch*100:+.0f}% in 24h" if ch else "APR spike detected"
+                    elif st == "APR_DROP":
+                        ch = m.get("apr_change_24h")
+                        s["message"] = f"APR {ch*100:+.0f}% in 24h" if ch else "APR dropped"
+                    elif st == "TVL_SPIKE":
+                        ch = m.get("tvl_change_24h")
+                        s["message"] = f"TVL {ch*100:+.0f}% inflow in 24h" if ch else "TVL spike"
+                    elif st == "OUTFLOW":
+                        ch = m.get("tvl_change_24h")
+                        s["message"] = f"TVL {ch*100:+.0f}% outflow in 24h" if ch else "Capital outflow"
+                    elif st == "RISK_JUMP":
+                        s["message"] = s.get("why", "Risk score increased")
+                    elif st == "ENTRY_GOOD":
+                        s["message"] = "Entry conditions favorable"
+                    elif st == "ENTRY_BAD":
+                        s["message"] = "Entry conditions deteriorating"
+                    else:
+                        s["message"] = s.get("why", st)
+                self.send_json(signals)
+            except Exception as e:
+                print(f"[ERROR] /api/signals/recent: {e}")
+                self.send_json({"error": str(e), "signals": []}, 500)
             return
 
         if path.startswith("/api/v1/"):
