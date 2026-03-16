@@ -662,7 +662,7 @@ tbody tr:last-child td{border-bottom:none}
 /* PROTO SECTION */
 .lp-protos{border-top:1px solid rgba(255,255,255,.05);padding:28px 44px;
   max-width:1340px;margin:0 auto;width:100%;
-  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;}
+  display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:12px;}
 .lp-protos-lbl{font-size:11px;color:rgba(255,255,255,.25);font-weight:600;letter-spacing:.5px;text-transform:uppercase;}
 .lp-proto-badges{display:flex;align-items:center;gap:10px;}
 .lp-proto-b{display:flex;align-items:center;gap:7px;padding:8px 16px;border-radius:10px;
@@ -698,11 +698,19 @@ tbody tr:last-child td{border-bottom:none}
 /* ═══════════════════════════════════════════════
    MINI MAP (Dashboard widget)
 ═══════════════════════════════════════════════ */
+.map-proto-row{display:grid;grid-template-columns:1fr 380px;gap:24px;margin-bottom:32px;align-items:stretch;}
+@media(max-width:1024px){.map-proto-row{grid-template-columns:1fr;}}
+.proto-sidebar{background:linear-gradient(145deg,rgba(8,12,24,.95),rgba(12,16,28,.92));
+  border:1px solid rgba(255,255,255,.06);border-radius:20px;padding:18px 22px;
+  display:flex;flex-direction:column;}
+.proto-sidebar .section-header{margin-bottom:12px;}
+.proto-sidebar .grid{flex:1;display:flex;flex-direction:column;gap:12px;}
+[data-theme="light"] .proto-sidebar{background:linear-gradient(145deg,rgba(240,244,252,.95),rgba(230,236,248,.92));border-color:rgba(0,0,0,.06);}
 .mini-map-card{
   background:linear-gradient(145deg, rgba(8,12,24,.95), rgba(12,16,28,.92));
   border:1px solid rgba(255,255,255,.06);
   border-radius:20px;overflow:hidden;backdrop-filter:blur(16px);
-  position:relative;margin-bottom:32px;
+  position:relative;
 }
 [data-theme="light"] .mini-map-card{
   background:linear-gradient(145deg, rgba(240,244,252,.95), rgba(230,236,248,.92));
@@ -1086,21 +1094,26 @@ tbody tr:last-child td{border-bottom:none}
 <main class="main">
 <div class="page active" id="pg-dashboard">
 <section class="hero-stats"><div class="stat-card"><div class="stat-label">Total TVL</div><div class="stat-value highlight" id="sTvl">$0</div><div class="stat-sub">Hyperliquid vaults</div></div><div class="stat-card"><div class="stat-label">Best APR</div><div class="stat-value" id="sApr">0%</div><div class="stat-sub" id="sAprV">-</div></div><div class="stat-card"><div class="stat-label">Active Vaults</div><div class="stat-value" id="sCnt">0</div><div class="stat-sub" id="sCntS">-</div></div><div class="stat-card"><div class="stat-label">Protocol</div><div class="stat-value" style="background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">HL</div><div class="stat-sub">Hyperliquid Focused</div></div></section>
-<!-- MINI MAP WIDGET -->
-<div class="mini-map-card section">
-  <div class="mini-map-head">
-    <div class="mini-map-head-left">
-      <h2 class="section-title" style="margin:0">Vault Map <span class="badge" style="margin-left:6px">Live</span></h2>
-      <div class="mini-map-filters" id="mm-filters">
-        <button class="mini-map-filter active" data-mm="hyperliquid">Hyperliquid</button>
+<!-- MAP + PROTOCOL ROW -->
+<div class="map-proto-row">
+  <div class="mini-map-card">
+    <div class="mini-map-head">
+      <div class="mini-map-head-left">
+        <h2 class="section-title" style="margin:0">Vault Map <span class="badge" style="margin-left:6px">Live</span></h2>
+        <div class="mini-map-filters" id="mm-filters">
+          <button class="mini-map-filter active" data-mm="hyperliquid">Hyperliquid</button>
+        </div>
       </div>
+      <button class="mini-map-open-btn" onclick="nav('map')">Explore full map →</button>
     </div>
-    <button class="mini-map-open-btn" onclick="nav('map')">Explore full map →</button>
+    <svg id="mini-map-svg"></svg>
+    <div class="mini-map-gradient"></div>
   </div>
-  <svg id="mini-map-svg"></svg>
-  <div class="mini-map-gradient"></div>
+  <div class="proto-sidebar">
+    <div class="section-header"><h2 class="section-title">Protocol Vaults<span class="badge">Official</span></h2></div>
+    <div class="grid" id="protoGrid"></div>
+  </div>
 </div>
-<section class="section"><div class="section-header"><h2 class="section-title">Protocol Vaults<span class="badge">Official</span></h2></div><div class="grid" id="protoGrid"></div></section>
 <section class="section"><div class="section-header"><h2 class="section-title">User Vaults<span class="badge">Community</span></h2><div class="pills" id="dashPills"></div></div><div class="grid" id="userGrid"></div></section>
 <section class="section" id="bestRiskSection"><div class="section-header"><h2 class="section-title">Best Risk-Adjusted<span class="badge">Return/Risk</span></h2></div><div class="table-wrap"><table id="bestRiskTable"><thead><tr><th>#</th><th>Vault</th><th>Score</th><th>Risk</th><th>Return</th><th>TVL</th></tr></thead><tbody id="bestRiskTbody"></tbody></table></div></section>
 </div>
