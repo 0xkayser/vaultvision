@@ -4588,6 +4588,12 @@ function hlActionHash(action, vaultAddress, nonce){
   return hlKeccak256(buf);
 }
 
+// --- HL SDK: Get wallet's current chainId (for signatureChainId — "can be any chain" per HL SDK) ---
+async function hlGetWalletChainId(){
+  const hex=await window.ethereum.request({method:'eth_chainId'});
+  return parseInt(hex,16);
+}
+
 // --- HL SDK: EIP-712 Sign via browser wallet (for user-signed actions only) ---
 async function hlSignTypedDataWallet(domain,types,primaryType,message){
   if(!_walletAddr||!window.ethereum)throw new Error('Wallet not connected');
@@ -4654,11 +4660,12 @@ async function hlCheckAgentApproved(agentAddr){
   }catch(e){console.error('Check agent error:',e);return false;}
 }
 
-// --- Agent Wallet: Approve agent via browser wallet (user-signed, chainId 421614 — no conflict) ---
+// --- Agent Wallet: Approve agent via browser wallet (user-signed, uses wallet's current chain) ---
 async function hlApproveAgent(agentAddr){
   const nonce=Date.now();
+  const walletChainId=await hlGetWalletChainId();
   const domain={name:'HyperliquidSignTransaction',version:'1',
-    chainId:421614,verifyingContract:HL_ZERO_ADDR};
+    chainId:walletChainId,verifyingContract:HL_ZERO_ADDR};
   const types={
     'HyperliquidTransaction:ApproveAgent':[
       {name:'hyperliquidChain',type:'string'},
@@ -4674,10 +4681,10 @@ async function hlApproveAgent(agentAddr){
     nonce:nonce
   };
   const sig=await hlSignTypedDataWallet(domain,types,'HyperliquidTransaction:ApproveAgent',message);
-  // Send approveAgent to HL exchange
+  // Send approveAgent to HL exchange (signatureChainId must match domain chainId)
   const action={type:'approveAgent',
     hyperliquidChain:HL_IS_MAINNET?'Mainnet':'Testnet',
-    signatureChainId:'0x66eee',
+    signatureChainId:'0x'+walletChainId.toString(16),
     agentAddress:agentAddr,
     agentName:null,
     nonce:nonce};
@@ -4707,8 +4714,9 @@ async function hlEnsureAgentWallet(){
 
 // --- HL SDK: Sign user-signed actions via browser wallet (approveBuilderFee etc) ---
 async function hlSignApproveBuilderFee(builderAddr, maxFeeRate, nonce){
+  const walletChainId=await hlGetWalletChainId();
   const domain={name:'HyperliquidSignTransaction',version:'1',
-    chainId:421614,verifyingContract:HL_ZERO_ADDR};
+    chainId:walletChainId,verifyingContract:HL_ZERO_ADDR};
   const types={
     'HyperliquidTransaction:ApproveBuilderFee':[
       {name:'hyperliquidChain',type:'string'},
@@ -4753,9 +4761,10 @@ async function hlEnsureBuilderFeeApproved(){
   if(approved)return true;
   const nonce=Date.now();
   const maxFeeRate='0.01%';
+  const walletChainId=await hlGetWalletChainId();
   const sig=await hlSignApproveBuilderFee(HL_BUILDER_ADDR,maxFeeRate,nonce);
   const action={type:'approveBuilderFee',builder:HL_BUILDER_ADDR.toLowerCase(),maxFeeRate:maxFeeRate,nonce:nonce,
-    hyperliquidChain:HL_IS_MAINNET?'Mainnet':'Testnet',signatureChainId:'0x66eee'};
+    hyperliquidChain:HL_IS_MAINNET?'Mainnet':'Testnet',signatureChainId:'0x'+walletChainId.toString(16)};
   await hlExchange(action,sig,nonce);
   return true;
 }
