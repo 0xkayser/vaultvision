@@ -26,6 +26,7 @@ import json
 import math
 import os
 import sqlite3
+import struct
 import threading
 import time
 import urllib.request
@@ -33,6 +34,17 @@ import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 from typing import Optional, List, Dict, Any
+
+# Copy trading dependencies
+try:
+    from eth_account import Account
+    from eth_account.messages import encode_typed_data
+    import msgpack as msgpack_lib
+    from cryptography.fernet import Fernet
+    HAS_COPY_DEPS = True
+except ImportError:
+    HAS_COPY_DEPS = False
+    print("[WARN] Copy trading deps not installed (eth-account, msgpack, cryptography)")
 
 # =============================================================================
 # CONFIG
@@ -51,6 +63,12 @@ HL_SCRAPE_URL = "https://stats-data.hyperliquid.xyz/Mainnet/vaults"
 HL_MIN_TVL = 500_000  # Expanded filter: >500K TVL for user vaults
 HL_HLP_ADDRESS = "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303"
 HL_APR_FIX_TTL_SEC = 30 * 60  # Throttle APR fix runs
+
+# Copy Trading
+COPY_ENCRYPTION_KEY = os.environ.get("VV_COPY_KEY", "")
+COPY_MONITOR_INTERVAL_SEC = 120  # Check every 2 minutes
+HL_EXCHANGE_URL = "https://api.hyperliquid.xyz/exchange"
+_hl_meta_cache = {"data": None, "ts": 0}  # cached meta (asset list)
 
 # Excluded vaults (TASK E: Ban fake HL vaults)
 HL_EXCLUDED_NAMES = {
@@ -544,7 +562,54 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_hl_flow_vault_ts ON hl_vault_flow_events(vault_id, ts DESC)")
     except sqlite3.OperationalError:
         pass
-    
+
+    # =============================================================================
+    # COPY TRADING TABLES
+    # =============================================================================
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS copy_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_address TEXT NOT NULL,
+            vault_id TEXT NOT NULL,
+            agent_address TEXT NOT NULL,
+            agent_key_enc TEXT NOT NULL,
+            leverage INTEGER DEFAULT 3,
+            margin_per_trade REAL DEFAULT 50.0,
+            max_positions INTEGER DEFAULT 5,
+            is_active INTEGER DEFAULT 1,
+            created_ts INTEGER NOT NULL,
+            updated_ts INTEGER NOT NULL,
+            UNIQUE(user_address, vault_id)
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS copy_position_snapshots (
+            vault_id TEXT PRIMARY KEY,
+            positions_json TEXT NOT NULL,
+            ts INTEGER NOT NULL
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS copy_trade_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            user_address TEXT NOT NULL,
+            vault_id TEXT NOT NULL,
+            coin TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            size_usd REAL NOT NULL,
+            entry_price REAL,
+            order_status TEXT NOT NULL,
+            error_msg TEXT,
+            hl_response TEXT
+        )
+    """)
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_copy_log_user ON copy_trade_log(user_address, ts DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_copy_subs_active ON copy_subscriptions(is_active, vault_id)")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
     print(f"[DB] Initialized {DB_PATH} with canonical schema")
@@ -4467,6 +4532,366 @@ def compute_hl_realized_pnl(vault_id: str) -> dict:
     return result
 
 
+# =============================================================================
+# COPY TRADING: ENCRYPTION + HL SIGNING + MONITOR
+# =============================================================================
+
+_fernet_instance = None
+def _get_fernet():
+    """Get Fernet cipher for agent key encryption."""
+    global _fernet_instance, COPY_ENCRYPTION_KEY
+    if _fernet_instance:
+        return _fernet_instance
+    if not HAS_COPY_DEPS:
+        raise RuntimeError("Copy trading dependencies not installed")
+    key = COPY_ENCRYPTION_KEY
+    if not key:
+        key = Fernet.generate_key().decode()
+        COPY_ENCRYPTION_KEY = key
+        os.environ["VV_COPY_KEY"] = key
+        print(f"[COPY] Auto-generated encryption key (set VV_COPY_KEY env var in production)")
+    if len(key) < 44:
+        import hashlib, base64
+        key = base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest()).decode()
+    _fernet_instance = Fernet(key.encode() if isinstance(key, str) else key)
+    return _fernet_instance
+
+def encrypt_agent_key(private_key: str) -> str:
+    return _get_fernet().encrypt(private_key.encode()).decode()
+
+def decrypt_agent_key(encrypted: str) -> str:
+    return _get_fernet().decrypt(encrypted.encode()).decode()
+
+
+def hl_get_meta_cached() -> dict:
+    """Get HL asset meta with 5-min cache."""
+    global _hl_meta_cache
+    if _hl_meta_cache["data"] and time.time() - _hl_meta_cache["ts"] < 300:
+        return _hl_meta_cache["data"]
+    try:
+        req = urllib.request.Request(HL_API_URL, method="POST",
+            data=json.dumps({"type": "meta"}).encode(),
+            headers={"Content-Type": "application/json"})
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read())
+        _hl_meta_cache = {"data": data, "ts": time.time()}
+        return data
+    except Exception as e:
+        print(f"[COPY] Meta fetch error: {e}")
+        return _hl_meta_cache.get("data") or {"universe": []}
+
+
+def hl_get_all_mids() -> dict:
+    """Get current mid prices for all assets."""
+    try:
+        req = urllib.request.Request(HL_API_URL, method="POST",
+            data=json.dumps({"type": "allMids"}).encode(),
+            headers={"Content-Type": "application/json"})
+        resp = urllib.request.urlopen(req, timeout=10)
+        return json.loads(resp.read())
+    except Exception as e:
+        print(f"[COPY] Mids fetch error: {e}")
+        return {}
+
+
+def hl_keccak256(data: bytes) -> bytes:
+    """Keccak256 hash."""
+    from eth_utils import keccak
+    return keccak(data)
+
+
+def hl_action_hash(action: dict, vault_address: str = None, nonce: int = 0) -> bytes:
+    """Compute HL action hash: msgpack(action) + nonce(8 BE) + vault_flag."""
+    encoded = msgpack_lib.packb(action)
+    nonce_bytes = struct.pack(">Q", nonce)  # 8 bytes big-endian
+    vault_flag = b'\x01' if vault_address else b'\x00'
+    buf = encoded + nonce_bytes + vault_flag
+    if vault_address:
+        addr_clean = vault_address.lower().replace("0x", "")
+        buf += bytes.fromhex(addr_clean)
+    return hl_keccak256(buf)
+
+
+def hl_sign_l1_action(action: dict, agent_private_key: str, nonce: int, vault_address: str = None) -> dict:
+    """Sign an L1 action using agent private key. Returns {r, s, v}."""
+    action_hash = hl_action_hash(action, vault_address, nonce)
+    connection_id = "0x" + action_hash.hex()
+
+    # EIP-712 phantom agent
+    structured = {
+        "types": {
+            "EIP712Domain": [
+                {"name": "name", "type": "string"},
+                {"name": "version", "type": "string"},
+                {"name": "chainId", "type": "uint256"},
+                {"name": "verifyingContract", "type": "address"},
+            ],
+            "Agent": [
+                {"name": "source", "type": "string"},
+                {"name": "connectionId", "type": "bytes32"},
+            ],
+        },
+        "primaryType": "Agent",
+        "domain": {
+            "name": "Exchange",
+            "version": "1",
+            "chainId": 1337,
+            "verifyingContract": "0x0000000000000000000000000000000000000000",
+        },
+        "message": {
+            "source": "a",  # mainnet
+            "connectionId": connection_id,
+        },
+    }
+
+    account = Account.from_key(agent_private_key)
+    signable = encode_typed_data(full_message=structured)
+    signed = account.sign_message(signable)
+    return {
+        "r": hex(signed.r),
+        "s": hex(signed.s),
+        "v": signed.v,
+    }
+
+
+def hl_place_order_backend(asset_idx: int, is_buy: bool, price: str, size: str,
+                            agent_private_key: str) -> dict:
+    """Place an order on HL using agent key. Returns HL response."""
+    nonce = int(time.time() * 1000)
+    wire = {"a": asset_idx, "b": is_buy, "p": price, "s": size, "r": False,
+            "t": {"limit": {"tif": "Ioc"}}}
+    action = {"type": "order", "orders": [wire], "grouping": "na",
+              "builder": {"b": HL_BUILDER_ADDRESS.lower(), "f": HL_BUILDER_FEE_BPS}}
+
+    sig = hl_sign_l1_action(action, agent_private_key, nonce)
+    payload = json.dumps({"action": action, "nonce": nonce, "signature": sig}).encode()
+
+    req = urllib.request.Request(HL_EXCHANGE_URL, method="POST", data=payload,
+        headers={"Content-Type": "application/json"})
+    resp = urllib.request.urlopen(req, timeout=15)
+    result = json.loads(resp.read())
+    return result
+
+
+def hl_update_leverage_backend(asset_idx: int, leverage: int, is_cross: bool,
+                                agent_private_key: str) -> dict:
+    """Set leverage for an asset using agent key."""
+    nonce = int(time.time() * 1000)
+    action = {"type": "updateLeverage", "asset": asset_idx, "isCross": is_cross, "leverage": leverage}
+    sig = hl_sign_l1_action(action, agent_private_key, nonce)
+    payload = json.dumps({"action": action, "nonce": nonce, "signature": sig}).encode()
+
+    req = urllib.request.Request(HL_EXCHANGE_URL, method="POST", data=payload,
+        headers={"Content-Type": "application/json"})
+    try:
+        resp = urllib.request.urlopen(req, timeout=15)
+        return json.loads(resp.read())
+    except Exception as e:
+        print(f"[COPY] Leverage update error: {e}")
+        return {"status": "err", "response": str(e)}
+
+
+def hl_format_price(px: float) -> str:
+    """Format price to max 5 significant figures (HL requirement)."""
+    if px == 0:
+        return "0"
+    from decimal import Decimal
+    d = Decimal(str(px))
+    # 5 significant figures
+    rounded = float(f"{px:.5g}")
+    return f"{rounded:g}"
+
+
+def hl_format_size(sz: float, sz_decimals: int = 2) -> str:
+    """Format size to appropriate decimal places."""
+    formatted = f"{sz:.{sz_decimals}f}"
+    # Remove trailing zeros
+    if '.' in formatted:
+        formatted = formatted.rstrip('0').rstrip('.')
+    return formatted or "0"
+
+
+def diff_positions(prev_positions: list, curr_positions: list) -> list:
+    """Detect NEW positions: coin+direction in current but not in previous."""
+    prev_set = {(p["coin"], p["direction"]) for p in prev_positions if p.get("direction") != "flat"}
+    new_pos = []
+    for pos in curr_positions:
+        key = (pos["coin"], pos["direction"])
+        if key not in prev_set and pos.get("direction") != "flat":
+            new_pos.append(pos)
+    return new_pos
+
+
+def copy_trade_monitor_loop():
+    """Background thread: check vaults for new positions, execute copy trades."""
+    if not HAS_COPY_DEPS:
+        print("[COPY] Dependencies missing, copy trading disabled")
+        return
+
+    print("[COPY] Monitor thread started")
+    time.sleep(30)  # Initial delay
+
+    while True:
+        try:
+            conn = get_db()
+            # Get all active subscriptions
+            subs = conn.execute(
+                "SELECT * FROM copy_subscriptions WHERE is_active=1"
+            ).fetchall()
+
+            if not subs:
+                conn.close()
+                time.sleep(COPY_MONITOR_INTERVAL_SEC)
+                continue
+
+            # Group by vault_id
+            vault_subs = {}
+            for sub in subs:
+                vid = sub["vault_id"]
+                if vid not in vault_subs:
+                    vault_subs[vid] = []
+                vault_subs[vid].append(dict(sub))
+
+            for vault_id, subscribers in vault_subs.items():
+                try:
+                    # Fetch current positions
+                    vault_addr = vault_id
+                    if ":" in vault_addr:
+                        vault_addr = vault_addr.split(":")[-1]
+
+                    state = fetch_hl_clearinghouse_state(vault_addr)
+                    if not state:
+                        continue
+                    parsed = parse_hl_positions(state)
+                    curr_positions = parsed.get("positions", [])
+
+                    # Load previous snapshot
+                    snap = conn.execute(
+                        "SELECT positions_json FROM copy_position_snapshots WHERE vault_id=?",
+                        (vault_id,)
+                    ).fetchone()
+                    prev_positions = json.loads(snap["positions_json"]) if snap else []
+
+                    # Save current snapshot
+                    conn.execute(
+                        "INSERT OR REPLACE INTO copy_position_snapshots (vault_id, positions_json, ts) VALUES (?,?,?)",
+                        (vault_id, json.dumps([{"coin": p["coin"], "direction": p["direction"], "size_usd": p.get("size_usd", 0)} for p in curr_positions]), int(time.time()))
+                    )
+                    conn.commit()
+
+                    # Diff
+                    new_positions = diff_positions(prev_positions, curr_positions)
+                    if not new_positions:
+                        continue
+
+                    print(f"[COPY] Vault {vault_id[:10]}... has {len(new_positions)} new positions: {[p['coin'] for p in new_positions]}")
+
+                    # Get meta + mids for order placement
+                    meta = hl_get_meta_cached()
+                    mids = hl_get_all_mids()
+
+                    for pos in new_positions:
+                        coin = pos["coin"]
+                        direction = pos["direction"]
+                        is_buy = direction == "long"
+
+                        # Find asset index
+                        asset_idx = -1
+                        sz_decimals = 2
+                        for i, u in enumerate(meta.get("universe", [])):
+                            if u["name"] == coin:
+                                asset_idx = i
+                                sz_decimals = u.get("szDecimals", 2)
+                                break
+                        if asset_idx < 0:
+                            print(f"[COPY] Asset {coin} not found in meta")
+                            continue
+
+                        mid_price = float(mids.get(coin, 0))
+                        if mid_price <= 0:
+                            print(f"[COPY] No mid price for {coin}")
+                            continue
+
+                        for sub in subscribers:
+                            try:
+                                # Check max positions
+                                active_count = conn.execute(
+                                    "SELECT COUNT(*) as cnt FROM copy_trade_log WHERE user_address=? AND vault_id=? AND order_status='success'",
+                                    (sub["user_address"], vault_id)
+                                ).fetchone()["cnt"]
+
+                                if active_count >= sub["max_positions"]:
+                                    print(f"[COPY] User {sub['user_address'][:10]}... at max positions ({sub['max_positions']})")
+                                    conn.execute(
+                                        "INSERT INTO copy_trade_log (ts, user_address, vault_id, coin, direction, size_usd, order_status, error_msg) VALUES (?,?,?,?,?,?,?,?)",
+                                        (int(time.time()), sub["user_address"], vault_id, coin, direction, 0, "skipped", "max_positions reached")
+                                    )
+                                    conn.commit()
+                                    continue
+
+                                # Calculate size
+                                margin = sub["margin_per_trade"]
+                                lev = sub["leverage"]
+                                position_value = margin * lev
+                                raw_size = position_value / mid_price
+                                size_str = hl_format_size(raw_size, sz_decimals)
+
+                                if float(size_str) * mid_price < 10:
+                                    print(f"[COPY] Order too small for {coin}: ${float(size_str) * mid_price:.2f}")
+                                    conn.execute(
+                                        "INSERT INTO copy_trade_log (ts, user_address, vault_id, coin, direction, size_usd, order_status, error_msg) VALUES (?,?,?,?,?,?,?,?)",
+                                        (int(time.time()), sub["user_address"], vault_id, coin, direction, position_value, "skipped", "order_too_small")
+                                    )
+                                    conn.commit()
+                                    continue
+
+                                # Slippage: 0.5%
+                                slippage = 1.005 if is_buy else 0.995
+                                px_str = hl_format_price(mid_price * slippage)
+
+                                # Decrypt agent key
+                                agent_key = decrypt_agent_key(sub["agent_key_enc"])
+
+                                # Set leverage
+                                hl_update_leverage_backend(asset_idx, lev, False, agent_key)
+                                time.sleep(0.3)
+
+                                # Place order
+                                result = hl_place_order_backend(asset_idx, is_buy, px_str, size_str, agent_key)
+
+                                status = "success" if result.get("status") != "err" else "failed"
+                                error_msg = result.get("response", "") if status == "failed" else None
+
+                                conn.execute(
+                                    "INSERT INTO copy_trade_log (ts, user_address, vault_id, coin, direction, size_usd, entry_price, order_status, error_msg, hl_response) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                    (int(time.time()), sub["user_address"], vault_id, coin, direction, position_value, mid_price, status, error_msg, json.dumps(result))
+                                )
+                                conn.commit()
+
+                                print(f"[COPY] {status.upper()}: {sub['user_address'][:10]}... copied {coin} {direction} ${position_value:.0f}")
+                                time.sleep(0.5)  # Rate limit
+
+                            except Exception as e:
+                                print(f"[COPY] Order error for {sub['user_address'][:10]}...: {e}")
+                                conn.execute(
+                                    "INSERT INTO copy_trade_log (ts, user_address, vault_id, coin, direction, size_usd, order_status, error_msg) VALUES (?,?,?,?,?,?,?,?)",
+                                    (int(time.time()), sub["user_address"], vault_id, coin, direction, 0, "failed", str(e))
+                                )
+                                conn.commit()
+
+                    time.sleep(1)  # Between vaults
+
+                except Exception as e:
+                    print(f"[COPY] Vault {vault_id[:10]}... error: {e}")
+
+            conn.close()
+
+        except Exception as e:
+            print(f"[COPY] Monitor error: {e}")
+
+        time.sleep(COPY_MONITOR_INTERVAL_SEC)
+
+
 def compute_entry_score(
     upnl_pct: Optional[float],
     leverage_effective: Optional[float],
@@ -7451,6 +7876,61 @@ class APIHandler(BaseHTTPRequestHandler):
             })
             return
 
+        # GET /api/copy/status?user=0x...
+        if path == "/api/copy/status":
+            user = query.get("user", [None])[0]
+            if not user:
+                self.send_json({"error": "user param required"}, 400)
+                return
+            conn = get_db()
+            subs = conn.execute(
+                "SELECT vault_id, leverage, margin_per_trade, max_positions, is_active, created_ts, updated_ts FROM copy_subscriptions WHERE user_address=?",
+                (user.lower(),)
+            ).fetchall()
+            result = []
+            for s in subs:
+                # Get trade count
+                cnt = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM copy_trade_log WHERE user_address=? AND vault_id=? AND order_status='success'",
+                    (user.lower(), s["vault_id"])
+                ).fetchone()["cnt"]
+                last = conn.execute(
+                    "SELECT ts FROM copy_trade_log WHERE user_address=? AND vault_id=? ORDER BY ts DESC LIMIT 1",
+                    (user.lower(), s["vault_id"])
+                ).fetchone()
+                result.append({
+                    "vault_id": s["vault_id"],
+                    "leverage": s["leverage"],
+                    "margin_per_trade": s["margin_per_trade"],
+                    "max_positions": s["max_positions"],
+                    "is_active": bool(s["is_active"]),
+                    "trades_count": cnt,
+                    "last_trade_ts": last["ts"] if last else None,
+                    "created_ts": s["created_ts"],
+                })
+            conn.close()
+            self.send_json({"subscriptions": result})
+            return
+
+        # GET /api/copy/trades?user=0x...&vault_id=0x...
+        if path == "/api/copy/trades":
+            user = query.get("user", [None])[0]
+            vault_id = query.get("vault_id", [None])[0]
+            if not user:
+                self.send_json({"error": "user param required"}, 400)
+                return
+            conn = get_db()
+            q = "SELECT ts, coin, direction, size_usd, entry_price, order_status, error_msg FROM copy_trade_log WHERE user_address=?"
+            params = [user.lower()]
+            if vault_id:
+                q += " AND vault_id=?"
+                params.append(vault_id)
+            q += " ORDER BY ts DESC LIMIT 50"
+            trades = conn.execute(q, params).fetchall()
+            conn.close()
+            self.send_json({"trades": [dict(t) for t in trades]})
+            return
+
         if path.startswith("/api/v1/"):
             v1_cleanup_rate_limits()
             client_ip = self.client_address[0] if self.client_address else "unknown"
@@ -8584,6 +9064,97 @@ class APIHandler(BaseHTTPRequestHandler):
                 print(f"[TRADE ERROR] {e}")
                 self.send_json({"ok": False, "error": str(e)}, 500)
 
+        # =================================================================
+        # COPY TRADING ENDPOINTS
+        # =================================================================
+        elif path == "/api/copy/subscribe":
+            if not HAS_COPY_DEPS:
+                self.send_json({"error": "Copy trading not available"}, 503)
+                return
+            try:
+                data = json.loads(body) if body else {}
+                user_addr = data.get("user_address", "").lower()
+                vault_id = data.get("vault_id", "")
+                agent_key = data.get("agent_private_key", "")
+                leverage = min(max(int(data.get("leverage", 3)), 1), 50)
+                margin = min(max(float(data.get("margin_per_trade", 50)), 10), 10000)
+                max_pos = min(max(int(data.get("max_positions", 5)), 1), 20)
+
+                if not user_addr or not vault_id or not agent_key:
+                    self.send_json({"error": "Missing required fields"}, 400)
+                    return
+
+                # Verify agent key is valid
+                try:
+                    acct = Account.from_key(agent_key)
+                    agent_addr = acct.address.lower()
+                except Exception:
+                    self.send_json({"error": "Invalid agent private key"}, 400)
+                    return
+
+                # Encrypt and store
+                enc_key = encrypt_agent_key(agent_key)
+                now = int(time.time())
+                conn = get_db()
+                conn.execute("""
+                    INSERT OR REPLACE INTO copy_subscriptions
+                    (user_address, vault_id, agent_address, agent_key_enc, leverage, margin_per_trade, max_positions, is_active, created_ts, updated_ts)
+                    VALUES (?,?,?,?,?,?,?,1,?,?)
+                """, (user_addr, vault_id, agent_addr, enc_key, leverage, margin, max_pos, now, now))
+                conn.commit()
+                conn.close()
+                print(f"[COPY] Subscribed: {user_addr[:10]}... → {vault_id[:10]}... (lev={leverage}, margin=${margin}, max={max_pos})")
+                self.send_json({"ok": True, "agent_address": agent_addr})
+
+            except Exception as e:
+                print(f"[COPY] Subscribe error: {e}")
+                self.send_json({"error": str(e)}, 500)
+
+        elif path == "/api/copy/unsubscribe":
+            try:
+                data = json.loads(body) if body else {}
+                user_addr = data.get("user_address", "").lower()
+                vault_id = data.get("vault_id", "")
+                conn = get_db()
+                conn.execute("UPDATE copy_subscriptions SET is_active=0, updated_ts=? WHERE user_address=? AND vault_id=?",
+                    (int(time.time()), user_addr, vault_id))
+                conn.commit()
+                conn.close()
+                print(f"[COPY] Unsubscribed: {user_addr[:10]}... from {vault_id[:10]}...")
+                self.send_json({"ok": True})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif path == "/api/copy/update":
+            try:
+                data = json.loads(body) if body else {}
+                user_addr = data.get("user_address", "").lower()
+                vault_id = data.get("vault_id", "")
+                updates = []
+                params = []
+                if "leverage" in data:
+                    updates.append("leverage=?")
+                    params.append(min(max(int(data["leverage"]), 1), 50))
+                if "margin_per_trade" in data:
+                    updates.append("margin_per_trade=?")
+                    params.append(min(max(float(data["margin_per_trade"]), 10), 10000))
+                if "max_positions" in data:
+                    updates.append("max_positions=?")
+                    params.append(min(max(int(data["max_positions"]), 1), 20))
+                if "is_active" in data:
+                    updates.append("is_active=?")
+                    params.append(1 if data["is_active"] else 0)
+                updates.append("updated_ts=?")
+                params.append(int(time.time()))
+                params.extend([user_addr, vault_id])
+                conn = get_db()
+                conn.execute(f"UPDATE copy_subscriptions SET {','.join(updates)} WHERE user_address=? AND vault_id=?", params)
+                conn.commit()
+                conn.close()
+                self.send_json({"ok": True})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
         else:
             self.send_json({"error": "Not found"}, 404)
 
@@ -8670,7 +9241,12 @@ def main():
     initial_delay = 30 if _has_recent_vault_data(max_age_sec=1800) else 2
     fetch_thread = threading.Thread(target=run_fetch_loop, kwargs={"initial_delay_sec": initial_delay}, daemon=True)
     fetch_thread.start()
-    
+
+    # Start copy trading monitor thread
+    if HAS_COPY_DEPS:
+        copy_thread = threading.Thread(target=copy_trade_monitor_loop, daemon=True)
+        copy_thread.start()
+
     # Run server (bind to 0.0.0.0 for production)
     run_server(port)
 

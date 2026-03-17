@@ -2304,6 +2304,50 @@ function renderEntryIntel(v) {
     <div class="hedge-note">0.01% builder fee per order &middot; Powered by VaultVision</div>
   </div>
   ` : ''}
+  <!-- COPY TRADING CARD -->
+  ${posState === 'real' ? `
+  <div class="entry-card fade-in" style="animation-delay:.4s;margin-bottom:32px" id="copyCard">
+    <h4 style="margin-bottom:12px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:3px;opacity:.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+      Copy Trading
+    </h4>
+    <div id="copyContent">
+      <div id="copySetup" style="display:none">
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">Auto-copy new positions from this vault to your account.</p>
+        <div class="hedge-margin-row">
+          <span style="font-size:12px;color:var(--text-secondary)">Leverage</span>
+          <select id="copyLeverage" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border-light);background:rgba(255,255,255,.03);color:var(--text-primary);font-size:13px;font-family:inherit">
+            <option value="1">1x</option><option value="2">2x</option><option value="3" selected>3x</option><option value="5">5x</option><option value="10">10x</option><option value="20">20x</option>
+          </select>
+        </div>
+        <div class="hedge-margin-row">
+          <span style="font-size:12px;color:var(--text-secondary)">Margin per trade (USDC)</span>
+          <input id="copyMargin" type="number" value="50" min="10" max="10000" style="width:80px;padding:6px 10px;border-radius:8px;border:1px solid var(--border-light);background:rgba(255,255,255,.03);color:var(--text-primary);font-size:13px;font-family:inherit;text-align:right">
+        </div>
+        <div class="hedge-margin-row">
+          <span style="font-size:12px;color:var(--text-secondary)">Max positions</span>
+          <select id="copyMaxPos" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border-light);background:rgba(255,255,255,.03);color:var(--text-primary);font-size:13px;font-family:inherit">
+            <option value="3">3</option><option value="5" selected>5</option><option value="10">10</option><option value="15">15</option><option value="20">20</option>
+          </select>
+        </div>
+        <button onclick="startCopyTrading()" style="width:100%;padding:12px;border:none;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;margin-top:8px" id="copyStartBtn">Start Copying</button>
+        <p style="font-size:10px;color:var(--text-muted);margin-top:8px;text-align:center">Agent key stored encrypted. Can only trade, not withdraw.</p>
+      </div>
+      <div id="copyActive" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:12px;font-weight:700;color:#10b981">● Monitoring</span>
+          <button onclick="stopCopyTrading()" style="padding:4px 10px;border-radius:6px;border:1px solid rgba(244,63,94,.3);background:none;color:#f43f5e;font-size:11px;cursor:pointer;font-family:inherit">Stop</button>
+        </div>
+        <div id="copySettings" style="font-size:11px;color:var(--text-muted);margin-bottom:8px"></div>
+        <div id="copyTradeLog" style="max-height:200px;overflow-y:auto"></div>
+      </div>
+      <div id="copyNeedWallet" style="text-align:center;padding:12px">
+        <p style="font-size:12px;color:var(--text-muted)">Connect wallet to enable copy trading</p>
+      </div>
+    </div>
+    <div class="hedge-note">0.01% builder fee per order &middot; Powered by VaultVision</div>
+  </div>
+  ` : ''}
   </div>`;
 }
 
@@ -3139,6 +3183,10 @@ function renderVault(id){
         // Load positions for hedge card
         if(document.getElementById('hedgeCard')){
           fetchVaultPositions(id);
+        }
+        // Init copy trading card
+        if(document.getElementById('copyCard')){
+          initCopyCard(id);
         }
       }
     }).catch(() => {});
@@ -5417,6 +5465,145 @@ async function executeHedge(direction){
     if(e.message&&e.message.includes('User rejected'))return;
     alert('Hedge error: '+(e.message||e));
   }
+}
+
+// =============================================================================
+// COPY TRADING UI
+// =============================================================================
+let _copyVaultId=null;
+
+function initCopyCard(vaultId){
+  _copyVaultId=vaultId;
+  const setup=document.getElementById('copySetup');
+  const active=document.getElementById('copyActive');
+  const needWallet=document.getElementById('copyNeedWallet');
+  if(!setup)return;
+
+  if(!_walletAddr){
+    needWallet.style.display='';
+    setup.style.display='none';
+    active.style.display='none';
+    return;
+  }
+  needWallet.style.display='none';
+
+  // Check if already subscribed
+  fetch(API_BASE+'/api/copy/status?user='+_walletAddr)
+    .then(r=>r.json())
+    .then(data=>{
+      const sub=data.subscriptions?.find(s=>s.vault_id===vaultId && s.is_active);
+      if(sub){
+        showCopyActive(sub);
+        loadCopyTrades(vaultId);
+      }else{
+        setup.style.display='';
+        active.style.display='none';
+      }
+    })
+    .catch(()=>{setup.style.display='';active.style.display='none';});
+}
+
+function showCopyActive(sub){
+  const setup=document.getElementById('copySetup');
+  const active=document.getElementById('copyActive');
+  if(setup)setup.style.display='none';
+  if(active){
+    active.style.display='';
+    const settings=document.getElementById('copySettings');
+    if(settings)settings.textContent=`${sub.leverage}x leverage · $${sub.margin_per_trade} margin · max ${sub.max_positions} positions · ${sub.trades_count||0} trades`;
+  }
+}
+
+function loadCopyTrades(vaultId){
+  fetch(API_BASE+'/api/copy/trades?user='+_walletAddr+'&vault_id='+vaultId)
+    .then(r=>r.json())
+    .then(data=>{
+      const log=document.getElementById('copyTradeLog');
+      if(!log||!data.trades)return;
+      if(data.trades.length===0){
+        log.innerHTML='<div style="font-size:11px;color:var(--text-muted);padding:8px 0">No copied trades yet. Monitoring for new positions...</div>';
+        return;
+      }
+      log.innerHTML=data.trades.slice(0,20).map(t=>{
+        const ago=Math.round((Date.now()/1000-t.ts)/60);
+        const agoStr=ago<60?ago+'m ago':Math.round(ago/60)+'h ago';
+        const icon=t.order_status==='success'?'✅':t.order_status==='skipped'?'⏭':'❌';
+        const dir=t.direction==='long'?'<span style="color:#10b981">Long</span>':'<span style="color:#f43f5e">Short</span>';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:11px">
+          <span>${icon} ${t.coin} ${dir}</span>
+          <span style="color:var(--text-muted)">$${t.size_usd?.toFixed(0)||'?'} · ${agoStr}</span>
+        </div>`;
+      }).join('');
+    })
+    .catch(()=>{});
+}
+
+async function startCopyTrading(){
+  if(!_walletAddr||!_copyVaultId)return;
+  const btn=document.getElementById('copyStartBtn');
+  btn.disabled=true;btn.textContent='Setting up...';
+  try{
+    // Ensure agent wallet exists
+    await hlEnsureAgentWallet();
+    // Get agent private key from localStorage
+    const storeKey='vv-agent-'+_walletAddr;
+    const agentKey=localStorage.getItem(storeKey);
+    if(!agentKey){throw new Error('Agent key not found');}
+
+    const leverage=parseInt(document.getElementById('copyLeverage').value);
+    const margin=parseFloat(document.getElementById('copyMargin').value);
+    const maxPos=parseInt(document.getElementById('copyMaxPos').value);
+
+    // Extract vault address from vault ID
+    let vaultAddr=_copyVaultId;
+    if(vaultAddr.includes(':'))vaultAddr=vaultAddr.split(':').pop();
+
+    btn.textContent='Subscribing...';
+    const r=await fetch(API_BASE+'/api/copy/subscribe',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        user_address:_walletAddr,
+        vault_id:vaultAddr,
+        agent_private_key:agentKey,
+        leverage:leverage,
+        margin_per_trade:margin,
+        max_positions:maxPos
+      })
+    });
+    const data=await r.json();
+    if(data.error)throw new Error(data.error);
+
+    showCopyActive({leverage,margin_per_trade:margin,max_positions:maxPos,trades_count:0});
+    loadCopyTrades(vaultAddr);
+    btn.disabled=false;btn.textContent='Start Copying';
+
+    // Log
+    fetch(API_BASE+'/api/trading/log',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({wallet_hash:_walletAddr.slice(0,10),action_type:'copy_subscribe',asset:vaultAddr.slice(0,10),size_usd:margin,source_page:'vault_detail'})
+    }).catch(()=>{});
+
+  }catch(e){
+    console.error('Copy trading error:',e);
+    btn.disabled=false;btn.textContent='Start Copying';
+    if(e.message&&e.message.includes('User rejected'))return;
+    alert('Copy trading error: '+(e.message||e));
+  }
+}
+
+async function stopCopyTrading(){
+  if(!_walletAddr||!_copyVaultId)return;
+  let vaultAddr=_copyVaultId;
+  if(vaultAddr.includes(':'))vaultAddr=vaultAddr.split(':').pop();
+  try{
+    await fetch(API_BASE+'/api/copy/unsubscribe',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({user_address:_walletAddr,vault_id:vaultAddr})});
+    // Show setup again
+    const setup=document.getElementById('copySetup');
+    const active=document.getElementById('copyActive');
+    if(setup)setup.style.display='';
+    if(active)active.style.display='none';
+  }catch(e){alert('Error: '+(e.message||e));}
 }
 
 // Init: load data then navigate
