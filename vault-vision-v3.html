@@ -2052,10 +2052,10 @@ function renderExpectationBlock(v) {
 function renderEntryIntel(v) {
   if (v.protocol !== 'hyperliquid') return '';
   const ei = v.entry_intel;
-  
+
   // ALWAYS render cards for HL vaults — never hide sections
   if (!ei) {
-    return `
+    return `<div id="entryIntelWrap">
     <div class="entry-intel-grid fade-in" style="animation-delay:.18s">
       <div class="entry-card" id="entryMeterCard">
         <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:3px;opacity:.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>Entry Meter</h4>
@@ -2081,9 +2081,10 @@ function renderEntryIntel(v) {
           <div class="entry-unavailable-sub">Waiting for snapshot history</div>
         </div>
       </div>
+    </div>
     </div>`;
   }
-  
+
   const score = ei.entry_score;
   const label = ei.entry_label || 'N/A';
   const reasons = ei.reasons || [];
@@ -2188,7 +2189,7 @@ function renderEntryIntel(v) {
       <div style="text-align:center"><span class="flow-state-tag unavailable">POSITIONS: UNAVAILABLE</span></div>
   `;
   
-  return `
+  return `<div id="entryIntelWrap">
   <div class="entry-intel-grid fade-in" style="animation-delay:.18s">
     <!-- ENTRY METER -->
     <div class="entry-card" id="entryMeterCard">
@@ -2259,7 +2260,8 @@ function renderEntryIntel(v) {
     </div>
     <div class="hedge-note">0.01% builder fee per order &middot; Powered by VaultVision</div>
   </div>
-  ` : ''}`;
+  ` : ''}
+  </div>`;
 }
 
 // RISK BREAKDOWN COMPONENT (with tooltips)
@@ -3079,13 +3081,11 @@ function renderVault(id){
     fetch(API_BASE + '/api/vault/' + id + '/entry').then(r => r.ok ? r.json() : null).then(ei => {
       if (ei && ei.entry_score != null) {
         v.entry_intel = ei;
-        // Re-render entry intel block (replace placeholder or insert new)
-        const grid = document.querySelector('.entry-intel-grid');
-        if (grid) {
-          // Replace existing placeholder with real data
-          grid.outerHTML = renderEntryIntel(v);
+        // Re-render entire entry intel wrapper (replaces placeholder + hedge card as one unit)
+        const wrap = document.getElementById('entryIntelWrap');
+        if (wrap) {
+          wrap.outerHTML = renderEntryIntel(v);
         } else {
-          // Insert before charts-grid
           const chartsGrid = document.querySelector('.charts-grid');
           if (chartsGrid) {
             chartsGrid.insertAdjacentHTML('beforebegin', renderEntryIntel(v));
@@ -5279,25 +5279,40 @@ async function executeHedge(direction){
     const mids=await hlGetMids();
     const margin=parseFloat(document.getElementById('hedgeMargin').value)||100;
     await hlEnsureBuilderFeeApproved();
-    let filled=0,total=positions.length;
-    // Split margin proportionally across positions
+    let filled=0,skipped=0,errors=[];
+    // Split margin proportionally across positions by exposure size
     const totalExposure=positions.reduce((s,p)=>s+p.size_usd,0);
-    for(let i=0;i<positions.length;i++){
-      const p=positions[i];
+    // Filter: only positions where proportional margin gives ≥$10 order
+    const viable=positions.filter(p=>{
+      const posMargin=margin*(p.size_usd/totalExposure);
+      return posMargin>=10;
+    });
+    if(viable.length===0){
+      const minNeeded=Math.ceil(positions.length*10);
+      alert(`Margin too low. Each position needs at least $10. For ${positions.length} positions you need at least $${minNeeded} margin.`);
+      btn.disabled=false;btn.textContent=origText;return;
+    }
+    const total=viable.length;
+    // Recalculate shares among viable positions only
+    const viableExposure=viable.reduce((s,p)=>s+p.size_usd,0);
+    for(let i=0;i<viable.length;i++){
+      const p=viable[i];
       btn.textContent=`${i+1}/${total}...`;
       const assetIdx=_assetMeta.universe.findIndex(u=>u.name===p.coin);
-      if(assetIdx<0)continue;
+      if(assetIdx<0){skipped++;continue;}
       const midPrice=parseFloat(mids[p.coin]);
-      if(!midPrice)continue;
+      if(!midPrice){skipped++;continue;}
       const szDecimals=_assetMeta.universe[assetIdx].szDecimals||2;
-      // Proportional margin allocation
-      const posShare=p.size_usd/totalExposure;
+      // Proportional margin allocation among viable positions
+      const posShare=p.size_usd/viableExposure;
       const posMargin=margin*posShare;
+      // Hedge notional = vault exposure × coverage, capped by user's margin allocation
       const hedgeNotional=p.size_usd*_hedgeCoverage;
       const actualNotional=Math.min(hedgeNotional,posMargin);
+      if(actualNotional<10){skipped++;continue;}
       const rawSz=actualNotional/midPrice;
       const sz=removeTrailingZeros(rawSz.toFixed(szDecimals));
-      if(parseFloat(sz)<=0)continue;
+      if(parseFloat(sz)<=0){skipped++;continue;}
       const isBuy=p.direction==='short';
       const slippage=isBuy?1.005:0.995;
       const px=hlFormatPrice(midPrice*slippage);
@@ -5305,13 +5320,21 @@ async function executeHedge(direction){
         await hlUpdateLeverage(assetIdx,1,false);
         await hlPlaceOrder(assetIdx,isBuy,px,sz,{limit:{tif:'Ioc'}});
         filled++;
-      }catch(orderErr){console.error('Hedge order error for',p.coin,orderErr);}
+      }catch(orderErr){
+        console.error('Hedge order error for',p.coin,orderErr);
+        errors.push(p.coin+': '+(orderErr.message||orderErr));
+      }
     }
     // Log
     fetch(API_BASE+'/api/trading/log',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({wallet_hash:_walletAddr.slice(0,10),action_type:'hedge_all_'+direction,asset:positions.map(p=>p.coin).join(','),size_usd:margin,source_page:'vault_detail'})
+      body:JSON.stringify({wallet_hash:_walletAddr.slice(0,10),action_type:'hedge_all_'+direction,asset:viable.map(p=>p.coin).join(','),size_usd:margin,source_page:'vault_detail'})
     }).catch(()=>{});
-    btn.textContent=`${filled}/${total} filled!`;
+    const skippedSmall=positions.length-viable.length;
+    let resultMsg=`${filled}/${total} filled`;
+    if(skippedSmall>0)resultMsg+=` (${skippedSmall} too small)`;
+    if(errors.length>0)resultMsg+=`\nErrors: ${errors.join(', ')}`;
+    btn.textContent=resultMsg;
+    if(errors.length>0)alert('Hedge results:\n'+resultMsg);
     setTimeout(()=>{btn.disabled=false;btn.textContent=origText;},4000);
   }catch(e){
     console.error('Hedge all error:',e);
