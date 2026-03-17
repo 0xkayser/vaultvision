@@ -67,6 +67,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text"
 @keyframes floatUp{0%{opacity:0;transform:translateY(0) translateX(var(--drift-x,0px))}5%{opacity:.12}15%{opacity:.1}50%{opacity:.07}85%{opacity:.04}100%{opacity:0;transform:translateY(calc(-100vh - 150px)) translateX(var(--drift-x,0px))}}
 @keyframes floatWobblePulse{0%{transform:translateX(0) rotate(0deg) scale(1)}12.5%{transform:translateX(6px) rotate(0.8deg) scale(1.08)}25%{transform:translateX(8px) rotate(1deg) scale(1.12)}37.5%{transform:translateX(6px) rotate(0.8deg) scale(1.15)}50%{transform:translateX(0) rotate(0deg) scale(1.15)}62.5%{transform:translateX(-6px) rotate(-0.8deg) scale(1.12)}75%{transform:translateX(-8px) rotate(-1deg) scale(1.08)}87.5%{transform:translateX(-6px) rotate(-0.8deg) scale(1.05)}100%{transform:translateX(0) rotate(0deg) scale(1)}}
 @media(prefers-reduced-motion:reduce){.floating-apr{animation:none!important;display:none}}
+@media(max-width:768px){.floating-apr{display:none!important}}
 .header{position:sticky;top:0;z-index:100;padding:16px 32px;background:var(--header-bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border-light);transition:background .3s}
 .header-inner{max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}
 .header-tagline{font-size:14px;font-weight:500;color:var(--text-secondary);letter-spacing:-0.01em;text-align:center;flex:1;min-width:200px}
@@ -161,8 +162,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text"
 .trade-submit:hover{transform:translateY(-1px);}
 .trade-submit:disabled{opacity:.5;cursor:not-allowed;transform:none;}
 .trade-powered{font-size:10px;color:var(--text-muted);text-align:center;margin-top:12px;}
-@media(max-width:640px){.trade-panel{right:0;left:0;width:100%;border-radius:20px 20px 0 0;}
-  .trade-fab{bottom:16px;right:16px;}}
+@media(max-width:640px){.trade-panel{right:0;left:0;width:100%;border-radius:20px 20px 0 0;
+    padding-bottom:calc(24px + env(safe-area-inset-bottom));}
+  .trade-fab{bottom:calc(16px + env(safe-area-inset-bottom));right:16px;z-index:900;}}
 .main{max-width:1400px;margin:0 auto;padding:32px}
 .page{display:none}.page.active{display:block}
 .hero-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:48px}
@@ -712,7 +714,7 @@ tbody tr:last-child td{border-bottom:none}
 .lp-grid{position:fixed;inset:0;z-index:1;pointer-events:none;
   background-image:linear-gradient(rgba(0,212,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.025) 1px,transparent 1px);
   background-size:72px 72px;}
-.lp-wrap{position:relative;z-index:10;min-height:100vh;display:flex;flex-direction:column;}
+.lp-wrap{position:relative;z-index:10;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden;}
 /* NAV */
 .lp-nav{display:flex;align-items:center;justify-content:space-between;padding:20px 44px;
   border-bottom:1px solid rgba(255,255,255,.05);}
@@ -745,7 +747,7 @@ tbody tr:last-child td{border-bottom:none}
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;}
 .lp-sub{font-size:17px;color:rgba(255,255,255,.5);line-height:1.68;max-width:480px;}
 .lp-stats{display:flex;align-items:center;background:rgba(255,255,255,.04);
-  border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:14px 0;width:fit-content;}
+  border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:14px 0;width:fit-content;max-width:100%;overflow-x:auto;}
 .lp-stat{display:flex;flex-direction:column;align-items:center;gap:3px;padding:0 20px;}
 .lp-stat-val{font-size:19px;font-weight:800;background:linear-gradient(135deg,#00d4ff,#00ff88);
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;}
@@ -858,11 +860,18 @@ tbody tr:last-child td{border-bottom:none}
   .lp-footer{padding:16px 20px;}
   .lp-stats{overflow-x:auto;}
   .lp-h1{font-size:clamp(30px,7vw,48px);}
+  .lp-sub{font-size:15px;max-width:100%;}
 }
 @media(max-width:600px){
   .lp-feats-grid{grid-template-columns:1fr;}
   .lp-nav-links{display:none;}
   .lp-proto-badges{flex-wrap:wrap;}
+  .lp-hero{padding:28px 16px 24px;}
+  .lp-h1{font-size:clamp(26px,8vw,40px);letter-spacing:-1px;}
+  .lp-sub{font-size:14px;}
+  .lp-stats{gap:0;}
+  .lp-ctas{flex-direction:column;gap:8px;}
+  .lp-ctas a,.lp-ctas button{width:100%;text-align:center;}
 }
 /* ═══════════════════════════════════════════════
    MINI MAP (Dashboard widget)
