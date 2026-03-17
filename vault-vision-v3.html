@@ -2245,11 +2245,6 @@ function renderEntryIntel(v) {
       Hedge Exposure
     </h4>
     <div id="hedgePositions"><div style="text-align:center;padding:20px;color:var(--text-muted)">Loading positions...</div></div>
-    <div class="hedge-coverage" id="hedgeCoverage" style="display:none">
-      <button class="hedge-cov-btn" onclick="setHedgeCoverage(0.25)">25%</button>
-      <button class="hedge-cov-btn active" onclick="setHedgeCoverage(0.50)">50%</button>
-      <button class="hedge-cov-btn" onclick="setHedgeCoverage(1.0)">100%</button>
-    </div>
     <div class="hedge-margin-row" id="hedgeMarginRow" style="display:none">
       <span style="font-size:12px;color:var(--text-secondary)">Your margin (USDC)</span>
       <input class="hedge-margin-input" id="hedgeMargin" type="number" placeholder="100" min="10" style="max-width:120px;text-align:right" oninput="updateHedgeHint()">
@@ -5167,7 +5162,7 @@ async function executeTrade(){
 // =============================================================================
 // PHASE 4: ONE-CLICK HEDGE
 // =============================================================================
-let _hedgePositions=[], _hedgeCoverage=0.5, _hedgeVaultId=null;
+let _hedgePositions=[], _hedgeCoverage=1.0, _hedgeVaultId=null;
 
 function fmtUsdShort(v){
   if(v==null)return'N/A';
@@ -5192,21 +5187,27 @@ async function fetchVaultPositions(vaultId){
     _hedgePositions=data.positions.filter(p=>p.direction!=='flat');
     // Sort by size descending
     _hedgePositions.sort((a,b)=>b.size_usd-a.size_usd);
-    // Render position rows
+    // Render position rows — collapse if >10
+    const SHOW_LIMIT=10;
     let html='';
     _hedgePositions.forEach((p,i)=>{
-      html+=`<div class="hedge-pos-row">
+      const hidden=i>=SHOW_LIMIT?'style="display:none" data-hedge-extra':'';
+      html+=`<div class="hedge-pos-row" ${hidden}>
         <span class="hedge-coin">${p.coin}</span>
         <span class="hedge-dir ${p.direction}">${p.direction}</span>
         <span class="hedge-size">${fmtUsdShort(p.size_usd)}</span>
         <button class="hedge-btn-sm" onclick="executeHedgeSingle(${i})">Hedge</button>
       </div>`;
     });
+    if(_hedgePositions.length>SHOW_LIMIT){
+      html+=`<div class="hedge-pos-row" id="hedgeShowMore" style="justify-content:center;cursor:pointer;color:var(--sky-400);font-size:12px;font-weight:600" onclick="toggleHedgePositions()">
+        Show all ${_hedgePositions.length} positions ▼
+      </div>`;
+    }
     container.innerHTML=html;
-    // Show coverage + actions if wallet connected
+    // Show actions
     const hasLongs=_hedgePositions.some(p=>p.direction==='long');
     const hasShorts=_hedgePositions.some(p=>p.direction==='short');
-    document.getElementById('hedgeCoverage').style.display='flex';
     document.getElementById('hedgeMarginRow').style.display='flex';
     document.getElementById('hedgeActions').style.display='flex';
     document.getElementById('hedgeAllLongsBtn').style.display=hasLongs?'':'none';
@@ -5218,12 +5219,12 @@ async function fetchVaultPositions(vaultId){
   }
 }
 
-function setHedgeCoverage(pct){
-  _hedgeCoverage=pct;
-  document.querySelectorAll('.hedge-cov-btn').forEach(b=>{
-    b.classList.toggle('active',parseFloat(b.textContent)===pct*100);
-  });
-  updateHedgeHint();
+function toggleHedgePositions(){
+  const extras=document.querySelectorAll('[data-hedge-extra]');
+  const btn=document.getElementById('hedgeShowMore');
+  const visible=extras[0]&&extras[0].style.display!=='none';
+  extras.forEach(el=>el.style.display=visible?'none':'flex');
+  if(btn)btn.innerHTML=visible?`Show all ${_hedgePositions.length} positions ▼`:'Show less ▲';
 }
 
 function updateHedgeHint(){
