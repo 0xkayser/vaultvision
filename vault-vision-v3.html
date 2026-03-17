@@ -58,7 +58,7 @@
 }
 *{margin:0;padding:0;box-sizing:border-box}
 button,a,.card,.pill,.nav-btn,.back-btn,.ext-link,.card-ext-link,.theme-toggle,.compare-item{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,sans-serif;background:var(--bg-body);color:var(--text-primary);min-height:100vh;transition:background .3s,color .3s;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,sans-serif;background:var(--bg-body);color:var(--text-primary);min-height:100vh;transition:background .3s,color .3s;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);overflow-x:hidden}
 .bg{position:fixed;inset:0;z-index:-1;background:var(--gradient-bg);overflow:hidden;transition:background .5s}
 .floating-apr{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;font-weight:600;font-size:16px;color:var(--emerald-500);pointer-events:none;white-space:nowrap;z-index:1;text-shadow:0 2px 8px rgba(16,185,129,0.2);will-change:transform,opacity;transform-origin:center;display:inline-block}
 .floating-apr.negative{color:var(--rose-400);text-shadow:0 2px 8px rgba(244,63,94,0.2)}
@@ -192,7 +192,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text"
 .pill{padding:8px 16px;background:var(--bg-card-solid);border:1px solid var(--border-light);border-radius:999px;font-size:13px;font-weight:500;color:var(--text-secondary);cursor:pointer;transition:all .2s}
 .pill:hover{border-color:var(--sky-400);transform:translateY(-1px)}
 .pill.active{background:var(--gradient-accent);border-color:transparent;color:#fff;box-shadow:var(--glow-accent)}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr));gap:16px}
 .card{background:var(--bg-card);border:1px solid var(--border-light);border-radius:20px;padding:24px;cursor:pointer;transition:all .3s;backdrop-filter:blur(10px);animation:fadeInUp .5s ease-out backwards;position:relative;overflow:hidden;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(0,212,255,0.05),rgba(0,255,136,0.02));opacity:0;transition:opacity .3s}
 .card:hover{transform:translateY(-6px) scale(1.01);box-shadow:0 12px 40px rgba(0,212,255,.15)}
@@ -574,15 +574,15 @@ tbody tr:last-child td{border-bottom:none}
 }
 @media(max-width:768px){
   .header{padding:12px 16px}
-  .header-inner{flex-direction:column;gap:12px}
-  .nav{width:100%;justify-content:center;gap:2px}
+  .header-inner{flex-direction:row;flex-wrap:wrap;gap:8px}
+  .nav{width:100%;justify-content:center;gap:2px;order:3}
   .nav-btn{padding:10px 14px;font-size:13px;min-height:44px}
   .hero-stats,.grid,.detail-metrics,.charts-grid,.calc-results{grid-template-columns:1fr;gap:12px}
-  .vault-hero-stats{justify-content:center}
+  .vault-hero-stats{justify-content:center;flex-wrap:wrap}
   .header-tagline{display:none}
   .main{padding:16px}
   .section{margin-bottom:32px}
-  .section-header{margin-bottom:16px}
+  .section-header{margin-bottom:16px;flex-direction:column;gap:8px}
   .stat-card{padding:20px}
   .stat-value{font-size:24px}
   .card{padding:20px}
@@ -609,28 +609,47 @@ tbody tr:last-child td{border-bottom:none}
   .compare-item{padding:12px;min-height:44px}
   .ext-link{padding:10px 14px;min-height:44px}
   .card-ext-link{padding:8px 12px;font-size:12px;min-height:36px}
+  /* Wallet mobile */
+  .wallet-btn{height:36px;padding:0 12px;font-size:11px}
+  .wallet-dropdown{right:-8px;min-width:180px}
+  /* Hedge mobile */
+  .hedge-pos-row{padding:6px 0;font-size:12px}
+  .hedge-coin{min-width:36px;font-size:12px}
+  .hedge-size{font-size:11px}
+  .hedge-btn-sm{padding:4px 8px;font-size:10px}
+  .hedge-actions{flex-direction:column;gap:8px}
+  .hedge-action-btn{padding:12px;font-size:13px}
+  /* Deposit modal mobile */
+  .deposit-modal{padding:20px;width:94%;border-radius:16px}
+  /* Entry intel mobile */
+  .entry-card{padding:14px}
+  .entry-meter-score{font-size:44px}
 }
 @media(max-width:480px){
   .header{padding:10px 12px;padding-top:max(10px,env(safe-area-inset-top))}
+  .header-inner{gap:6px}
   .main{padding:12px}
-  .hero-stats{gap:10px}
-  .stat-card{padding:16px}
-  .stat-value{font-size:22px}
-  .stat-label{font-size:12px}
+  .hero-stats{gap:10px;grid-template-columns:repeat(2,1fr)}
+  .stat-card{padding:14px}
+  .stat-value{font-size:20px}
+  .stat-label{font-size:11px}
+  .stat-sub{font-size:11px}
   .card{padding:16px;border-radius:16px}
   .card-name{font-size:15px}
   .card-apy-val{font-size:18px}
   .card-apy{padding-top:24px}
   .section-title{font-size:18px}
   .badge{font-size:10px;padding:3px 8px}
-  .nav-btn{padding:8px 12px;font-size:12px}
+  .nav-btn{padding:8px 10px;font-size:11px}
   .pill{font-size:12px;padding:8px 12px}
   .table-wrap{border-radius:12px}
   th{font-size:11px;padding:8px 10px}
   td{font-size:12px;padding:8px 10px}
-  .vault-hero{padding:16px;border-radius:20px}
-  .detail-metric{padding:12px}
-  .detail-metric-val{font-size:18px}
+  .vault-hero{padding:14px;border-radius:16px}
+  .vault-hero h2{font-size:18px!important}
+  .detail-metric{padding:10px}
+  .detail-metric-val{font-size:16px}
+  .detail-metric-label{font-size:10px}
   .chart-card{padding:12px;border-radius:16px}
   .chart-wrap{height:160px}
   .calc-card{padding:20px;border-radius:16px}
@@ -639,6 +658,25 @@ tbody tr:last-child td{border-bottom:none}
   .calc-res{padding:12px;border-radius:10px}
   .calc-res-label{font-size:10px}
   .calc-res-val{font-size:18px}
+  /* Wallet 480 */
+  .wallet-btn{height:34px;padding:0 10px;font-size:10px;border-radius:10px}
+  .wallet-btn .wallet-icon{width:14px;height:14px}
+  /* Trade panel full width */
+  .trade-panel{padding:18px}
+  .trade-row label{font-size:10px}
+  .trade-select,.trade-input{font-size:12px;padding:8px 10px}
+  .trade-submit{padding:12px;font-size:13px}
+  /* Hedge 480 */
+  .hedge-coin{min-width:32px;font-size:11px}
+  .hedge-dir{font-size:10px;padding:2px 4px}
+  .hedge-size{font-size:10px}
+  .hedge-margin-input{font-size:12px}
+  /* Back button */
+  .back-btn{font-size:13px;padding:10px 14px}
+  /* Entry intel */
+  .entry-meter-score{font-size:36px}
+  .entry-card{padding:12px}
+  .entry-card h4{font-size:13px}
 }
 @media(max-width:768px) and (orientation:landscape){
   .header{padding:8px 16px}

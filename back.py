@@ -8590,6 +8590,13 @@ class APIHandler(BaseHTTPRequestHandler):
 
 class ReusableHTTPServer(HTTPServer):
     allow_reuse_address = True
+    allow_reuse_port = True
+    def server_bind(self):
+        import socket
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try: self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except: pass
+        super().server_bind()
 
 def run_server(port: int):
     """Run HTTP server."""
