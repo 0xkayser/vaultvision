@@ -4645,7 +4645,11 @@ def hl_sign_l1_action(action: dict, agent_private_key: str, nonce: int, vault_ad
     }
 
     account = Account.from_key(agent_private_key)
-    signable = encode_typed_data(full_message=structured)
+    signable = encode_typed_data(
+        domain_data=structured["domain"],
+        message_types={"Agent": structured["types"]["Agent"]},
+        message_data=structured["message"],
+    )
     signed = account.sign_message(signable)
     return {
         "r": hex(signed.r),

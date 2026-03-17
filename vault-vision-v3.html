@@ -64,7 +64,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text"
 .floating-apr.negative{color:var(--rose-400);text-shadow:0 2px 8px rgba(244,63,94,0.2)}
 .floating-apr.high{color:#f59e0b;text-shadow:0 2px 8px rgba(245,158,11,0.2)}
 .floating-apr.medium{color:#8b5cf6;text-shadow:0 2px 8px rgba(139,92,246,0.2)}
-@keyframes floatUp{0%{opacity:0;transform:translateY(0) translateX(var(--drift-x,0px))}5%{opacity:.12}15%{opacity:.1}50%{opacity:.07}85%{opacity:.04}100%{opacity:0;transform:translateY(calc(-100vh - 150px)) translateX(var(--drift-x,0px))}}
+@keyframes floatUp{0%{opacity:0;transform:translateY(0) translateX(var(--drift-x,0px))}5%{opacity:.06}15%{opacity:.05}50%{opacity:.04}85%{opacity:.02}100%{opacity:0;transform:translateY(calc(-100vh - 150px)) translateX(var(--drift-x,0px))}}
 @keyframes floatWobblePulse{0%{transform:translateX(0) rotate(0deg) scale(1)}12.5%{transform:translateX(6px) rotate(0.8deg) scale(1.08)}25%{transform:translateX(8px) rotate(1deg) scale(1.12)}37.5%{transform:translateX(6px) rotate(0.8deg) scale(1.15)}50%{transform:translateX(0) rotate(0deg) scale(1.15)}62.5%{transform:translateX(-6px) rotate(-0.8deg) scale(1.12)}75%{transform:translateX(-8px) rotate(-1deg) scale(1.08)}87.5%{transform:translateX(-6px) rotate(-0.8deg) scale(1.05)}100%{transform:translateX(0) rotate(0deg) scale(1)}}
 @media(prefers-reduced-motion:reduce){.floating-apr{animation:none!important;display:none}}
 @media(max-width:768px){.floating-apr{display:none!important}}
