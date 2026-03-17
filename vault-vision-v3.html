@@ -2312,7 +2312,7 @@ function renderEntryIntel(v) {
       Copy Trading
     </h4>
     <div id="copyContent">
-      <div id="copySetup" style="display:none">
+      <div id="copySetup">
         <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">Auto-copy new positions from this vault to your account.</p>
         <div class="hedge-margin-row">
           <span style="font-size:12px;color:var(--text-secondary)">Leverage</span>
@@ -2341,7 +2341,7 @@ function renderEntryIntel(v) {
         <div id="copySettings" style="font-size:11px;color:var(--text-muted);margin-bottom:8px"></div>
         <div id="copyTradeLog" style="max-height:200px;overflow-y:auto"></div>
       </div>
-      <div id="copyNeedWallet" style="text-align:center;padding:12px">
+      <div id="copyNeedWallet" style="text-align:center;padding:12px;display:none">
         <p style="font-size:12px;color:var(--text-muted)">Connect wallet to enable copy trading</p>
       </div>
     </div>
@@ -4973,11 +4973,13 @@ async function connectWallet(){
     localStorage.setItem('vv-wallet',_walletAddr);
     updateWalletUI();
     fetchWalletBalance();
+    if(_copyVaultId)initCopyCard(_copyVaultId);
     window.ethereum.on('accountsChanged',(accs)=>{
       if(!accs.length){disconnectWallet();return;}
       _walletAddr=accs[0].toLowerCase();
       localStorage.setItem('vv-wallet',_walletAddr);
       updateWalletUI();fetchWalletBalance();
+      if(_copyVaultId)initCopyCard(_copyVaultId);
     });
   }catch(e){console.error('Wallet connect error:',e);}
 }
@@ -5080,6 +5082,7 @@ function autoConnectWallet(){
       if(accs.some(a=>a.toLowerCase()===saved)){
         _walletAddr=saved;_walletProvider=window.ethereum;
         updateWalletUI();fetchWalletBalance();
+        if(_copyVaultId)initCopyCard(_copyVaultId);
       }
     }).catch(()=>{});
   }
