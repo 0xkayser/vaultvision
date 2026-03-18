@@ -4645,7 +4645,11 @@ def hl_sign_l1_action(action: dict, agent_private_key: str, nonce: int, vault_ad
     }
 
     account = Account.from_key(agent_private_key)
-    signable = encode_typed_data(full_message=structured)
+    signable = encode_typed_data(
+        domain_data=structured["domain"],
+        message_types={"Agent": structured["types"]["Agent"]},
+        message_data=structured["message"],
+    )
     signed = account.sign_message(signable)
     return {
         "r": hex(signed.r),
@@ -4691,6 +4695,36 @@ def hl_update_leverage_backend(asset_idx: int, leverage: int, is_cross: bool,
         return {"status": "err", "response": str(e)}
 
 
+def hl_close_position_backend(asset_idx: int, is_long: bool, size: float,
+                                sz_decimals: int, mid_price: float,
+                                agent_private_key: str) -> dict:
+    """Close a position by placing opposite market order. Returns HL response."""
+    # To close a long → sell; to close a short → buy
+    is_buy = not is_long
+    slippage = 0.995 if is_long else 1.005  # worse price for closing
+    px_str = hl_format_price(mid_price * slippage)
+    size_str = hl_format_size(abs(size), sz_decimals)
+
+    nonce = int(time.time() * 1000)
+    wire = {"a": asset_idx, "b": is_buy, "p": px_str, "s": size_str, "r": True,
+            "t": {"limit": {"tif": "Ioc"}}}  # r=True → reduce only
+    action = {"type": "order", "orders": [wire], "grouping": "na",
+              "builder": {"b": HL_BUILDER_ADDRESS.lower(), "f": HL_BUILDER_FEE_BPS}}
+
+    sig = hl_sign_l1_action(action, agent_private_key, nonce)
+    payload = json.dumps({"action": action, "nonce": nonce, "signature": sig}).encode()
+
+    req = urllib.request.Request(HL_EXCHANGE_URL, method="POST", data=payload,
+        headers={"Content-Type": "application/json"})
+    try:
+        resp = urllib.request.urlopen(req, timeout=15)
+        result = json.loads(resp.read())
+        return result
+    except Exception as e:
+        print(f"[COPY] Close order error: {e}")
+        return {"status": "err", "response": str(e)}
+
+
 def hl_format_price(px: float) -> str:
     """Format price to max 5 significant figures (HL requirement)."""
     if px == 0:
@@ -4711,15 +4745,25 @@ def hl_format_size(sz: float, sz_decimals: int = 2) -> str:
     return formatted or "0"
 
 
-def diff_positions(prev_positions: list, curr_positions: list) -> list:
-    """Detect NEW positions: coin+direction in current but not in previous."""
+def diff_positions(prev_positions: list, curr_positions: list) -> dict:
+    """Detect NEW and CLOSED positions between snapshots.
+    Returns {"opened": [...], "closed": [...]}"""
     prev_set = {(p["coin"], p["direction"]) for p in prev_positions if p.get("direction") != "flat"}
-    new_pos = []
+    curr_set = {(p["coin"], p["direction"]) for p in curr_positions if p.get("direction") != "flat"}
+
+    opened = []
     for pos in curr_positions:
         key = (pos["coin"], pos["direction"])
         if key not in prev_set and pos.get("direction") != "flat":
-            new_pos.append(pos)
-    return new_pos
+            opened.append(pos)
+
+    closed = []
+    for pos in prev_positions:
+        key = (pos["coin"], pos["direction"])
+        if key not in curr_set and pos.get("direction") != "flat":
+            closed.append(pos)
+
+    return {"opened": opened, "closed": closed}
 
 
 def copy_trade_monitor_loop():
@@ -4779,12 +4823,18 @@ def copy_trade_monitor_loop():
                     )
                     conn.commit()
 
-                    # Diff
-                    new_positions = diff_positions(prev_positions, curr_positions)
-                    if not new_positions:
+                    # Diff — detect opened AND closed positions
+                    diff = diff_positions(prev_positions, curr_positions)
+                    new_positions = diff["opened"]
+                    closed_positions = diff["closed"]
+
+                    if not new_positions and not closed_positions:
                         continue
 
-                    print(f"[COPY] Vault {vault_id[:10]}... has {len(new_positions)} new positions: {[p['coin'] for p in new_positions]}")
+                    if new_positions:
+                        print(f"[COPY] Vault {vault_id[:10]}... has {len(new_positions)} new positions: {[p['coin'] for p in new_positions]}")
+                    if closed_positions:
+                        print(f"[COPY] Vault {vault_id[:10]}... closed {len(closed_positions)} positions: {[p['coin'] for p in closed_positions]}")
 
                     # Get meta + mids for order placement
                     meta = hl_get_meta_cached()
@@ -4878,6 +4928,75 @@ def copy_trade_monitor_loop():
                                     (int(time.time()), sub["user_address"], vault_id, coin, direction, 0, "failed", str(e))
                                 )
                                 conn.commit()
+
+                    # === CLOSE positions that vault closed ===
+                    if closed_positions and meta and mids:
+                        for pos in closed_positions:
+                            coin = pos["coin"]
+                            direction = pos["direction"]
+                            is_long = direction == "long"
+
+                            asset_idx = -1
+                            sz_decimals = 2
+                            for i, u in enumerate(meta.get("universe", [])):
+                                if u["name"] == coin:
+                                    asset_idx = i
+                                    sz_decimals = u.get("szDecimals", 2)
+                                    break
+                            if asset_idx < 0:
+                                continue
+
+                            mid_price = float(mids.get(coin, 0))
+                            if mid_price <= 0:
+                                continue
+
+                            for sub in subscribers:
+                                try:
+                                    agent_key = decrypt_agent_key(sub["agent_key_enc"])
+
+                                    # Fetch user's current positions to find size
+                                    user_addr = sub["user_address"]
+                                    user_state = fetch_hl_clearinghouse_state(user_addr)
+                                    if not user_state:
+                                        continue
+                                    user_parsed = parse_hl_positions(user_state)
+                                    user_pos = None
+                                    for up in user_parsed.get("positions", []):
+                                        if up["coin"] == coin and up["direction"] == direction:
+                                            user_pos = up
+                                            break
+                                    if not user_pos:
+                                        print(f"[COPY] User {user_addr[:10]}... has no {coin} {direction} to close")
+                                        continue
+
+                                    size_val = abs(float(user_pos.get("size", 0)))
+                                    if size_val <= 0:
+                                        continue
+
+                                    result = hl_close_position_backend(
+                                        asset_idx, is_long, size_val, sz_decimals,
+                                        mid_price, agent_key
+                                    )
+
+                                    status = "success" if result.get("status") != "err" else "failed"
+                                    error_msg = result.get("response", "") if status == "failed" else None
+                                    size_usd = size_val * mid_price
+
+                                    conn.execute(
+                                        "INSERT INTO copy_trade_log (ts, user_address, vault_id, coin, direction, size_usd, entry_price, order_status, error_msg, hl_response) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                        (int(time.time()), user_addr, vault_id, coin, f"close_{direction}", size_usd, mid_price, status, error_msg, json.dumps(result))
+                                    )
+                                    conn.commit()
+                                    print(f"[COPY] CLOSE {status.upper()}: {user_addr[:10]}... closed {coin} {direction} ${size_usd:.0f}")
+                                    time.sleep(0.5)
+
+                                except Exception as e:
+                                    print(f"[COPY] Close error for {sub['user_address'][:10]}...: {e}")
+                                    conn.execute(
+                                        "INSERT INTO copy_trade_log (ts, user_address, vault_id, coin, direction, size_usd, order_status, error_msg) VALUES (?,?,?,?,?,?,?,?)",
+                                        (int(time.time()), sub["user_address"], vault_id, coin, f"close_{direction}", 0, "failed", str(e))
+                                    )
+                                    conn.commit()
 
                     time.sleep(1)  # Between vaults
 
