@@ -2285,7 +2285,6 @@ function renderEntryIntel(v) {
     </div>
   </div>
   <!-- HEDGE EXPOSURE CARD (full-width, below intel grid) -->
-  ${posState === 'real' ? `
   <div class="entry-card fade-in" style="animation-delay:.3s;margin-bottom:32px" id="hedgeCard">
     <h4 style="margin-bottom:12px">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:3px;opacity:.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -2303,9 +2302,7 @@ function renderEntryIntel(v) {
     </div>
     <div class="hedge-note">0.01% builder fee per order &middot; Powered by VaultVision</div>
   </div>
-  ` : ''}
   <!-- COPY TRADING CARD -->
-  ${posState === 'real' ? `
   <div class="entry-card fade-in" style="animation-delay:.4s;margin-bottom:32px" id="copyCard">
     <h4 style="margin-bottom:12px">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:3px;opacity:.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
@@ -2347,7 +2344,6 @@ function renderEntryIntel(v) {
     </div>
     <div class="hedge-note">0.01% builder fee per order &middot; Powered by VaultVision</div>
   </div>
-  ` : ''}
   </div>`;
 }
 
