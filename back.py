@@ -9391,6 +9391,33 @@ def main():
         copy_thread = threading.Thread(target=copy_trade_monitor_loop, daemon=True)
         copy_thread.start()
 
+    # Start paper trading auto-update thread (every 12h)
+    def paper_trade_auto_loop():
+        """Run paper trading strategies every 12 hours."""
+        INTERVAL = 12 * 3600  # 12 hours
+        time.sleep(60)  # wait for initial data fetch
+        while True:
+            try:
+                import paper_trade as pt
+                vaults = pt.load_live_vaults()
+                if vaults:
+                    ts = pt.now_ts()
+                    for sname in pt.ALL_STRATEGY_NAMES:
+                        try:
+                            pt.run_strategy(sname, vaults, ts)
+                        except Exception as e:
+                            print(f"[PAPER] Error running {sname}: {e}")
+                    print(f"[PAPER] Auto-update complete at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                else:
+                    print("[PAPER] No vault data available, skipping")
+            except Exception as e:
+                print(f"[PAPER] Auto-update error: {e}")
+            time.sleep(INTERVAL)
+
+    paper_thread = threading.Thread(target=paper_trade_auto_loop, daemon=True)
+    paper_thread.start()
+    print("[PAPER] Auto-update thread started (every 12h)")
+
     # Run server (bind to 0.0.0.0 for production)
     run_server(port)
 
