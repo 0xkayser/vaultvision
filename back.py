@@ -7906,10 +7906,39 @@ class APIHandler(BaseHTTPRequestHandler):
                         vault_counts[vn] = vault_counts.get(vn, 0) + 1
                 overlaps = [{"vault": v, "count": c} for v, c in vault_counts.items() if c >= 3]
 
+                # Build HLP equity curve (normalized to $10K)
+                hlp_equity_log = []
+                if hlp_data and hlp_data.get("values"):
+                    hlp_vals = hlp_data["values"]
+                    if hlp_vals and hlp_vals[0][1] > 0:
+                        base = hlp_vals[0][1]
+                        for ts_v, val in hlp_vals:
+                            hlp_equity_log.append({"date": "", "equity": 10000 * val / base, "ts": ts_v})
+
+                # Build BTC hold equity curve (normalized to $10K)
+                btc_equity_log = []
+                btc_return = None
+                try:
+                    import requests as req2
+                    btc_r = req2.get("https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=30", timeout=10)
+                    if btc_r.status_code == 200:
+                        btc_prices = btc_r.json().get("prices", [])
+                        if btc_prices and btc_prices[0][1] > 0:
+                            btc_base = btc_prices[0][1]
+                            for ts_ms, price in btc_prices[::6]:  # sample every ~6 hours
+                                btc_equity_log.append({"date": "", "equity": 10000 * price / btc_base, "ts": int(ts_ms/1000)})
+                            if btc_prices[-1][1] > 0:
+                                btc_return = (btc_prices[-1][1] - btc_base) / btc_base * 100
+                except Exception:
+                    pass
+
                 self.send_json({
                     "ts": ts,
                     "strategies": strategies,
                     "hlp_benchmark_pct": hlp_return,
+                    "hlp_equity_log": hlp_equity_log,
+                    "btc_return_pct": btc_return,
+                    "btc_equity_log": btc_equity_log,
                     "position_overlaps": overlaps,
                 })
             except Exception as e:
