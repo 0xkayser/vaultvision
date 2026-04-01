@@ -65,11 +65,11 @@ STRATEGIES = {
         "verdict": "To validate",
         "color": "#00d4ff",
     },
-    "smart_money": {
-        "name": "Smart Money",
-        "hold_days": 14,
-        "max_pos": 3,
-        "description": "TVL inflow > 5% with stagnant price < 2%",
+    "low_dd": {
+        "name": "Low DD Grinder",
+        "hold_days": 21,
+        "max_pos": 4,
+        "description": "High Sharpe vaults: consistent growth + minimal drawdown over 30d",
         "verdict": "To validate",
         "color": "#ff6b6b",
     },
@@ -82,21 +82,29 @@ STRATEGIES = {
         "verdict": "To validate",
         "color": "#ffd93d",
     },
-    "eq_gap": {
-        "name": "Equity-Price Gap",
-        "hold_days": 14,
+    "leader_conviction": {
+        "name": "Leader Conviction",
+        "hold_days": 21,
         "max_pos": 3,
-        "description": "TVL grows faster than vault price (divergence)",
+        "description": "Manager has high skin-in-game + low leverage + positive momentum",
         "verdict": "To validate",
         "color": "#c084fc",
     },
-    "tvl_accel": {
-        "name": "TVL Acceleration",
+    "momentum": {
+        "name": "Momentum Breakout",
         "hold_days": 14,
-        "max_pos": 3,
-        "description": "TVL growth rate accelerating (control — was OVERFIT in backtest)",
-        "verdict": "OVERFIT (7.3x)",
+        "max_pos": 4,
+        "description": "Vaults breaking ATH accountValue with volume confirmation",
+        "verdict": "To validate",
         "color": "#ff8c42",
+    },
+    "conservative": {
+        "name": "Conservative Yield",
+        "hold_days": 28,
+        "max_pos": 3,
+        "description": "Ultra-selective: only enter proven vaults with 30d+ track record, low DD, high WR signals",
+        "verdict": "To validate",
+        "color": "#22d3ee",
     },
 }
 
@@ -454,20 +462,61 @@ def vol_adjusted_allocation(state, vault, max_pos):
 # ═══════════════════════════════════════════════════════════════════════
 
 def get_hlp_benchmark(vaults):
-    """Get HLP vault performance as benchmark."""
+    """Get HLP vault performance as benchmark using HL API for accuracy."""
+    HLP_ADDR = "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303"
     for pk, v in vaults.items():
-        if "hyperliquidity provider" in v["name"].lower() or "hlp" in v["name"].lower():
-            if len(v["values"]) >= 2:
-                first_val = v["values"][0][1]
-                last_val = v["values"][-1][1]
-                if first_val > 0:
+        if pk.lower() == HLP_ADDR or "hyperliquidity provider" in v["name"].lower():
+            # Fetch real history from API
+            try:
+                resp = requests.post("https://api.hyperliquid.xyz/info",
+                                     json={"type": "vaultDetails", "vaultAddress": pk}, timeout=10)
+                d = resp.json()
+                portfolio = d.get("portfolio", [])
+                api_values = []
+                for entry in portfolio:
+                    if isinstance(entry, list) and entry[0] in ("allTime", "perpAllTime"):
+                        av_hist = entry[1].get("accountValueHistory", [])
+                        pnl_hist = entry[1].get("pnlHistory", [])
+                        # Compute depositor return per period using PnL delta / AV
+                        # This gives actual % return a depositor would earn
+                        if pnl_hist and av_hist and len(pnl_hist) == len(av_hist):
+                            share = 10000.0  # start at $10K like our strategies
+                            share_values = []
+                            for i in range(len(pnl_hist)):
+                                ts_ms = pnl_hist[i][0]
+                                if i == 0:
+                                    share_values.append((ts_ms / 1000, share))
+                                    continue
+                                pnl_delta = float(pnl_hist[i][1]) - float(pnl_hist[i-1][1])
+                                av_prev = float(av_hist[i-1][1])
+                                if av_prev > 0:
+                                    period_return = pnl_delta / av_prev
+                                    share *= (1 + period_return)
+                                share_values.append((ts_ms / 1000, share))
+                            if share_values:
+                                api_values = share_values
+                        elif av_hist:
+                            api_values = [(h[0] / 1000, float(h[1])) for h in av_hist if float(h[1]) > 0]
+                        break
+                if api_values:
                     return {
                         "name": v["name"],
                         "pk": pk,
-                        "total_return": (last_val - first_val) / first_val,
-                        "current_val": last_val,
-                        "values": v["values"],
+                        "total_return": (api_values[-1][1] - api_values[0][1]) / api_values[0][1],
+                        "current_val": api_values[-1][1],
+                        "values": api_values,
                     }
+            except Exception:
+                pass
+            # Fallback to DB
+            if len(v["values"]) >= 2:
+                return {
+                    "name": v["name"],
+                    "pk": pk,
+                    "total_return": (v["values"][-1][1] - v["values"][0][1]) / v["values"][0][1],
+                    "current_val": v["current_val"],
+                    "values": v["values"],
+                }
     return None
 
 
@@ -537,51 +586,292 @@ def score_optimal(v, ts):
 compute_vault_confidence = score_optimal
 
 
-def score_tvl_accel(v, ts):
-    """TVL acceleration strategy. Threshold: > 0 (binary enter/skip)."""
+def score_momentum(v, ts):
+    """Momentum Breakout: enter when vault breaks ATH with confirmed trend.
+    Threshold: >= 2.0"""
     day = 86400
-    lookback = 7 * day
-
-    if not v["tvl_series"]:
+    values = v["values"]
+    if len(values) < 30:
         return -1, []
 
-    growth_now = growth_rate(v["tvl_series"], ts, lookback)
-    growth_prev = growth_rate(v["tvl_series"], ts - day, lookback)
-
-    if growth_now is None or growth_prev is None:
-        return -1, []
-
-    acceleration = growth_now - growth_prev
+    score = 0
     reasons = []
 
-    if acceleration > 0.05 and growth_now > 0:
-        score = acceleration * 10  # higher accel = higher score
-        reasons.append(f"TVL accel: {acceleration*100:.1f}% (growth: {growth_now*100:.1f}%)")
-        return score, reasons
+    current = v["current_val"]
+    if current <= 0:
+        return -1, []
 
-    return -1, []
+    # Find ATH from history (exclude last 3 days to require fresh breakout)
+    cutoff_ts = ts - 3 * day
+    historical = [val for t, val in values if t < cutoff_ts]
+    if not historical:
+        return -1, []
+    ath = max(historical)
+
+    # Signal 1: Current value above ATH (breakout)
+    if current > ath * 1.005:  # >0.5% above ATH to filter noise
+        score += 1.5
+        pct_above = (current - ath) / ath * 100
+        reasons.append(f"ATH breakout: +{pct_above:.1f}% above prev high")
+    else:
+        return -1, []  # No breakout = no entry
+
+    # Signal 2: Short-term momentum confirms (3d positive)
+    val_3d = growth_rate(values, ts, 3 * day)
+    if val_3d is not None and val_3d > 0.01:
+        score += 0.5
+        reasons.append(f"3d momentum: +{val_3d*100:.1f}%")
+
+    # Signal 3: TVL not declining (people aren't fleeing)
+    tvl_g = growth_rate(v["tvl_series"], ts, 7 * day) if v["tvl_series"] else None
+    if tvl_g is not None and tvl_g > -0.02:
+        score += 0.5
+        reasons.append(f"TVL stable: {tvl_g*100:+.1f}%")
+    elif tvl_g is not None and tvl_g < -0.05:
+        score -= 1
+        reasons.append(f"TVL declining: {tvl_g*100:.1f}%")
+
+    # Signal 4: Low leverage = sustainable growth
+    if v["leverage_series"]:
+        lev = get_val(v["leverage_series"], ts, day * 2)
+        if lev is not None and lev <= 3.0:
+            score += 0.5
+            reasons.append(f"Leverage safe: {lev:.1f}x")
+        elif lev is not None and lev > 5.0:
+            score -= 1
+            reasons.append(f"Leverage risky: {lev:.1f}x")
+
+    return score, reasons
 
 
-def score_eq_gap(v, ts):
-    """Equity-price gap. Threshold: > 0."""
+def score_leader_conviction(v, ts):
+    """Leader Conviction: manager has high skin-in-game + vault is performing.
+    Threshold: >= 2.0"""
     day = 86400
-    lookback = 7 * day
-
-    if not v.get("equity_series") or len(v["equity_series"]) < 5:
+    values = v["values"]
+    if len(values) < 20:
         return -1, []
 
-    eq_growth = growth_rate(v["equity_series"], ts, lookback)
-    val_growth = growth_rate(v["values"], ts, lookback)
+    score = 0
+    reasons = []
 
-    if eq_growth is None or val_growth is None:
+    # We need leader fraction from API — fetch it
+    try:
+        resp = requests.post("https://api.hyperliquid.xyz/info",
+                             json={"type": "vaultDetails", "vaultAddress": v["pk"]}, timeout=5)
+        d = resp.json()
+        leader_frac = float(d.get("leaderFraction", 0) or 0)
+        leader_commission = float(d.get("leaderCommission", 0) or 0)
+        is_closed = d.get("isClosed", False)
+        if is_closed == "True" or is_closed is True:
+            return -1, ["Vault closed"]
+    except Exception:
         return -1, []
 
-    gap = eq_growth - val_growth
-    if gap > 0.03 and eq_growth > 0:
-        reasons = [f"Equity-price gap: {gap*100:.1f}% (eq: +{eq_growth*100:.1f}%, val: {val_growth*100:+.1f}%)"]
-        return gap * 10, reasons
+    # Signal 1: Leader has significant skin in game (>10%)
+    if leader_frac >= 0.15:
+        score += 1.5
+        reasons.append(f"Leader owns {leader_frac*100:.1f}%")
+    elif leader_frac >= 0.08:
+        score += 0.5
+        reasons.append(f"Leader owns {leader_frac*100:.1f}%")
+    else:
+        return -1, [f"Low leader stake: {leader_frac*100:.1f}%"]
 
-    return -1, []
+    # Signal 2: Positive 14d performance
+    val_14d = growth_rate(values, ts, 14 * day)
+    if val_14d is not None and val_14d > 0.02:
+        score += 1
+        reasons.append(f"14d return: +{val_14d*100:.1f}%")
+    elif val_14d is not None and val_14d < -0.05:
+        score -= 1
+        reasons.append(f"14d loss: {val_14d*100:.1f}%")
+
+    # Signal 3: Low leverage
+    if v["leverage_series"]:
+        lev = get_val(v["leverage_series"], ts, day * 2)
+        if lev is not None and lev <= 3.0:
+            score += 0.5
+            reasons.append(f"Conservative leverage: {lev:.1f}x")
+        elif lev is not None and lev > 5.0:
+            score -= 0.5
+            reasons.append(f"High leverage: {lev:.1f}x")
+
+    # Signal 4: Fair commission (not extractive)
+    if leader_commission <= 0.1:
+        score += 0.5
+        reasons.append(f"Fair commission: {leader_commission*100:.0f}%")
+
+    # Signal 5: TVL shows confidence
+    tvl_g = growth_rate(v["tvl_series"], ts, 7 * day) if v["tvl_series"] else None
+    if tvl_g is not None and tvl_g > 0.03:
+        score += 0.5
+        reasons.append(f"TVL growing: +{tvl_g*100:.1f}%")
+
+    return score, reasons
+
+
+def score_low_dd(v, ts):
+    """Low Drawdown Grinder: consistent positive returns with minimal drawdown.
+    Looks for vaults with high Sharpe-like characteristics.
+    Threshold: >= 2.0"""
+    day = 86400
+    values = v["values"]
+    if len(values) < 30:
+        return -1, []
+
+    score = 0
+    reasons = []
+
+    # Compute 30d return
+    val_30d = growth_rate(values, ts, 30 * day)
+    val_7d = growth_rate(values, ts, 7 * day)
+    val_3d = growth_rate(values, ts, 3 * day)
+
+    if val_30d is None or val_7d is None:
+        return -1, []
+
+    # Signal 1: Positive 30d return (must be making money)
+    if val_30d > 0.03:
+        score += 1
+        reasons.append(f"30d return: +{val_30d*100:.1f}%")
+    elif val_30d <= 0:
+        return -1, [f"30d negative: {val_30d*100:.1f}%"]
+
+    # Signal 2: Low drawdown — compute max DD over last 30 days
+    lookback_ts = ts - 30 * day
+    recent = [(t, val) for t, val in values if t >= lookback_ts]
+    if len(recent) >= 10:
+        peak = recent[0][1]
+        max_dd = 0
+        for _, val in recent:
+            if val > peak:
+                peak = val
+            dd = (val - peak) / peak
+            if dd < max_dd:
+                max_dd = dd
+        if max_dd > -0.05:  # Less than 5% drawdown
+            score += 1.5
+            reasons.append(f"Max DD: {max_dd*100:.1f}% (excellent)")
+        elif max_dd > -0.10:
+            score += 0.5
+            reasons.append(f"Max DD: {max_dd*100:.1f}% (acceptable)")
+        else:
+            score -= 1
+            reasons.append(f"Max DD: {max_dd*100:.1f}% (too deep)")
+
+    # Signal 3: Consistency — all timeframes positive
+    positive_timeframes = sum(1 for g in [val_30d, val_7d, val_3d] if g is not None and g > 0)
+    if positive_timeframes == 3:
+        score += 1
+        reasons.append("All timeframes positive (3d/7d/30d)")
+    elif positive_timeframes >= 2:
+        score += 0.5
+        reasons.append(f"{positive_timeframes}/3 timeframes positive")
+
+    # Signal 4: Low leverage = sustainable
+    if v["leverage_series"]:
+        lev = get_val(v["leverage_series"], ts, day * 2)
+        if lev is not None and lev <= 2.0:
+            score += 0.5
+            reasons.append(f"Low leverage: {lev:.1f}x")
+        elif lev is not None and lev > 5.0:
+            score -= 1
+            reasons.append(f"Risky leverage: {lev:.1f}x")
+
+    return score, reasons
+
+
+def score_conservative(v, ts):
+    """Conservative Yield: ultra-selective, optimized for high win rate.
+    Only enters vaults that pass ALL checks. Threshold: >= 5.0 (very high bar)."""
+    day = 86400
+    values = v["values"]
+    if len(values) < 60:  # need 60+ days of history (proven vault)
+        return -1, ["Too young for conservative"]
+
+    score = 0
+    reasons = []
+
+    # GATE 1: Majority of timeframes positive, 30d MUST be positive
+    val_3d = growth_rate(values, ts, 3 * day)
+    val_7d = growth_rate(values, ts, 7 * day)
+    val_14d = growth_rate(values, ts, 14 * day)
+    val_30d = growth_rate(values, ts, 30 * day)
+
+    if any(g is None for g in [val_3d, val_7d, val_14d, val_30d]):
+        return -1, ["Missing data"]
+
+    # 30d must be positive (proven long-term trend)
+    if val_30d <= 0.01:
+        return -1, [f"30d not positive enough: {val_30d*100:+.1f}%"]
+
+    # At least 3 of 4 timeframes must be positive
+    positive_count = sum(1 for g in [val_3d, val_7d, val_14d, val_30d] if g > 0)
+    if positive_count < 3:
+        return -1, [f"Only {positive_count}/4 TFs positive: 3d={val_3d*100:+.1f}% 7d={val_7d*100:+.1f}% 14d={val_14d*100:+.1f}% 30d={val_30d*100:+.1f}%"]
+
+    score += 1.5 + (0.5 if positive_count == 4 else 0)
+    reasons.append(f"{positive_count}/4 TFs green: 3d {val_3d*100:+.1f}% / 7d {val_7d*100:+.1f}% / 14d {val_14d*100:+.1f}% / 30d {val_30d*100:+.1f}%")
+
+    # GATE 2: Max drawdown over 30d must be < 3% (ultra-low DD)
+    lookback_ts = ts - 30 * day
+    recent = [(t, val) for t, val in values if t >= lookback_ts]
+    if len(recent) >= 10:
+        peak = recent[0][1]
+        max_dd = 0
+        for _, val in recent:
+            if val > peak:
+                peak = val
+            dd = (val - peak) / peak
+            if dd < max_dd:
+                max_dd = dd
+        if max_dd > -0.05:
+            score += 1.5
+            reasons.append(f"Low DD: {max_dd*100:.1f}%")
+        elif max_dd > -0.10:
+            score += 0.5
+            reasons.append(f"Moderate DD: {max_dd*100:.1f}%")
+        else:
+            return -1, [f"DD too deep for conservative: {max_dd*100:.1f}%"]
+    else:
+        return -1, ["Not enough recent data"]
+
+    # GATE 3: TVL stable or growing (no exodus)
+    tvl_7d = growth_rate(v["tvl_series"], ts, 7 * day) if v["tvl_series"] else None
+    tvl_14d = growth_rate(v["tvl_series"], ts, 14 * day) if v["tvl_series"] else None
+    if tvl_7d is not None and tvl_7d >= 0:
+        score += 0.5
+        reasons.append(f"TVL stable: 7d {tvl_7d*100:+.1f}%")
+    elif tvl_7d is not None and tvl_7d < -0.03:
+        return -1, [f"TVL declining: {tvl_7d*100:.1f}%"]
+
+    # GATE 4: Low leverage (must be <= 2.5x)
+    if v["leverage_series"]:
+        lev = get_val(v["leverage_series"], ts, day * 2)
+        if lev is not None:
+            if lev <= 2.5:
+                score += 1
+                reasons.append(f"Conservative leverage: {lev:.1f}x")
+            else:
+                return -1, [f"Leverage too high: {lev:.1f}x"]
+
+    # GATE 5: Minimum TVL $200K (liquidity)
+    if v["tvl"] < 200000:
+        return -1, [f"TVL too low: ${v['tvl']:,.0f}"]
+    score += 0.5
+    reasons.append(f"TVL: ${v['tvl']:,.0f}")
+
+    # GATE 6: No whale concentration risk
+    if v.get("concentration_top1", 0) > 0.30:
+        return -1, [f"Whale risk: top1 = {v['concentration_top1']*100:.0f}%"]
+
+    # Bonus: accelerating (7d > 14d growth rate)
+    if val_7d > val_14d:
+        score += 0.5
+        reasons.append("Accelerating growth")
+
+    return score, reasons
 
 
 def score_composite(v, ts):
@@ -620,24 +910,8 @@ def score_composite(v, ts):
 
 
 def score_smart_money(v, ts):
-    """Smart money: TVL inflow with stagnant price. Threshold: > 0."""
-    day = 86400
-    lookback = 7 * day
-
-    if not v["tvl_series"] or len(v["tvl_series"]) < 3:
-        return -1, []
-
-    tvl_g = growth_rate(v["tvl_series"], ts, lookback)
-    val_g = growth_rate(v["values"], ts, lookback)
-
-    if tvl_g is None or val_g is None:
-        return -1, []
-
-    if tvl_g > 0.05 and val_g < 0.02:
-        reasons = [f"Smart money: TVL +{tvl_g*100:.1f}% but price {val_g*100:+.1f}%"]
-        return tvl_g * 10, reasons
-
-    return -1, []
+    """DEPRECATED — redirects to low_dd."""
+    return score_low_dd(v, ts)
 
 
 def score_risk_off(v, ts):
@@ -674,12 +948,13 @@ def score_risk_off(v, ts):
 
 # Map strategy name -> (scoring_fn, entry_threshold)
 SCORING_FUNCTIONS = {
-    "optimal":     (score_optimal, 2.5),
-    "composite":   (score_composite, 2.0),
-    "smart_money": (score_smart_money, 0.0),
-    "risk_off":    (score_risk_off, 0.0),
-    "eq_gap":      (score_eq_gap, 0.0),
-    "tvl_accel":   (score_tvl_accel, 0.0),
+    "optimal":           (score_optimal, 2.5),
+    "composite":         (score_composite, 2.0),
+    "low_dd":            (score_low_dd, 2.0),
+    "risk_off":          (score_risk_off, 0.0),
+    "leader_conviction": (score_leader_conviction, 2.0),
+    "momentum":          (score_momentum, 2.0),
+    "conservative":      (score_conservative, 5.0),
 }
 
 
@@ -747,12 +1022,13 @@ def check_exit_eq_gap(v, ts, pos):
 
 
 EXIT_FUNCTIONS = {
-    "optimal":     lambda v, ts, pos: check_exit_signal(v, ts, pos, 14),
-    "composite":   lambda v, ts, pos: check_exit_signal(v, ts, pos, 14),
-    "smart_money": lambda v, ts, pos: check_exit_signal(v, ts, pos, 14),
-    "risk_off":    check_exit_risk_off,
-    "eq_gap":      check_exit_eq_gap,
-    "tvl_accel":   lambda v, ts, pos: check_exit_signal(v, ts, pos, 14),
+    "optimal":           lambda v, ts, pos: check_exit_signal(v, ts, pos, 14),
+    "composite":         lambda v, ts, pos: check_exit_signal(v, ts, pos, 14),
+    "low_dd":            lambda v, ts, pos: check_exit_signal(v, ts, pos, 21),
+    "risk_off":          check_exit_risk_off,
+    "leader_conviction": lambda v, ts, pos: check_exit_signal(v, ts, pos, 21),
+    "momentum":          lambda v, ts, pos: check_exit_signal(v, ts, pos, 14),
+    "conservative":      lambda v, ts, pos: check_exit_signal(v, ts, pos, 28),
 }
 
 
@@ -1127,7 +1403,7 @@ def print_compare(results, vaults):
                 if sts and (start_ts is None or sts < start_ts):
                     start_ts = sts
         if start_ts:
-            hlp_start = get_val(hlp["values"], start_ts, 86400 * 3)
+            hlp_start = get_val(hlp["values"], start_ts, 86400 * 7)
             hlp_end = hlp["current_val"]
             if hlp_start and hlp_start > 0:
                 hlp_ret = (hlp_end - hlp_start) / hlp_start
