@@ -1366,7 +1366,7 @@ tbody tr:last-child td{border-bottom:none}
 <div class="logo" onclick="showLanding()"><div class="logo-icon">VV</div><div class="logo-text">Vault<span>Vision</span><span class="badge" style="background:linear-gradient(135deg,#10b981,#34d399)">LIVE</span></div></div>
 <div class="header-tagline">Vault analytics for Hyperliquid</div>
 <div style="display:flex;align-items:center;gap:12px">
-<nav class="nav" id="mainNav"><button class="nav-btn active" data-p="dashboard">Dashboard</button><button class="nav-btn" data-p="analytics">Analytics</button><button class="nav-btn" data-p="compare">Compare</button><button class="nav-btn" data-p="map">Map</button></nav>
+<nav class="nav" id="mainNav"><button class="nav-btn active" data-p="dashboard">Dashboard</button><button class="nav-btn" data-p="analytics">Analytics</button><button class="nav-btn" data-p="compare">Compare</button><button class="nav-btn" data-p="map">Map</button><button class="nav-btn" data-p="portfolio" id="navPortfolio" style="display:none">Portfolio</button></nav>
 <div style="position:relative" id="walletWrap">
 <button class="wallet-btn" id="walletBtn" onclick="toggleWalletMenu()">
   <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
@@ -1535,6 +1535,18 @@ tbody tr:last-child td{border-bottom:none}
   <!-- Tooltips -->
   <div id="map-link-tip"></div>
   <div id="map-node-tip"></div>
+</div>
+
+<!-- PORTFOLIO PAGE -->
+<div class="page" id="pg-portfolio">
+  <div id="portfolioContent">
+    <div style="text-align:center;padding:80px 20px;color:var(--text-muted)">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.3;margin-bottom:16px"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+      <p style="font-size:16px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Connect wallet to view portfolio</p>
+      <p style="font-size:13px">Your positions, vault deposits, and watchlist in one place.</p>
+      <button onclick="connectWallet()" style="margin-top:16px;padding:10px 24px;border:none;border-radius:10px;background:var(--gradient-accent);color:#fff;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit">Connect Wallet</button>
+    </div>
+  </div>
 </div>
 </main>
 <footer class="footer"><span class="live-dot"></span>Live Data — Hyperliquid<br><span id="lastUpd" style="opacity:0.7"></span></footer>
@@ -2488,10 +2500,11 @@ function nav(p,prm={}){
   else if(p==='compare')renderComp();
   else if(p==='vault'&&prm.id)renderVault(prm.id);
   else if(p==='map')renderMap();
+  else if(p==='portfolio')renderPortfolio();
   location.hash=p==='vault'?'vault/'+prm.id:p;
 }
 document.querySelectorAll('#mainNav .nav-btn').forEach(b=>b.onclick=()=>nav(b.dataset.p));
-window.onhashchange=()=>{const h=location.hash.slice(1);if(h.startsWith('vault/'))nav('vault',{id:h.split('/')[1]});else nav(['dashboard','analytics','compare','map'].includes(h)?h:'dashboard');};
+window.onhashchange=()=>{const h=location.hash.slice(1);if(h.startsWith('vault/'))nav('vault',{id:h.split('/')[1]});else nav(['dashboard','analytics','compare','map','portfolio'].includes(h)?h:'dashboard');};
 
 function dataQualityBadge(dq){
   const labels={full:'Verified',partial:'Partial',mock:'Demo', demo:'Demo'};
@@ -3042,7 +3055,7 @@ function renderVault(id){
           ${dataQualityBadge(v.data_quality)}
           ${v.source_kind?`<span class="badge">${v.source_kind.replace(/_/g,' ').toUpperCase()}</span>`:''}
         </div>
-        <h1 class="vault-hero-title">${v.vault_name}</h1>
+        <h1 class="vault-hero-title">${v.vault_name} <span onclick="event.stopPropagation();const added=toggleWatchVault('${id}');this.textContent=added?'★':'☆';this.title=added?'Remove from watchlist':'Add to watchlist'" style="cursor:pointer;font-size:20px;vertical-align:middle;color:${getWatchlist().includes(id)?'#fbbf24':'var(--text-muted)'}" title="${getWatchlist().includes(id)?'Remove from watchlist':'Add to watchlist'}">${getWatchlist().includes(id)?'★':'☆'}</span></h1>
         <div class="vault-hero-sub">
           <span>${isL?'Operator':v.leader?'Leader':'ID'}: ${v.leader||v.vault_id||'—'}</span>
           <span>·</span>
@@ -5026,6 +5039,7 @@ function updateWalletUI(){
     label.innerHTML='<span class="wallet-dot"></span>'+short;
     if(fab)fab.classList.add('visible');
     if(depositBtn){depositBtn.disabled=false;depositBtn.textContent='Deposit';}
+    const navP=document.getElementById('navPortfolio');if(navP)navP.style.display='';
     const info=document.getElementById('walletInfo');
     if(info){
       info.innerHTML=`<div style="padding:10px 14px">
@@ -5038,6 +5052,8 @@ function updateWalletUI(){
     label.textContent='Connect';
     if(fab)fab.classList.remove('visible');
     if(depositBtn){depositBtn.disabled=true;depositBtn.textContent='Connect Wallet First';}
+    const navP2=document.getElementById('navPortfolio');if(navP2)navP2.style.display='none';
+    if(curPage==='portfolio')nav('dashboard');
   }
   const tradeBtn=document.getElementById('tradeSubmit');
   if(tradeBtn){
@@ -5605,6 +5621,175 @@ async function stopCopyTrading(){
     if(active)active.style.display='none';
   }catch(e){alert('Error: '+(e.message||e));}
 }
+
+// =============================================================================
+// PORTFOLIO PAGE
+// =============================================================================
+function getWatchlist(){try{return JSON.parse(localStorage.getItem('vv-watchlist')||'[]');}catch(e){return[];}}
+function setWatchlist(list){localStorage.setItem('vv-watchlist',JSON.stringify(list));}
+function toggleWatchVault(pk){
+  const wl=getWatchlist();
+  const idx=wl.indexOf(pk);
+  if(idx>=0)wl.splice(idx,1);else wl.push(pk);
+  setWatchlist(wl);
+  return idx<0; // true = added
+}
+
+async function renderPortfolio(){
+  const el=document.getElementById('portfolioContent');
+  if(!_walletAddr){
+    el.innerHTML=`<div style="text-align:center;padding:80px 20px;color:var(--text-muted)">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.3;margin-bottom:16px"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+      <p style="font-size:16px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Connect wallet to view portfolio</p>
+      <button onclick="connectWallet()" style="margin-top:16px;padding:10px 24px;border:none;border-radius:10px;background:var(--gradient-accent);color:#fff;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit">Connect Wallet</button>
+    </div>`;
+    return;
+  }
+
+  el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading portfolio...</div>';
+
+  try{
+    // Fetch all data in parallel
+    const [perpsR,spotR,copyR]=await Promise.all([
+      fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'clearinghouseState',user:_walletAddr})}),
+      fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'spotClearinghouseState',user:_walletAddr})}),
+      fetch(API_BASE+'/api/copy/status?user='+_walletAddr).catch(()=>({json:()=>({subscriptions:[]})})),
+    ]);
+    const perps=await perpsR.json();
+    const spot=await spotR.json();
+    const copyData=await copyR.json();
+
+    // Parse account data
+    const ms=perps.marginSummary||perps.crossMarginSummary||{};
+    const accountValue=parseFloat(ms.accountValue)||0;
+    const totalPnl=parseFloat(ms.totalRawUsd)||0;
+    const withdrawable=parseFloat(perps.withdrawable)||0;
+
+    // Spot USDC
+    let spotUSDC=0;
+    if(spot?.balances){for(const b of spot.balances){if(b.coin==='USDC'||b.token===0)spotUSDC+=parseFloat(b.total||0);}}
+
+    // Positions
+    const positions=(perps.assetPositions||[]).map(ap=>{
+      const p=ap.position;
+      const sz=parseFloat(p.szi);
+      if(Math.abs(sz)<0.000001)return null;
+      const entry=parseFloat(p.entryPx);
+      const upnl=parseFloat(p.unrealizedPnl);
+      const margin=parseFloat(p.marginUsed);
+      const lev=p.leverage;
+      const levVal=typeof lev==='object'?parseInt(lev.value):parseInt(lev)||1;
+      return{coin:p.coin,side:sz>0?'Long':'Short',size:Math.abs(sz),entry,upnl,margin,leverage:levVal,
+        pnlPct:margin>0?(upnl/margin*100):0};
+    }).filter(Boolean).sort((a,b)=>b.margin-a.margin);
+
+    const totalUpnl=positions.reduce((s,p)=>s+p.upnl,0);
+    const totalMargin=positions.reduce((s,p)=>s+p.margin,0);
+
+    // Copy trading
+    const copySubs=(copyData.subscriptions||[]).filter(s=>s.is_active);
+
+    // Watchlist
+    const watchlist=getWatchlist();
+    const watchVaults=watchlist.map(pk=>all().find(v=>v.id===pk||v.pk===pk)).filter(Boolean);
+
+    // Render
+    const short=_walletAddr.slice(0,6)+'...'+_walletAddr.slice(-4);
+    el.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h2 style="font-size:20px;font-weight:700">Portfolio</h2>
+      <span style="font-size:13px;color:var(--text-muted);font-family:monospace">${short}</span>
+    </div>
+
+    <!-- Hero Stats -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px" class="portfolio-hero">
+      <div class="stat-card">
+        <div class="stat-label">Account Value</div>
+        <div class="stat-value">${fmtUsd(accountValue)}</div>
+        <div class="stat-sub">Perps + Margin</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Unrealized PnL</div>
+        <div class="stat-value ${totalUpnl>=0?'positive':'negative'}">${totalUpnl>=0?'+':''}$${Math.abs(totalUpnl).toFixed(2)}</div>
+        <div class="stat-sub">${positions.length} position${positions.length!==1?'s':''}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Spot USDC</div>
+        <div class="stat-value">${fmtUsd(spotUSDC)}</div>
+        <div class="stat-sub">Available</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Withdrawable</div>
+        <div class="stat-value">${fmtUsd(withdrawable)}</div>
+        <div class="stat-sub">Free margin</div>
+      </div>
+    </div>
+
+    <!-- Open Positions -->
+    <div class="entry-card" style="margin-bottom:16px">
+      <h4 style="margin-bottom:12px">Open Positions${positions.length?` (${positions.length})`:''}</h4>
+      ${positions.length?`
+      <div style="display:grid;grid-template-columns:80px 50px 40px 1fr 90px 90px;gap:4px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;padding:0 8px 8px">
+        <span>Coin</span><span>Side</span><span>Lev</span><span>Margin</span><span>uPnL</span><span style="text-align:right">PnL %</span>
+      </div>
+      ${positions.map(p=>`
+      <div style="display:grid;grid-template-columns:80px 50px 40px 1fr 90px 90px;gap:4px;align-items:center;padding:8px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px;font-size:13px">
+        <span style="font-weight:600">${p.coin}</span>
+        <span style="color:${p.side==='Long'?'var(--emerald-500)':'var(--rose-500)'};font-size:11px;font-weight:600">${p.side}</span>
+        <span style="font-size:11px;color:var(--text-muted)">${p.leverage}x</span>
+        <span>$${p.margin.toFixed(2)}</span>
+        <span style="color:${p.upnl>=0?'var(--emerald-500)':'var(--rose-500)'};font-weight:600">${p.upnl>=0?'+':''}$${p.upnl.toFixed(2)}</span>
+        <span style="text-align:right;color:${p.pnlPct>=0?'var(--emerald-500)':'var(--rose-500)'};font-weight:600">${p.pnlPct>=0?'+':''}${p.pnlPct.toFixed(1)}%</span>
+      </div>`).join('')}
+      <div style="display:grid;grid-template-columns:80px 50px 40px 1fr 90px 90px;gap:4px;padding:8px;font-size:12px;font-weight:600;border-top:1px solid var(--border-light);margin-top:4px">
+        <span>Total</span><span></span><span></span>
+        <span>$${totalMargin.toFixed(2)}</span>
+        <span style="color:${totalUpnl>=0?'var(--emerald-500)':'var(--rose-500)'}">${totalUpnl>=0?'+':''}$${totalUpnl.toFixed(2)}</span>
+        <span></span>
+      </div>
+      `:'<div style="color:var(--text-muted);font-size:13px;padding:16px 0;text-align:center">No open positions</div>'}
+    </div>
+
+    <!-- Copy Trading -->
+    ${copySubs.length?`
+    <div class="entry-card" style="margin-bottom:16px">
+      <h4 style="margin-bottom:12px">Copy Trading (${copySubs.length} active)</h4>
+      ${copySubs.map(s=>{
+        const vname=all().find(v=>v.id===s.vault_id||v.pk===s.vault_id)?.vault_name||s.vault_id.slice(0,10)+'...';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px">
+          <div><span style="color:var(--emerald-500);font-size:11px;font-weight:700">● Active</span> <span style="font-size:13px;font-weight:600;margin-left:8px">${vname}</span></div>
+          <span style="font-size:11px;color:var(--text-muted)">${s.leverage}x · $${s.margin_per_trade} margin · ${s.trades_count||0} trades</span>
+        </div>`;
+      }).join('')}
+    </div>`:''}
+
+    <!-- Watchlist -->
+    <div class="entry-card">
+      <h4 style="margin-bottom:12px">Watchlist${watchVaults.length?` (${watchVaults.length})`:''}</h4>
+      ${watchVaults.length?watchVaults.map(v=>`
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px;cursor:pointer" onclick="nav('vault',{id:'${v.id}'})">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span onclick="event.stopPropagation();toggleWatchVault('${v.id}');renderPortfolio();" style="cursor:pointer;font-size:16px">★</span>
+          <span style="font-size:13px;font-weight:600">${v.vault_name}</span>
+        </div>
+        <div style="display:flex;gap:16px;font-size:12px;color:var(--text-secondary)">
+          <span>${fmtUsd(v.tvl_usd)} TVL</span>
+          <span style="color:${(v.apy||0)>=0?'var(--emerald-500)':'var(--rose-500)'}">${((v.apy||0)*100).toFixed(1)}% APR</span>
+          <span style="color:var(--sky-400)">View →</span>
+        </div>
+      </div>`).join(''):`
+      <div style="color:var(--text-muted);font-size:13px;padding:16px 0;text-align:center">
+        No vaults in watchlist. Click ★ on any vault detail page to add.
+      </div>`}
+    </div>`;
+  }catch(e){
+    console.error('Portfolio error:',e);
+    el.innerHTML='<div style="color:var(--rose-500);text-align:center;padding:40px">Error loading portfolio: '+e.message+'</div>';
+  }
+}
+
+// Add CSS for portfolio responsive
+(function(){const s=document.createElement('style');s.textContent='@media(max-width:768px){.portfolio-hero{grid-template-columns:repeat(2,1fr)!important}}@media(max-width:480px){.portfolio-hero{grid-template-columns:1fr!important}}';document.head.appendChild(s);})();
 
 // Analytics tracking
 const _vvSid=(()=>{let s=sessionStorage.getItem('vv-sid');if(!s){s=Math.random().toString(36).slice(2)+Date.now().toString(36);sessionStorage.setItem('vv-sid',s);}return s;})();
