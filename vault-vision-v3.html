@@ -5650,13 +5650,15 @@ async function renderPortfolio(){
 
   try{
     // Fetch all data in parallel
-    const [perpsR,spotR,copyR]=await Promise.all([
+    const [perpsR,spotR,vaultR,copyR]=await Promise.all([
       fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'clearinghouseState',user:_walletAddr})}),
       fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'spotClearinghouseState',user:_walletAddr})}),
+      fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'userVaultEquities',user:_walletAddr})}),
       fetch(API_BASE+'/api/copy/status?user='+_walletAddr).catch(()=>({json:()=>({subscriptions:[]})})),
     ]);
     const perps=await perpsR.json();
     const spot=await spotR.json();
+    const vaultDeposits=await vaultR.json();
     const copyData=await copyR.json();
 
     // Parse account data
@@ -5749,6 +5751,37 @@ async function renderPortfolio(){
       </div>
       `:'<div style="color:var(--text-muted);font-size:13px;padding:16px 0;text-align:center">No open positions</div>'}
     </div>
+
+    <!-- Vault Deposits -->
+    ${(vaultDeposits&&vaultDeposits.length)?`
+    <div class="entry-card" style="margin-bottom:16px">
+      <h4 style="margin-bottom:12px">Vault Deposits (${vaultDeposits.length})</h4>
+      ${vaultDeposits.map(vd=>{
+        const eq=parseFloat(vd.equity||0);
+        const vaddr=vd.vaultAddress;
+        const vInfo=all().find(v=>v.pk===vaddr||v.id===vaddr||v.vault_id===vaddr);
+        const vname=vInfo?vInfo.vault_name:vaddr.slice(0,8)+'...'+vaddr.slice(-6);
+        const locked=vd.lockedUntilTimestamp?new Date(parseInt(vd.lockedUntilTimestamp)):null;
+        const isLocked=locked&&locked>new Date();
+        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px;cursor:pointer" onclick="nav('vault',{id:'${vInfo?vInfo.id:vaddr}'})">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--sky-400),var(--emerald-500));display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff">${vname.slice(0,2).toUpperCase()}</div>
+            <div>
+              <div style="font-size:13px;font-weight:600">${vname}</div>
+              ${isLocked?`<div style="font-size:10px;color:var(--text-muted)">Locked until ${locked.toLocaleDateString()}</div>`:''}
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:14px;font-weight:700">${fmtUsd(eq)}</div>
+            <div style="font-size:10px;color:var(--sky-400)">View →</div>
+          </div>
+        </div>`;
+      }).join('')}
+      <div style="font-size:12px;font-weight:600;padding:8px 12px;border-top:1px solid var(--border-light);margin-top:4px;display:flex;justify-content:space-between">
+        <span>Total deposited</span>
+        <span>${fmtUsd(vaultDeposits.reduce((s,vd)=>s+parseFloat(vd.equity||0),0))}</span>
+      </div>
+    </div>`:''}
 
     <!-- Copy Trading -->
     ${copySubs.length?`
