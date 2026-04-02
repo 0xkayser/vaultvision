@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{width:1200px;height:630px;background:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;overflow:hidden;position:relative}
+
+.bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 50% at 20% -20%,rgba(56,189,248,0.12),transparent 50%),radial-gradient(ellipse 60% 40% at 80% 0%,rgba(139,92,246,0.1),transparent 40%),radial-gradient(ellipse 40% 30% at 70% 80%,rgba(0,255,136,0.06),transparent)}
+
+.content{position:relative;z-index:1;padding:80px 80px;height:100%;display:flex;flex-direction:column;justify-content:space-between}
+
+.top{display:flex;align-items:center;gap:16px}
+.logo-box{width:56px;height:56px;background:linear-gradient(135deg,#00d4ff,#00ff88);border-radius:16px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;color:#fff}
+.logo-text{font-size:28px;font-weight:700;color:#f1f5f9}
+.logo-text span{background:linear-gradient(135deg,#00d4ff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+
+h1{font-size:64px;font-weight:800;color:#f1f5f9;line-height:1.15;margin-top:40px;max-width:900px}
+h1 em{font-style:normal;background:linear-gradient(135deg,#00d4ff,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+
+.stats{display:flex;gap:40px;margin-top:auto}
+.stat{display:flex;flex-direction:column;gap:4px}
+.stat-val{font-size:32px;font-weight:800;color:#00d4ff}
+.stat-label{font-size:14px;font-weight:500;color:#64748b;text-transform:uppercase;letter-spacing:1px}
+
+.url{font-size:18px;color:#64748b;font-weight:500;position:absolute;bottom:40px;right:80px}
+
+.grid-dots{position:absolute;right:60px;top:50%;transform:translateY(-50%);opacity:0.08}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+
+<svg class="grid-dots" width="300" height="300" viewBox="0 0 300 300">
+  <defs><pattern id="dots" width="30" height="30" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.5" fill="#00d4ff"/></pattern></defs>
+  <rect width="300" height="300" fill="url(#dots)"/>
+</svg>
+
+<div class="content">
+  <div class="top">
+    <div class="logo-box">VV</div>
+    <div class="logo-text"><span>Vault</span>Vision</div>
+  </div>
+
+  <h1>Vault Analytics for <em>Hyperliquid</em></h1>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-val">100+</div>
+      <div class="stat-label">Vaults Tracked</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val">$500M+</div>
+      <div class="stat-label">TVL Monitored</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val">7</div>
+      <div class="stat-label">AI Strategies</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val">Real-time</div>
+      <div class="stat-label">Risk Scoring</div>
+    </div>
+  </div>
+</div>
+
+<div class="url">vaultvision.tech</div>
+</body>
+</html>
