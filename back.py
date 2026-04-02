@@ -7605,6 +7605,18 @@ class APIHandler(BaseHTTPRequestHandler):
         # OG image for social previews
         if path in ("/og-image.png", "/og-image.svg"):
             try:
+                og_path = os.path.join(os.path.dirname(__file__), "og-image.png")
+                if os.path.exists(og_path):
+                    with open(og_path, "rb") as f:
+                        png_bytes = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Cache-Control", "public, max-age=3600")
+                    self.end_headers()
+                    self.wfile.write(png_bytes)
+                    return
+
+                # Fallback: dynamic generation
                 from PIL import Image, ImageDraw, ImageFont
                 import io
 
