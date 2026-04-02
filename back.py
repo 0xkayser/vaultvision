@@ -8099,54 +8099,6 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"trades": [dict(t) for t in trades]})
             return
 
-        # ─── Analytics ─────────────────────────────────────────────────
-        # POST /api/analytics/track — pixel endpoint for page views
-        if path == "/api/analytics/track":
-            try:
-                import hashlib
-                content_len = int(self.headers.get('Content-Length', 0))
-                body = json.loads(self.rfile.read(content_len)) if content_len else {}
-                ts = int(time.time())
-                page_path = body.get("path", "/")
-                session_id = body.get("sid", "")
-                wallet = body.get("wallet", "")
-                referer = body.get("ref", "")
-                ua = self.headers.get("User-Agent", "")[:200]
-                # Hash IP for privacy
-                raw_ip = self.client_address[0] if self.client_address else ""
-                ip_hash = hashlib.sha256((raw_ip + "vv-salt-2026").encode()).hexdigest()[:16]
-                conn = get_db()
-                conn.execute(
-                    "INSERT INTO page_views (ts, path, ip_hash, user_agent, referer, session_id, wallet_addr) VALUES (?,?,?,?,?,?,?)",
-                    (ts, page_path, ip_hash, ua, referer, session_id, wallet or None)
-                )
-                # Upsert daily stats
-                today = time.strftime("%Y-%m-%d")
-                conn.execute("""
-                    INSERT INTO daily_stats (date, views, unique_visitors, wallet_connects)
-                    VALUES (?, 1, 0, 0)
-                    ON CONFLICT(date) DO UPDATE SET views = views + 1
-                """, (today,))
-                # Count unique visitors for today
-                uv = conn.execute(
-                    "SELECT COUNT(DISTINCT ip_hash) FROM page_views WHERE ts >= ?",
-                    (int(time.mktime(time.strptime(today, "%Y-%m-%d"))),)
-                ).fetchone()[0]
-                wc = conn.execute(
-                    "SELECT COUNT(DISTINCT wallet_addr) FROM page_views WHERE ts >= ? AND wallet_addr IS NOT NULL",
-                    (int(time.mktime(time.strptime(today, "%Y-%m-%d"))),)
-                ).fetchone()[0]
-                conn.execute(
-                    "UPDATE daily_stats SET unique_visitors=?, wallet_connects=? WHERE date=?",
-                    (uv, wc, today)
-                )
-                conn.commit()
-                conn.close()
-                self.send_json({"ok": True})
-            except Exception as e:
-                self.send_json({"ok": False, "error": str(e)})
-            return
-
         # GET /api/analytics/stats — dashboard data
         if path == "/api/analytics/stats":
             try:
@@ -9240,6 +9192,45 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "Invalid JSON"}, 400)
             return
         
+        # POST /api/analytics/track
+        if path == "/api/analytics/track":
+            try:
+                import hashlib
+                ts = int(time.time())
+                page_path = data.get("path", "/")
+                session_id = data.get("sid", "")
+                wallet = data.get("wallet", "")
+                referer = data.get("ref", "")
+                ua = self.headers.get("User-Agent", "")[:200]
+                raw_ip = self.client_address[0] if self.client_address else ""
+                ip_hash = hashlib.sha256((raw_ip + "vv-salt-2026").encode()).hexdigest()[:16]
+                conn = get_db()
+                conn.execute(
+                    "INSERT INTO page_views (ts, path, ip_hash, user_agent, referer, session_id, wallet_addr) VALUES (?,?,?,?,?,?,?)",
+                    (ts, page_path, ip_hash, ua, referer, session_id, wallet or None)
+                )
+                today = time.strftime("%Y-%m-%d")
+                conn.execute("""
+                    INSERT INTO daily_stats (date, views, unique_visitors, wallet_connects)
+                    VALUES (?, 1, 0, 0)
+                    ON CONFLICT(date) DO UPDATE SET views = views + 1
+                """, (today,))
+                uv = conn.execute(
+                    "SELECT COUNT(DISTINCT ip_hash) FROM page_views WHERE ts >= ?",
+                    (int(time.mktime(time.strptime(today, "%Y-%m-%d"))),)
+                ).fetchone()[0]
+                wc = conn.execute(
+                    "SELECT COUNT(DISTINCT wallet_addr) FROM page_views WHERE ts >= ? AND wallet_addr IS NOT NULL",
+                    (int(time.mktime(time.strptime(today, "%Y-%m-%d"))),)
+                ).fetchone()[0]
+                conn.execute("UPDATE daily_stats SET unique_visitors=?, wallet_connects=? WHERE date=?", (uv, wc, today))
+                conn.commit()
+                conn.close()
+                self.send_json({"ok": True})
+            except Exception as e:
+                self.send_json({"ok": False, "error": str(e)})
+            return
+
         if path == "/api/paper-trading/run":
             try:
                 import paper_trade as pt
