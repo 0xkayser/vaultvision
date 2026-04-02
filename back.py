@@ -604,9 +604,33 @@ def init_db():
             hl_response TEXT
         )
     """)
+    # Analytics: page views
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS page_views (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            path TEXT NOT NULL,
+            ip_hash TEXT,
+            user_agent TEXT,
+            referer TEXT,
+            session_id TEXT,
+            wallet_addr TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS daily_stats (
+            date TEXT PRIMARY KEY,
+            views INTEGER DEFAULT 0,
+            unique_visitors INTEGER DEFAULT 0,
+            wallet_connects INTEGER DEFAULT 0
+        )
+    """)
+
     try:
         c.execute("CREATE INDEX IF NOT EXISTS idx_copy_log_user ON copy_trade_log(user_address, ts DESC)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_copy_subs_active ON copy_subscriptions(is_active, vault_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_pv_ts ON page_views(ts)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_pv_session ON page_views(session_id)")
     except sqlite3.OperationalError:
         pass
 
@@ -8073,6 +8097,109 @@ class APIHandler(BaseHTTPRequestHandler):
             trades = conn.execute(q, params).fetchall()
             conn.close()
             self.send_json({"trades": [dict(t) for t in trades]})
+            return
+
+        # ─── Analytics ─────────────────────────────────────────────────
+        # POST /api/analytics/track — pixel endpoint for page views
+        if path == "/api/analytics/track":
+            try:
+                import hashlib
+                content_len = int(self.headers.get('Content-Length', 0))
+                body = json.loads(self.rfile.read(content_len)) if content_len else {}
+                ts = int(time.time())
+                page_path = body.get("path", "/")
+                session_id = body.get("sid", "")
+                wallet = body.get("wallet", "")
+                referer = body.get("ref", "")
+                ua = self.headers.get("User-Agent", "")[:200]
+                # Hash IP for privacy
+                raw_ip = self.client_address[0] if self.client_address else ""
+                ip_hash = hashlib.sha256((raw_ip + "vv-salt-2026").encode()).hexdigest()[:16]
+                conn = get_db()
+                conn.execute(
+                    "INSERT INTO page_views (ts, path, ip_hash, user_agent, referer, session_id, wallet_addr) VALUES (?,?,?,?,?,?,?)",
+                    (ts, page_path, ip_hash, ua, referer, session_id, wallet or None)
+                )
+                # Upsert daily stats
+                today = time.strftime("%Y-%m-%d")
+                conn.execute("""
+                    INSERT INTO daily_stats (date, views, unique_visitors, wallet_connects)
+                    VALUES (?, 1, 0, 0)
+                    ON CONFLICT(date) DO UPDATE SET views = views + 1
+                """, (today,))
+                # Count unique visitors for today
+                uv = conn.execute(
+                    "SELECT COUNT(DISTINCT ip_hash) FROM page_views WHERE ts >= ?",
+                    (int(time.mktime(time.strptime(today, "%Y-%m-%d"))),)
+                ).fetchone()[0]
+                wc = conn.execute(
+                    "SELECT COUNT(DISTINCT wallet_addr) FROM page_views WHERE ts >= ? AND wallet_addr IS NOT NULL",
+                    (int(time.mktime(time.strptime(today, "%Y-%m-%d"))),)
+                ).fetchone()[0]
+                conn.execute(
+                    "UPDATE daily_stats SET unique_visitors=?, wallet_connects=? WHERE date=?",
+                    (uv, wc, today)
+                )
+                conn.commit()
+                conn.close()
+                self.send_json({"ok": True})
+            except Exception as e:
+                self.send_json({"ok": False, "error": str(e)})
+            return
+
+        # GET /api/analytics/stats — dashboard data
+        if path == "/api/analytics/stats":
+            try:
+                conn = get_db()
+                today = time.strftime("%Y-%m-%d")
+
+                # Today
+                today_row = conn.execute("SELECT * FROM daily_stats WHERE date=?", (today,)).fetchone()
+
+                # Last 30 days
+                history = conn.execute(
+                    "SELECT date, views, unique_visitors, wallet_connects FROM daily_stats ORDER BY date DESC LIMIT 30"
+                ).fetchall()
+
+                # Totals
+                totals = conn.execute(
+                    "SELECT COUNT(*) as total_views, COUNT(DISTINCT ip_hash) as total_uv, COUNT(DISTINCT session_id) as total_sessions FROM page_views"
+                ).fetchone()
+
+                # Top pages
+                top_pages = conn.execute(
+                    "SELECT path, COUNT(*) as hits FROM page_views GROUP BY path ORDER BY hits DESC LIMIT 10"
+                ).fetchall()
+
+                # Top referrers
+                top_refs = conn.execute(
+                    "SELECT referer, COUNT(*) as hits FROM page_views WHERE referer != '' GROUP BY referer ORDER BY hits DESC LIMIT 10"
+                ).fetchall()
+
+                # Wallets connected (unique)
+                total_wallets = conn.execute(
+                    "SELECT COUNT(DISTINCT wallet_addr) FROM page_views WHERE wallet_addr IS NOT NULL"
+                ).fetchone()[0]
+
+                conn.close()
+                self.send_json({
+                    "today": {
+                        "views": today_row["views"] if today_row else 0,
+                        "unique_visitors": today_row["unique_visitors"] if today_row else 0,
+                        "wallet_connects": today_row["wallet_connects"] if today_row else 0,
+                    },
+                    "history": [dict(h) for h in history],
+                    "totals": {
+                        "views": totals["total_views"],
+                        "unique_visitors": totals["total_uv"],
+                        "sessions": totals["total_sessions"],
+                        "wallets": total_wallets,
+                    },
+                    "top_pages": [{"path": p["path"], "hits": p["hits"]} for p in top_pages],
+                    "top_referrers": [{"ref": r["referer"], "hits": r["hits"]} for r in top_refs],
+                })
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
             return
 
         if path.startswith("/api/v1/"):

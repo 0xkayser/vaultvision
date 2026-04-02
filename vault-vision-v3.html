@@ -2479,6 +2479,7 @@ let curPage='dashboard',dashF='hyperliquid',anaF='hyperliquid',sortK='tvl_usd',s
 
 function nav(p,prm={}){
   curPage=p;
+  if(typeof vvTrack==='function')vvTrack(p+(prm.id?'/'+prm.id:''));
   document.querySelectorAll('#mainNav .nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.p===p));
   document.querySelectorAll('.page').forEach(pg=>pg.classList.remove('active'));
   const t=document.getElementById('pg-'+p);if(t)t.classList.add('active');
@@ -5605,6 +5606,14 @@ async function stopCopyTrading(){
   }catch(e){alert('Error: '+(e.message||e));}
 }
 
+// Analytics tracking
+const _vvSid=(()=>{let s=sessionStorage.getItem('vv-sid');if(!s){s=Math.random().toString(36).slice(2)+Date.now().toString(36);sessionStorage.setItem('vv-sid',s);}return s;})();
+function vvTrack(path){
+  try{fetch(API_BASE+'/api/analytics/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path||location.hash||'/',sid:_vvSid,wallet:_walletAddr||'',ref:document.referrer||''}),keepalive:true}).catch(()=>{});}catch(e){}
+}
+// Track navigation
+const _origNav=typeof nav==='function'?nav:null;
+
 // Init: load data then navigate
 (async function(){
   // Initialize theme, tooltips, wallet
@@ -5612,6 +5621,7 @@ async function stopCopyTrading(){
   initRefBanner();
   initTooltips();
   autoConnectWallet();
+  vvTrack();
   
   // Show/hide landing page before data loads
   initLanding();
