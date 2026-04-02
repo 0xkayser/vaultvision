@@ -7737,6 +7737,22 @@ class APIHandler(BaseHTTPRequestHandler):
                 return
 
         # Serve paper trading dashboard
+        # Serve admin dashboard
+        if path == "/admin" or path == "/admin.html":
+            try:
+                html_path = os.path.join(os.path.dirname(__file__), "admin.html")
+                with open(html_path, "r", encoding="utf-8") as f:
+                    html_content = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                self.wfile.write(html_content.encode("utf-8"))
+                return
+            except Exception as e:
+                self.send_error(500, f"Error serving admin: {e}")
+                return
+
         if path == "/paper-trading" or path == "/paper-trading.html":
             try:
                 html_path = os.path.join(os.path.dirname(__file__), "paper-trading.html")
@@ -8150,6 +8166,19 @@ class APIHandler(BaseHTTPRequestHandler):
                     "top_pages": [{"path": p["path"], "hits": p["hits"]} for p in top_pages],
                     "top_referrers": [{"ref": r["referer"], "hits": r["hits"]} for r in top_refs],
                 })
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+            return
+
+        # GET /api/analytics/recent — last 50 page views
+        if path == "/api/analytics/recent":
+            try:
+                conn = get_db()
+                rows = conn.execute(
+                    "SELECT ts, path, ip_hash, wallet_addr FROM page_views ORDER BY ts DESC LIMIT 50"
+                ).fetchall()
+                conn.close()
+                self.send_json({"events": [{"ts": r["ts"], "path": r["path"], "ip": r["ip_hash"][:8], "wallet": bool(r["wallet_addr"])} for r in rows]})
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
             return

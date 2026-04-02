@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin | VaultVision</title>
+<style>
+:root{
+  --bg-body:#0a0a0f;--bg-card:rgba(30,30,40,0.8);--bg-card-solid:#1a1a24;--border-light:rgba(255,255,255,0.08);
+  --header-bg:rgba(15,15,20,0.85);--text-primary:#f1f5f9;--text-secondary:#94a3b8;--text-muted:#64748b;
+  --table-header-bg:rgba(30,30,40,0.9);--table-hover-bg:rgba(56,189,248,0.08);
+  --gradient-bg:radial-gradient(ellipse 80% 50% at 20% -20%,rgba(56,189,248,0.15),transparent 50%),radial-gradient(ellipse 60% 40% at 80% 0%,rgba(139,92,246,0.12),transparent 40%),linear-gradient(180deg,#0a0a0f,#0f0f1a);
+  --gradient-accent:linear-gradient(135deg,#00d4ff,#00ff88);
+  --emerald:#10b981;--rose:#f43f5e;--sky:#38bdf8;--amber:#fbbf24;--violet:#8b5cf6;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;background:var(--bg-body);color:var(--text-primary);min-height:100vh}
+.bg{position:fixed;inset:0;z-index:-1;background:var(--gradient-bg)}
+.header{padding:16px 32px;background:var(--header-bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border-light)}
+.header-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between}
+.logo{display:flex;align-items:center;gap:8px;text-decoration:none}
+.logo-icon{width:32px;height:32px;background:var(--gradient-accent);border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px}
+.logo-text{font-weight:600;font-size:16px;color:var(--text-primary)}
+.logo-text span{background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.header-right{display:flex;align-items:center;gap:12px}
+.live-dot{width:8px;height:8px;background:var(--emerald);border-radius:50%;animation:pulse 2s infinite}
+.last-update{font-size:11px;color:var(--text-muted)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+.main{max-width:1200px;margin:0 auto;padding:24px 32px}
+
+/* Hero Stats */
+.hero{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px}
+.hero-card{background:var(--bg-card);border:1px solid var(--border-light);border-radius:16px;padding:20px;backdrop-filter:blur(10px)}
+.hero-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:6px}
+.hero-value{font-size:32px;font-weight:700;line-height:1.2}
+.hero-sub{font-size:12px;color:var(--text-secondary);margin-top:4px}
+.hero-value.accent{background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+
+/* Sections */
+.section{margin-bottom:28px}
+.section-title{font-size:16px;font-weight:600;margin-bottom:12px;color:var(--text-secondary)}
+
+/* Chart */
+.chart-wrap{background:var(--bg-card);border:1px solid var(--border-light);border-radius:16px;padding:20px;position:relative}
+.chart-inner{height:240px;position:relative}
+.chart-inner canvas{width:100%!important;height:100%!important}
+.chart-tooltip{position:absolute;background:var(--bg-card-solid);border:1px solid var(--border-light);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:10}
+
+/* Two col */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+
+/* Tables */
+.table-card{background:var(--bg-card);border:1px solid var(--border-light);border-radius:16px;overflow:hidden;backdrop-filter:blur(10px)}
+.table-card h3{font-size:13px;font-weight:600;color:var(--text-secondary);padding:16px 16px 0;text-transform:uppercase;letter-spacing:.3px}
+table{width:100%;border-collapse:collapse}
+th{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);padding:12px 16px;text-align:left;border-bottom:1px solid var(--border-light)}
+td{padding:10px 16px;border-bottom:1px solid var(--border-light);font-size:13px}
+tr:hover td{background:var(--table-hover-bg)}
+.bar{height:4px;border-radius:2px;background:var(--gradient-accent);display:inline-block;vertical-align:middle;margin-left:8px}
+
+/* Recent activity */
+.activity-list{padding:12px 16px;max-height:300px;overflow-y:auto}
+.activity-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-light);font-size:12px}
+.activity-item:last-child{border:none}
+.activity-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.activity-path{color:var(--text-primary);font-weight:500;flex:1}
+.activity-time{color:var(--text-muted);font-size:11px}
+
+/* Responsive */
+@media(max-width:768px){
+  .hero{grid-template-columns:repeat(2,1fr)}
+  .two-col{grid-template-columns:1fr}
+  .main{padding:16px}
+  .header{padding:12px 16px}
+}
+@media(max-width:480px){
+  .hero{grid-template-columns:1fr}
+  .hero-value{font-size:24px}
+}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<header class="header">
+  <div class="header-inner">
+    <a class="logo" href="/"><div class="logo-icon">VV</div><div class="logo-text"><span>Vault</span>Vision</div></a>
+    <div class="header-right">
+      <div class="live-dot"></div>
+      <span class="last-update" id="lastUpdate">Loading...</span>
+    </div>
+  </div>
+</header>
+
+<main class="main">
+  <!-- Hero Stats -->
+  <div class="hero">
+    <div class="hero-card">
+      <div class="hero-label">Views Today</div>
+      <div class="hero-value accent" id="hViews">-</div>
+      <div class="hero-sub" id="hViewsSub"></div>
+    </div>
+    <div class="hero-card">
+      <div class="hero-label">Unique Visitors</div>
+      <div class="hero-value" id="hUV">-</div>
+      <div class="hero-sub" id="hUVSub"></div>
+    </div>
+    <div class="hero-card">
+      <div class="hero-label">Wallets Connected</div>
+      <div class="hero-value" id="hWallets">-</div>
+      <div class="hero-sub" id="hWalletsSub"></div>
+    </div>
+    <div class="hero-card">
+      <div class="hero-label">Total Sessions</div>
+      <div class="hero-value" id="hSessions">-</div>
+      <div class="hero-sub" id="hSessionsSub"></div>
+    </div>
+  </div>
+
+  <!-- Views Chart -->
+  <div class="section">
+    <div class="section-title">Daily Views (30d)</div>
+    <div class="chart-wrap">
+      <div class="chart-inner"><canvas id="viewsChart"></canvas></div>
+      <div class="chart-tooltip" id="chartTooltip"></div>
+    </div>
+  </div>
+
+  <!-- Tables -->
+  <div class="two-col">
+    <div class="table-card">
+      <h3>Top Pages</h3>
+      <table><thead><tr><th>Page</th><th style="text-align:right">Hits</th><th style="width:30%"></th></tr></thead>
+      <tbody id="tPages"></tbody></table>
+    </div>
+    <div class="table-card">
+      <h3>Top Referrers</h3>
+      <table><thead><tr><th>Source</th><th style="text-align:right">Hits</th><th style="width:30%"></th></tr></thead>
+      <tbody id="tRefs"></tbody></table>
+    </div>
+  </div>
+
+  <!-- Recent Activity -->
+  <div class="section" style="margin-top:16px">
+    <div class="table-card">
+      <h3>Recent Activity</h3>
+      <div class="activity-list" id="activityList">
+        <div style="color:var(--text-muted);padding:20px;text-align:center;font-size:12px">Loading...</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+let data = null;
+const API = location.origin;
+
+async function fetchStats() {
+  try {
+    const r = await fetch(API + '/api/analytics/stats');
+    data = await r.json();
+    if (data.error) { console.error(data.error); return; }
+    render();
+  } catch(e) { console.error('Fetch error:', e); }
+}
+
+function render() {
+  if (!data) return;
+  const t = data.today;
+  const totals = data.totals;
+
+  // Hero
+  document.getElementById('hViews').textContent = t.views.toLocaleString();
+  document.getElementById('hViewsSub').textContent = `${totals.views.toLocaleString()} total`;
+  document.getElementById('hUV').textContent = t.unique_visitors.toLocaleString();
+  document.getElementById('hUVSub').textContent = `${totals.unique_visitors.toLocaleString()} total`;
+  document.getElementById('hWallets').textContent = t.wallet_connects.toLocaleString();
+  document.getElementById('hWalletsSub').textContent = `${totals.wallets.toLocaleString()} total`;
+  document.getElementById('hSessions').textContent = totals.sessions.toLocaleString();
+
+  // Top pages
+  const maxHits = Math.max(...(data.top_pages || []).map(p => p.hits), 1);
+  document.getElementById('tPages').innerHTML = (data.top_pages || []).map(p => {
+    const pct = (p.hits / maxHits * 100).toFixed(0);
+    const name = p.path.length > 40 ? p.path.slice(0,37)+'...' : p.path;
+    return `<tr><td style="font-family:monospace;font-size:12px">${esc(name)}</td><td style="text-align:right;font-weight:600">${p.hits}</td><td><div class="bar" style="width:${pct}%"></div></td></tr>`;
+  }).join('') || '<tr><td colspan="3" style="color:var(--text-muted);text-align:center">No data</td></tr>';
+
+  // Top referrers
+  const maxRef = Math.max(...(data.top_referrers || []).map(r => r.hits), 1);
+  document.getElementById('tRefs').innerHTML = (data.top_referrers || []).map(r => {
+    const pct = (r.hits / maxRef * 100).toFixed(0);
+    let src = r.ref;
+    try { src = new URL(r.ref).hostname; } catch(e) {}
+    return `<tr><td style="font-size:12px">${esc(src)}</td><td style="text-align:right;font-weight:600">${r.hits}</td><td><div class="bar" style="width:${pct}%"></div></td></tr>`;
+  }).join('') || '<tr><td colspan="3" style="color:var(--text-muted);text-align:center">No data</td></tr>';
+
+  // Chart
+  drawChart();
+
+  // Recent activity
+  fetchRecent();
+
+  // Update time
+  document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+function drawChart() {
+  const history = (data.history || []).slice().reverse(); // oldest first
+  if (!history.length) return;
+
+  const canvas = document.getElementById('viewsChart');
+  const wrap = canvas.parentElement;
+  const tooltip = document.getElementById('chartTooltip');
+  const dpr = window.devicePixelRatio || 1;
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const pad = {top:20, right:20, bottom:30, left:50};
+  const cw = w - pad.left - pad.right;
+  const ch = h - pad.top - pad.bottom;
+
+  const views = history.map(d => d.views);
+  const uvs = history.map(d => d.unique_visitors);
+  const maxV = Math.max(...views, ...uvs, 1) * 1.1;
+
+  const toX = i => pad.left + (i / Math.max(1, history.length - 1)) * cw;
+  const toY = v => pad.top + (1 - v / maxV) * ch;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i < 5; i++) {
+    const y = pad.top + (i/4) * ch;
+    const val = Math.round(maxV - (i/4) * maxV);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+    ctx.fillStyle = '#64748b';
+    ctx.font = '10px -apple-system,system-ui,sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(val, pad.left - 8, y + 4);
+  }
+
+  // X labels
+  ctx.fillStyle = '#64748b';
+  ctx.textAlign = 'center';
+  const step = Math.max(1, Math.floor(history.length / 6));
+  for (let i = 0; i < history.length; i += step) {
+    const d = history[i].date;
+    ctx.fillText(d.slice(5), toX(i), h - 8); // MM-DD
+  }
+
+  // Views bars
+  const barW = Math.max(2, cw / history.length * 0.6);
+  history.forEach((d, i) => {
+    const x = toX(i) - barW/2;
+    const barH = (d.views / maxV) * ch;
+    const grad = ctx.createLinearGradient(x, toY(d.views), x, pad.top + ch);
+    grad.addColorStop(0, 'rgba(0,212,255,0.8)');
+    grad.addColorStop(1, 'rgba(0,212,255,0.1)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(x, toY(d.views), barW, barH, [2,2,0,0]);
+    ctx.fill();
+  });
+
+  // UV line
+  ctx.strokeStyle = '#10b981';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  uvs.forEach((v, i) => {
+    const x = toX(i), y = toY(v);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // UV dots
+  uvs.forEach((v, i) => {
+    ctx.beginPath();
+    ctx.arc(toX(i), toY(v), 3, 0, Math.PI*2);
+    ctx.fillStyle = '#10b981';
+    ctx.fill();
+  });
+
+  // Legend
+  ctx.font = '11px -apple-system,system-ui,sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(0,212,255,0.8)';
+  ctx.fillRect(pad.left, 6, 12, 4);
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText('Views', pad.left + 16, 12);
+  ctx.fillStyle = '#10b981';
+  ctx.fillRect(pad.left + 70, 6, 12, 4);
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText('Unique', pad.left + 86, 12);
+
+  // Tooltip
+  canvas.onmousemove = e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const idx = Math.round(((mx - pad.left) / cw) * (history.length - 1));
+    if (idx < 0 || idx >= history.length) { tooltip.style.opacity = '0'; return; }
+    const d = history[idx];
+    tooltip.innerHTML = `<strong>${d.date}</strong><br>Views: ${d.views}<br>UV: ${d.unique_visitors}<br>Wallets: ${d.wallet_connects}`;
+    tooltip.style.opacity = '1';
+    tooltip.style.left = Math.min(toX(idx), w - 140) + 'px';
+    tooltip.style.top = (toY(d.views) - 60) + 'px';
+  };
+  canvas.onmouseleave = () => { tooltip.style.opacity = '0'; };
+}
+
+async function fetchRecent() {
+  try {
+    const r = await fetch(API + '/api/analytics/recent');
+    const d = await r.json();
+    if (d.error || !d.events) {
+      document.getElementById('activityList').innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;font-size:12px">No recent activity</div>';
+      return;
+    }
+    const list = document.getElementById('activityList');
+    list.innerHTML = d.events.map(e => {
+      const ago = Math.round((Date.now()/1000 - e.ts) / 60);
+      const agoStr = ago < 60 ? ago + 'm ago' : Math.round(ago/60) + 'h ago';
+      const color = e.wallet ? 'var(--emerald)' : 'var(--sky)';
+      return `<div class="activity-item">
+        <div class="activity-dot" style="background:${color}"></div>
+        <span class="activity-path">${esc(e.path)}</span>
+        ${e.wallet ? '<span style="color:var(--emerald);font-size:10px">WALLET</span>' : ''}
+        <span class="activity-time">${agoStr}</span>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('activityList').innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;font-size:12px">No recent activity</div>';
+  }
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+// Init
+fetchStats();
+setInterval(fetchStats, 60000);
+window.addEventListener('resize', () => { if(data) drawChart(); });
+</script>
+</body>
+</html>
