@@ -5632,14 +5632,16 @@ function toggleWatchVault(pk){
   const idx=wl.indexOf(pk);
   if(idx>=0)wl.splice(idx,1);else wl.push(pk);
   setWatchlist(wl);
-  return idx<0; // true = added
+  return idx<0;
 }
+function _ago(ms){const d=Math.floor(ms/86400000);if(d>0)return d+'d ago';const h=Math.floor(ms/3600000);return h+'h ago';}
+function _pnlColor(v){return v>=0?'var(--emerald-500)':'var(--rose-500)';}
+function _pnlSign(v){return(v>=0?'+':'')+v.toFixed(2);}
 
 async function renderPortfolio(){
   const el=document.getElementById('portfolioContent');
   if(!_walletAddr){
     el.innerHTML=`<div style="text-align:center;padding:80px 20px;color:var(--text-muted)">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.3;margin-bottom:16px"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
       <p style="font-size:16px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Connect wallet to view portfolio</p>
       <button onclick="connectWallet()" style="margin-top:16px;padding:10px 24px;border:none;border-radius:10px;background:var(--gradient-accent);color:#fff;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit">Connect Wallet</button>
     </div>`;
@@ -5661,136 +5663,181 @@ async function renderPortfolio(){
     const vaultDeposits=await vaultR.json();
     const copyData=await copyR.json();
 
+    // Fetch detailed vault info for each deposit (PnL, entry date, ATH)
+    const vaultDetails=await Promise.all((vaultDeposits||[]).map(async vd=>{
+      try{
+        const r=await fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({type:'vaultDetails',vaultAddress:vd.vaultAddress,user:_walletAddr})});
+        const d=await r.json();
+        // Find user's follower entry
+        let me=null;
+        for(const f of (d.followers||[])){if(f.user&&f.user.toLowerCase()===_walletAddr.toLowerCase()){me=f;break;}}
+        // Vault ATH + DD
+        let vaultATH=0,vaultNow=0,vaultPnl=0;
+        for(const entry of (d.portfolio||[])){
+          if(Array.isArray(entry)&&(entry[0]==='allTime'||entry[0]==='perpAllTime')){
+            const avh=entry[1].accountValueHistory||[];
+            if(avh.length){vaultATH=Math.max(...avh.map(h=>parseFloat(h[1])));vaultNow=parseFloat(avh[avh.length-1][1]);}
+            const pnlh=entry[1].pnlHistory||[];
+            if(pnlh.length)vaultPnl=parseFloat(pnlh[pnlh.length-1][1]);
+            break;
+          }
+        }
+        return{
+          addr:vd.vaultAddress,
+          equity:parseFloat(vd.equity||0),
+          locked:vd.lockedUntilTimestamp?parseInt(vd.lockedUntilTimestamp):0,
+          name:d.name||vd.vaultAddress.slice(0,10)+'...',
+          apr:d.apr||0,
+          myPnl:me?parseFloat(me.pnl||0):null,
+          myAllTimePnl:me?parseFloat(me.allTimePnl||0):null,
+          daysFollowing:me?me.daysFollowing:null,
+          entryTime:me?me.vaultEntryTime:null,
+          vaultATH,vaultNow,vaultPnl,
+          vaultDD:vaultATH>0?((vaultNow-vaultATH)/vaultATH*100):0,
+          leaderFraction:parseFloat(d.leaderFraction||0),
+          followers:(d.followers||[]).length,
+        };
+      }catch(e){return{addr:vd.vaultAddress,equity:parseFloat(vd.equity||0),name:vd.vaultAddress.slice(0,10)+'...',error:true};}
+    }));
+
     // Parse account data
     const ms=perps.marginSummary||perps.crossMarginSummary||{};
     const accountValue=parseFloat(ms.accountValue)||0;
-    const totalPnl=parseFloat(ms.totalRawUsd)||0;
     const withdrawable=parseFloat(perps.withdrawable)||0;
-
-    // Spot USDC
     let spotUSDC=0;
     if(spot?.balances){for(const b of spot.balances){if(b.coin==='USDC'||b.token===0)spotUSDC+=parseFloat(b.total||0);}}
 
     // Positions
     const positions=(perps.assetPositions||[]).map(ap=>{
-      const p=ap.position;
-      const sz=parseFloat(p.szi);
+      const p=ap.position;const sz=parseFloat(p.szi);
       if(Math.abs(sz)<0.000001)return null;
-      const entry=parseFloat(p.entryPx);
-      const upnl=parseFloat(p.unrealizedPnl);
-      const margin=parseFloat(p.marginUsed);
-      const lev=p.leverage;
-      const levVal=typeof lev==='object'?parseInt(lev.value):parseInt(lev)||1;
-      return{coin:p.coin,side:sz>0?'Long':'Short',size:Math.abs(sz),entry,upnl,margin,leverage:levVal,
-        pnlPct:margin>0?(upnl/margin*100):0};
+      const upnl=parseFloat(p.unrealizedPnl);const margin=parseFloat(p.marginUsed);
+      const lev=p.leverage;const levVal=typeof lev==='object'?parseInt(lev.value):parseInt(lev)||1;
+      return{coin:p.coin,side:sz>0?'Long':'Short',entry:parseFloat(p.entryPx),upnl,margin,leverage:levVal,pnlPct:margin>0?(upnl/margin*100):0};
     }).filter(Boolean).sort((a,b)=>b.margin-a.margin);
 
     const totalUpnl=positions.reduce((s,p)=>s+p.upnl,0);
     const totalMargin=positions.reduce((s,p)=>s+p.margin,0);
-
-    // Copy trading
     const copySubs=(copyData.subscriptions||[]).filter(s=>s.is_active);
-
-    // Watchlist
     const watchlist=getWatchlist();
     const watchVaults=watchlist.map(pk=>all().find(v=>v.id===pk||v.pk===pk)).filter(Boolean);
 
-    // Render
+    // Total vault equity
+    const totalVaultEq=vaultDetails.reduce((s,v)=>s+v.equity,0);
+    const totalVaultPnl=vaultDetails.reduce((s,v)=>s+(v.myPnl||0),0);
+    const totalNetWorth=accountValue+spotUSDC+totalVaultEq;
+
     const short=_walletAddr.slice(0,6)+'...'+_walletAddr.slice(-4);
     el.innerHTML=`
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-      <h2 style="font-size:20px;font-weight:700">Portfolio</h2>
-      <span style="font-size:13px;color:var(--text-muted);font-family:monospace">${short}</span>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+      <h2 style="font-size:22px;font-weight:700">Portfolio</h2>
+      <span style="font-size:12px;color:var(--text-muted);font-family:monospace;background:rgba(255,255,255,.04);padding:4px 10px;border-radius:6px">${short}</span>
     </div>
 
-    <!-- Hero Stats -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px" class="portfolio-hero">
-      <div class="stat-card">
-        <div class="stat-label">Account Value</div>
-        <div class="stat-value">${fmtUsd(accountValue)}</div>
-        <div class="stat-sub">Perps + Margin</div>
+    <!-- Net Worth Hero -->
+    <div class="entry-card" style="margin-bottom:20px;background:linear-gradient(135deg,rgba(0,212,255,.04),rgba(0,255,136,.04));border:1px solid rgba(0,212,255,.1)">
+      <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px">
+        <div style="font-size:36px;font-weight:800;background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${fmtUsd(totalNetWorth)}</div>
+        <span style="font-size:13px;color:var(--text-muted)">Total Net Worth</span>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Unrealized PnL</div>
-        <div class="stat-value ${totalUpnl>=0?'positive':'negative'}">${totalUpnl>=0?'+':''}$${Math.abs(totalUpnl).toFixed(2)}</div>
-        <div class="stat-sub">${positions.length} position${positions.length!==1?'s':''}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Spot USDC</div>
-        <div class="stat-value">${fmtUsd(spotUSDC)}</div>
-        <div class="stat-sub">Available</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Withdrawable</div>
-        <div class="stat-value">${fmtUsd(withdrawable)}</div>
-        <div class="stat-sub">Free margin</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px" class="portfolio-hero">
+        <div style="background:rgba(255,255,255,.03);border-radius:10px;padding:12px">
+          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Perps Account</div>
+          <div style="font-size:18px;font-weight:700">${fmtUsd(accountValue)}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.03);border-radius:10px;padding:12px">
+          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">In Vaults</div>
+          <div style="font-size:18px;font-weight:700">${fmtUsd(totalVaultEq)}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.03);border-radius:10px;padding:12px">
+          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Vault PnL</div>
+          <div style="font-size:18px;font-weight:700;color:${_pnlColor(totalVaultPnl)}">${_pnlSign(totalVaultPnl)}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.03);border-radius:10px;padding:12px">
+          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Spot USDC</div>
+          <div style="font-size:18px;font-weight:700">${fmtUsd(spotUSDC)}</div>
+        </div>
       </div>
     </div>
 
-    <!-- Open Positions -->
-    <div class="entry-card" style="margin-bottom:16px">
-      <h4 style="margin-bottom:12px">Open Positions${positions.length?` (${positions.length})`:''}</h4>
-      ${positions.length?`
-      <div style="display:grid;grid-template-columns:80px 50px 40px 1fr 90px 90px;gap:4px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;padding:0 8px 8px">
-        <span>Coin</span><span>Side</span><span>Lev</span><span>Margin</span><span>uPnL</span><span style="text-align:right">PnL %</span>
+    <!-- Vault Deposits — Rich Cards -->
+    ${vaultDetails.length?`
+    <div style="margin-bottom:20px">
+      <div style="font-size:14px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Vault Deposits (${vaultDetails.length})
       </div>
-      ${positions.map(p=>`
-      <div style="display:grid;grid-template-columns:80px 50px 40px 1fr 90px 90px;gap:4px;align-items:center;padding:8px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px;font-size:13px">
-        <span style="font-weight:600">${p.coin}</span>
-        <span style="color:${p.side==='Long'?'var(--emerald-500)':'var(--rose-500)'};font-size:11px;font-weight:600">${p.side}</span>
-        <span style="font-size:11px;color:var(--text-muted)">${p.leverage}x</span>
-        <span>$${p.margin.toFixed(2)}</span>
-        <span style="color:${p.upnl>=0?'var(--emerald-500)':'var(--rose-500)'};font-weight:600">${p.upnl>=0?'+':''}$${p.upnl.toFixed(2)}</span>
-        <span style="text-align:right;color:${p.pnlPct>=0?'var(--emerald-500)':'var(--rose-500)'};font-weight:600">${p.pnlPct>=0?'+':''}${p.pnlPct.toFixed(1)}%</span>
-      </div>`).join('')}
-      <div style="display:grid;grid-template-columns:80px 50px 40px 1fr 90px 90px;gap:4px;padding:8px;font-size:12px;font-weight:600;border-top:1px solid var(--border-light);margin-top:4px">
-        <span>Total</span><span></span><span></span>
-        <span>$${totalMargin.toFixed(2)}</span>
-        <span style="color:${totalUpnl>=0?'var(--emerald-500)':'var(--rose-500)'}">${totalUpnl>=0?'+':''}$${totalUpnl.toFixed(2)}</span>
-        <span></span>
-      </div>
-      `:'<div style="color:var(--text-muted);font-size:13px;padding:16px 0;text-align:center">No open positions</div>'}
-    </div>
-
-    <!-- Vault Deposits -->
-    ${(vaultDeposits&&vaultDeposits.length)?`
-    <div class="entry-card" style="margin-bottom:16px">
-      <h4 style="margin-bottom:12px">Vault Deposits (${vaultDeposits.length})</h4>
-      ${vaultDeposits.map(vd=>{
-        const eq=parseFloat(vd.equity||0);
-        const vaddr=vd.vaultAddress;
-        const vInfo=all().find(v=>v.pk===vaddr||v.id===vaddr||v.vault_id===vaddr);
-        const vname=vInfo?vInfo.vault_name:vaddr.slice(0,8)+'...'+vaddr.slice(-6);
-        const locked=vd.lockedUntilTimestamp?new Date(parseInt(vd.lockedUntilTimestamp)):null;
-        const isLocked=locked&&locked>new Date();
-        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px;cursor:pointer" onclick="nav('vault',{id:'${vInfo?vInfo.id:vaddr}'})">
-          <div style="display:flex;align-items:center;gap:10px">
-            <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--sky-400),var(--emerald-500));display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff">${vname.slice(0,2).toUpperCase()}</div>
+      ${vaultDetails.map(v=>{
+        const pnlPct=v.equity>0&&v.myPnl!=null?((v.myPnl/(v.equity-v.myPnl))*100):0;
+        const entryDate=v.entryTime?new Date(v.entryTime).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';
+        const vId=all().find(x=>x.pk===v.addr||x.id===v.addr)?.id||v.addr;
+        return `<div class="entry-card" style="margin-bottom:8px;cursor:pointer;transition:transform .15s" onclick="nav('vault',{id:'${vId}'})" onmouseenter="this.style.transform='translateY(-2px)'" onmouseleave="this.style.transform=''">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
             <div>
-              <div style="font-size:13px;font-weight:600">${vname}</div>
-              ${isLocked?`<div style="font-size:10px;color:var(--text-muted)">Locked until ${locked.toLocaleDateString()}</div>`:''}
+              <div style="font-size:15px;font-weight:700">${v.name}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Entered ${entryDate} · ${v.daysFollowing||'?'}d · ${v.followers} depositors</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:20px;font-weight:800">${fmtUsd(v.equity)}</div>
+              <div style="font-size:12px;font-weight:700;color:${_pnlColor(v.myPnl||0)}">${v.myPnl!=null?_pnlSign(v.myPnl):'—'} ${pnlPct?`(${pnlPct>=0?'+':''}${pnlPct.toFixed(1)}%)`:''}</div>
             </div>
           </div>
-          <div style="text-align:right">
-            <div style="font-size:14px;font-weight:700">${fmtUsd(eq)}</div>
-            <div style="font-size:10px;color:var(--sky-400)">View →</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+            <div style="background:rgba(255,255,255,.02);border-radius:8px;padding:8px">
+              <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Your PnL</div>
+              <div style="font-size:14px;font-weight:700;color:${_pnlColor(v.myPnl||0)}">${v.myPnl!=null?'$'+_pnlSign(v.myPnl):'—'}</div>
+            </div>
+            <div style="background:rgba(255,255,255,.02);border-radius:8px;padding:8px">
+              <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Vault APR</div>
+              <div style="font-size:14px;font-weight:700;color:${_pnlColor(v.apr)}">${(v.apr*100).toFixed(1)}%</div>
+            </div>
+            <div style="background:rgba(255,255,255,.02);border-radius:8px;padding:8px">
+              <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Vault DD</div>
+              <div style="font-size:14px;font-weight:700;color:${v.vaultDD<-5?'var(--rose-500)':v.vaultDD<-2?'var(--amber-400)':'var(--emerald-500)'}">${v.vaultDD.toFixed(1)}%</div>
+            </div>
+            <div style="background:rgba(255,255,255,.02);border-radius:8px;padding:8px">
+              <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Leader Stake</div>
+              <div style="font-size:14px;font-weight:700">${(v.leaderFraction*100).toFixed(1)}%</div>
+            </div>
           </div>
         </div>`;
       }).join('')}
-      <div style="font-size:12px;font-weight:600;padding:8px 12px;border-top:1px solid var(--border-light);margin-top:4px;display:flex;justify-content:space-between">
-        <span>Total deposited</span>
-        <span>${fmtUsd(vaultDeposits.reduce((s,vd)=>s+parseFloat(vd.equity||0),0))}</span>
-      </div>
+    </div>`:''}
+
+    <!-- Open Positions -->
+    ${positions.length?`
+    <div class="entry-card" style="margin-bottom:20px">
+      <h4 style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+        <span>Open Positions (${positions.length})</span>
+        <span style="font-size:12px;font-weight:600;color:${_pnlColor(totalUpnl)}">${_pnlSign(totalUpnl)} uPnL</span>
+      </h4>
+      ${positions.map(p=>`
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px">
+        <div style="display:flex;align-items:center;gap:10px;flex:1">
+          <span style="font-weight:700;width:50px">${p.coin}</span>
+          <span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:${p.side==='Long'?'rgba(16,185,129,.12)':'rgba(244,63,94,.12)'};color:${p.side==='Long'?'var(--emerald-500)':'var(--rose-500)'}">${p.side}</span>
+          <span style="font-size:11px;color:var(--text-muted)">${p.leverage}x</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:20px">
+          <span style="font-size:12px;color:var(--text-secondary)">$${p.margin.toFixed(2)}</span>
+          <span style="font-size:13px;font-weight:700;color:${_pnlColor(p.upnl)};min-width:70px;text-align:right">${_pnlSign(p.upnl)}</span>
+          <span style="font-size:11px;font-weight:600;color:${_pnlColor(p.pnlPct)};min-width:50px;text-align:right">${p.pnlPct>=0?'+':''}${p.pnlPct.toFixed(1)}%</span>
+        </div>
+      </div>`).join('')}
     </div>`:''}
 
     <!-- Copy Trading -->
     ${copySubs.length?`
-    <div class="entry-card" style="margin-bottom:16px">
+    <div class="entry-card" style="margin-bottom:20px">
       <h4 style="margin-bottom:12px">Copy Trading (${copySubs.length} active)</h4>
       ${copySubs.map(s=>{
         const vname=all().find(v=>v.id===s.vault_id||v.pk===s.vault_id)?.vault_name||s.vault_id.slice(0,10)+'...';
-        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px">
-          <div><span style="color:var(--emerald-500);font-size:11px;font-weight:700">● Active</span> <span style="font-size:13px;font-weight:600;margin-left:8px">${vname}</span></div>
+        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px;border-radius:8px;background:rgba(16,185,129,.04);border:1px solid rgba(16,185,129,.1);margin-bottom:4px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:var(--emerald-500);font-size:11px;font-weight:700">● Active</span>
+            <span style="font-size:13px;font-weight:600">${vname}</span>
+          </div>
           <span style="font-size:11px;color:var(--text-muted)">${s.leverage}x · $${s.margin_per_trade} margin · ${s.trades_count||0} trades</span>
         </div>`;
       }).join('')}
@@ -5798,21 +5845,23 @@ async function renderPortfolio(){
 
     <!-- Watchlist -->
     <div class="entry-card">
-      <h4 style="margin-bottom:12px">Watchlist${watchVaults.length?` (${watchVaults.length})`:''}</h4>
+      <h4 style="margin-bottom:12px;display:flex;align-items:center;gap:6px">
+        <span style="color:#fbbf24">★</span> Watchlist${watchVaults.length?` (${watchVaults.length})`:''}
+      </h4>
       ${watchVaults.length?watchVaults.map(v=>`
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px;cursor:pointer" onclick="nav('vault',{id:'${v.id}'})">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px;cursor:pointer" onclick="nav('vault',{id:'${v.id}'})">
         <div style="display:flex;align-items:center;gap:8px">
-          <span onclick="event.stopPropagation();toggleWatchVault('${v.id}');renderPortfolio();" style="cursor:pointer;font-size:16px">★</span>
+          <span onclick="event.stopPropagation();toggleWatchVault('${v.id}');renderPortfolio();" style="cursor:pointer;font-size:14px;color:#fbbf24">★</span>
           <span style="font-size:13px;font-weight:600">${v.vault_name}</span>
         </div>
         <div style="display:flex;gap:16px;font-size:12px;color:var(--text-secondary)">
-          <span>${fmtUsd(v.tvl_usd)} TVL</span>
-          <span style="color:${(v.apy||0)>=0?'var(--emerald-500)':'var(--rose-500)'}">${((v.apy||0)*100).toFixed(1)}% APR</span>
-          <span style="color:var(--sky-400)">View →</span>
+          <span>${fmtUsd(v.tvl_usd)}</span>
+          <span style="color:${(v.apy||0)>=0?'var(--emerald-500)':'var(--rose-500)'}">${((v.apy||0)*100).toFixed(1)}%</span>
+          <span style="color:var(--sky-400)">→</span>
         </div>
       </div>`).join(''):`
       <div style="color:var(--text-muted);font-size:13px;padding:16px 0;text-align:center">
-        No vaults in watchlist. Click ★ on any vault detail page to add.
+        No vaults in watchlist. Click ☆ on any vault to add.
       </div>`}
     </div>`;
   }catch(e){
