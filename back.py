@@ -7733,6 +7733,41 @@ class APIHandler(BaseHTTPRequestHandler):
                 return
 
         # Serve frontend HTML
+        # robots.txt
+        if path == "/robots.txt":
+            robots = "User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\nSitemap: https://vaultvision.tech/sitemap.xml\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(robots.encode())
+            return
+
+        # sitemap.xml
+        if path == "/sitemap.xml":
+            try:
+                conn = get_db()
+                vaults = conn.execute("SELECT pk, vault_name, updated_ts FROM vaults WHERE tvl_usd > 50000 AND status = 'active' ORDER BY tvl_usd DESC LIMIT 50").fetchall()
+                conn.close()
+                today = time.strftime("%Y-%m-%d")
+                urls = [
+                    f'  <url><loc>https://vaultvision.tech/</loc><lastmod>{today}</lastmod><changefreq>daily</changefreq><priority>1.0</priority></url>',
+                    f'  <url><loc>https://vaultvision.tech/#analytics</loc><lastmod>{today}</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url>',
+                    f'  <url><loc>https://vaultvision.tech/#compare</loc><lastmod>{today}</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>',
+                    f'  <url><loc>https://vaultvision.tech/#map</loc><lastmod>{today}</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>',
+                    f'  <url><loc>https://vaultvision.tech/paper-trading</loc><lastmod>{today}</lastmod><changefreq>daily</changefreq><priority>0.6</priority></url>',
+                ]
+                for v in vaults:
+                    urls.append(f'  <url><loc>https://vaultvision.tech/#vault/{v["pk"]}</loc><changefreq>daily</changefreq><priority>0.5</priority></url>')
+                sitemap = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + '\n'.join(urls) + '\n</urlset>'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/xml")
+                self.send_header("Cache-Control", "public, max-age=3600")
+                self.end_headers()
+                self.wfile.write(sitemap.encode())
+            except Exception as e:
+                self.send_error(500, f"Sitemap error: {e}")
+            return
+
         if path == "/" or path == "/index.html":
             try:
                 html_path = os.path.join(os.path.dirname(__file__), "vault-vision-v3.html")
