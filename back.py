@@ -6869,10 +6869,7 @@ def run_fetch_job():
                 if tvl is None or tvl < 500000:
                     continue
             
-            # APR filter (skip only if explicitly negative, allow zero/null for protocol vaults)
-            apr = vault.get("apr")
-            if apr is not None and apr < 0:
-                continue
+            # APR filter removed — vaults can have temporary negative APR
             
             filtered.append(vault)
         
