@@ -3948,17 +3948,13 @@ def fetch_hl_vaults_from_scraper() -> List[dict]:
             # 3) vault_name does NOT contain "Liquidator" (already checked above)
             # 4) vault_name is NOT in hard-ban list (already checked above)
             
-            # Apply filter: APR > 0
-            if apr is None or apr <= 0:
+            # Apply filter: APR > 0 (skip for HLP — it's always included)
+            if not is_hlp and (apr is None or apr <= 0):
                 continue
             
-            # Apply filter: TVL threshold (protocol >= 1M, user > 500K)
-            if is_hlp:
-                if tvl < 1_000_000:  # Protocol vaults: >= 1M TVL
-                    continue
-            else:
-                if tvl <= HL_MIN_TVL:  # User vaults: > 500K TVL
-                    continue
+            # Apply filter: TVL threshold (user > 500K, HLP always passes)
+            if not is_hlp and tvl <= HL_MIN_TVL:
+                continue
             
             # Parse create time for age
             create_ts = None
