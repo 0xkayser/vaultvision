@@ -2456,19 +2456,30 @@ async function loadVaults(){
     UV=vaults.filter(v=>!v.is_protocol);
     document.getElementById('lastUpd').textContent='Last updated: '+new Date(d.updated_utc*1000).toLocaleString();
     return true;
-  }catch(e){console.warn('API unavailable, using fallback');useFallback();return false;}
+  }catch(e){
+    console.warn('API unavailable, using fallback');
+    const banner=document.createElement('div');
+    banner.style.cssText='position:fixed;top:0;left:0;right:0;z-index:999;padding:8px 16px;background:rgba(245,158,11,.15);border-bottom:1px solid rgba(245,158,11,.3);text-align:center;font-size:12px;color:#fbbf24;backdrop-filter:blur(10px)';
+    banner.textContent='Using cached data — live API unavailable';
+    document.body.prepend(banner);
+    useFallback();return false;
+  }
 }
 
-// History cache keyed by vault_id + days to prevent shared data between vaults
+// History cache keyed by vault_id + days (LRU, max 50 entries)
 const historyCache = {};
+const _historyCacheOrder = [];
+const _HISTORY_CACHE_MAX = 50;
 async function loadHistory(id,days=90){
   const cacheKey = `${id}:${days}`;
   if(historyCache[cacheKey]) return historyCache[cacheKey];
   try{
     const r=await fetch(API_BASE+'/api/vault/'+id+'/history?days='+days);
     const d=await r.json();
-    // Cache with vault-specific key to prevent collisions
+    // Cache with LRU eviction
     historyCache[cacheKey] = d;
+    _historyCacheOrder.push(cacheKey);
+    while(_historyCacheOrder.length > _HISTORY_CACHE_MAX){const old=_historyCacheOrder.shift();delete historyCache[old];}
     return d;
   }catch(e){return{series:{tvl_usd:[],pnl_usd:[],cum_return_pct:[]},points:[],quality:{tvl:'none',pnl:'none'}};}
 }
@@ -3018,8 +3029,10 @@ function setupChartTooltip(canvas, tooltipEl, guidelineEl) {
     const valStr = isUsd ? fmtUsd(val) : (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
     
     tooltipEl.innerHTML = `<div class="chart-tooltip-date">${dateStr}</div><div class="chart-tooltip-value">${valStr}</div>`;
-    tooltipEl.style.left = (x + 12) + 'px';
-    tooltipEl.style.top = (y - 40) + 'px';
+    const ttW=tooltipEl.offsetWidth||120;
+    const wrapW=tooltipEl.parentElement?.clientWidth||300;
+    tooltipEl.style.left = Math.max(8, Math.min(x + 12, wrapW - ttW - 8)) + 'px';
+    tooltipEl.style.top = Math.max(4, y - 40) + 'px';
     tooltipEl.classList.add('visible');
     
     // Show vertical guideline
@@ -3347,6 +3360,7 @@ function renderVault(id){
 function initFloatingAprs() {
   const bg = document.querySelector('.bg');
   if (!bg || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (window.innerWidth <= 768) return; // Don't create on mobile — saves CPU/battery
   
   function createFloatingApr() {
     // Create wrapper for combining transforms
@@ -4666,14 +4680,15 @@ document.getElementById('map-search').addEventListener('input',function(){
 });
 
 // Resize
-window.addEventListener('resize',()=>{
+let _resizeTimer;
+window.addEventListener('resize',()=>{clearTimeout(_resizeTimer);_resizeTimer=setTimeout(()=>{
   if(curPage==='map'&&mapSvgSel){
     const el=document.getElementById('map-svg');
     const W=el.clientWidth||innerWidth, H=el.clientHeight||(innerHeight-104);
     mapSvgSel.attr('width',W).attr('height',H);
     if(mapMode==='scatter') mapPositionScatter(true);
   }
-});
+},200);});
 
 // ─── DRAG ──────────────────────────────────────────────────────────
 function mds(e,d){
