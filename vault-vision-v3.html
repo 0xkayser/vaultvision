@@ -6070,7 +6070,10 @@ function drawPortfolioChart(canvasId,history){
 
 // Analytics tracking
 const _vvSid=(()=>{let s=sessionStorage.getItem('vv-sid');if(!s){s=Math.random().toString(36).slice(2)+Date.now().toString(36);sessionStorage.setItem('vv-sid',s);}return s;})();
+const _VV_ADMIN_WALLETS=['0xff94bcf0171ad504c72790e5490bff40508ae4ab'];
 function vvTrack(path){
+  if(localStorage.getItem('vv-admin')==='1')return;
+  if(_walletAddr&&_VV_ADMIN_WALLETS.includes(_walletAddr.toLowerCase())){localStorage.setItem('vv-admin','1');return;}
   try{fetch(API_BASE+'/api/analytics/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path||location.hash||'/',sid:_vvSid,wallet:_walletAddr||'',ref:document.referrer||''}),keepalive:true}).catch(()=>{});}catch(e){}
 }
 // Track navigation
