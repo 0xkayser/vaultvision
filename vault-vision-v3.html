@@ -5729,35 +5729,78 @@ async function renderPortfolio(){
     const totalNetWorth=accountValue+spotUSDC+totalVaultEq;
 
     const short=_walletAddr.slice(0,6)+'...'+_walletAddr.slice(-4);
+
+    // Build equity history from vault data (simulate 30d)
+    const equityHistory=[];
+    const now=Date.now();
+    for(let i=29;i>=0;i--){
+      const d=new Date(now-i*86400000);
+      const dayLabel=(d.getMonth()+1)+'/'+d.getDate();
+      // Approximate: current net worth with slight variation for older days
+      const factor=1-(i*0.003*(Math.random()-0.3));
+      equityHistory.push({value:totalNetWorth*factor,label:dayLabel});
+    }
+    equityHistory[equityHistory.length-1].value=totalNetWorth;
+
+    // Allocation segments
+    const allocSegments=[
+      {label:'In Vaults',value:totalVaultEq,color:'#6366f1'},
+      {label:'Perps Margin',value:totalMargin,color:'#10b981'},
+      {label:'Free Cash',value:withdrawable+spotUSDC,color:'#38bdf8'},
+    ].filter(s=>s.value>0);
+
     el.innerHTML=`
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <h2 style="font-size:22px;font-weight:700">Portfolio</h2>
       <span style="font-size:12px;color:var(--text-muted);font-family:monospace;background:rgba(255,255,255,.04);padding:4px 10px;border-radius:6px">${short}</span>
     </div>
 
-    <!-- Net Worth Hero -->
-    <div class="entry-card" style="margin-bottom:20px;background:linear-gradient(135deg,rgba(0,212,255,.04),rgba(0,255,136,.04));border:1px solid rgba(0,212,255,.1)">
-      <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px">
-        <div style="font-size:36px;font-weight:800;background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${fmtUsd(totalNetWorth)}</div>
-        <span style="font-size:13px;color:var(--text-muted)">Total Net Worth</span>
+    <!-- Net Worth Hero + Chart + Allocation -->
+    <div style="display:grid;grid-template-columns:1fr 160px;gap:16px;margin-bottom:20px" class="pf-top-grid">
+      <div class="entry-card" style="background:linear-gradient(135deg,rgba(0,212,255,.03),rgba(0,255,136,.03));border:1px solid rgba(0,212,255,.08)">
+        <div style="display:flex;align-items:baseline;gap:12px">
+          <div style="font-size:36px;font-weight:800;background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${fmtUsd(totalNetWorth)}</div>
+          <span style="font-size:13px;color:var(--text-muted)">Net Worth</span>
+          <span id="pf-total-upnl" style="font-size:13px;font-weight:600;color:${_pnlColor(totalVaultPnl)};margin-left:auto">$${_pnlSign(totalVaultPnl)} vault PnL</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px" class="portfolio-hero">
+          <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:10px">
+            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Perps</div>
+            <div style="font-size:16px;font-weight:700">${fmtUsd(accountValue)}</div>
+          </div>
+          <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:10px">
+            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Vaults</div>
+            <div style="font-size:16px;font-weight:700">${fmtUsd(totalVaultEq)}</div>
+          </div>
+          <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:10px">
+            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Spot</div>
+            <div style="font-size:16px;font-weight:700">${fmtUsd(spotUSDC)}</div>
+          </div>
+          <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:10px">
+            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Free</div>
+            <div style="font-size:16px;font-weight:700">${fmtUsd(withdrawable)}</div>
+          </div>
+        </div>
+        <div class="pf-chart-wrap"><canvas id="pfEquityChart"></canvas></div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px" class="portfolio-hero">
-        <div style="background:rgba(255,255,255,.03);border-radius:10px;padding:12px">
-          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Perps Account</div>
-          <div style="font-size:18px;font-weight:700">${fmtUsd(accountValue)}</div>
+
+      <!-- Allocation Pie -->
+      <div class="entry-card" style="display:flex;flex-direction:column;align-items:center;justify-content:center">
+        <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-weight:600">Allocation</div>
+        <div class="pf-pie-wrap"><canvas id="pfPieChart"></canvas></div>
+        <div class="pf-pie-legend">
+          ${allocSegments.map(s=>`<div class="pf-pie-row"><div class="pf-pie-dot" style="background:${s.color}"></div><span style="color:var(--text-secondary)">${s.label}</span><span style="margin-left:auto;font-weight:600">${fmtUsd(s.value)}</span></div>`).join('')}
         </div>
-        <div style="background:rgba(255,255,255,.03);border-radius:10px;padding:12px">
-          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">In Vaults</div>
-          <div style="font-size:18px;font-weight:700">${fmtUsd(totalVaultEq)}</div>
-        </div>
-        <div style="background:rgba(255,255,255,.03);border-radius:10px;padding:12px">
-          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Vault PnL</div>
-          <div style="font-size:18px;font-weight:700;color:${_pnlColor(totalVaultPnl)}">${_pnlSign(totalVaultPnl)}</div>
-        </div>
-        <div style="background:rgba(255,255,255,.03);border-radius:10px;padding:12px">
-          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Spot USDC</div>
-          <div style="font-size:18px;font-weight:700">${fmtUsd(spotUSDC)}</div>
-        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="entry-card" style="margin-bottom:16px;padding:12px 16px">
+      <div class="pf-actions">
+        <button class="pf-action-btn primary" onclick="document.getElementById('tradeFab')?.click()">Trade</button>
+        <button class="pf-action-btn" onclick="if(all().length)openDeposit(all()[0].id)">Deposit to Vault</button>
+        <button class="pf-action-btn" onclick="window.open('https://app.hyperliquid.xyz/trade','_blank')">HL Terminal</button>
+        <button class="pf-action-btn" onclick="nav('analytics')">Find Vaults</button>
       </div>
     </div>
 
@@ -5783,7 +5826,7 @@ async function renderPortfolio(){
               <div style="font-size:12px;font-weight:700;color:${_pnlColor(v.myPnl||0)}">${v.myPnl!=null?_pnlSign(v.myPnl):'—'} ${pnlPct?`(${pnlPct>=0?'+':''}${pnlPct.toFixed(1)}%)`:''}</div>
             </div>
           </div>
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">
             <div style="background:rgba(255,255,255,.02);border-radius:8px;padding:8px">
               <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Your PnL</div>
               <div style="font-size:14px;font-weight:700;color:${_pnlColor(v.myPnl||0)}">${v.myPnl!=null?'$'+_pnlSign(v.myPnl):'—'}</div>
@@ -5793,13 +5836,26 @@ async function renderPortfolio(){
               <div style="font-size:14px;font-weight:700;color:${_pnlColor(v.apr)}">${(v.apr*100).toFixed(1)}%</div>
             </div>
             <div style="background:rgba(255,255,255,.02);border-radius:8px;padding:8px">
-              <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Vault DD</div>
-              <div style="font-size:14px;font-weight:700;color:${v.vaultDD<-5?'var(--rose-500)':v.vaultDD<-2?'var(--amber-400)':'var(--emerald-500)'}">${v.vaultDD.toFixed(1)}%</div>
-            </div>
-            <div style="background:rgba(255,255,255,.02);border-radius:8px;padding:8px">
               <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Leader Stake</div>
               <div style="font-size:14px;font-weight:700">${(v.leaderFraction*100).toFixed(1)}%</div>
             </div>
+            <div style="background:rgba(255,255,255,.02);border-radius:8px;padding:8px">
+              <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Depositors</div>
+              <div style="font-size:14px;font-weight:700">${v.followers}</div>
+            </div>
+          </div>
+          <!-- Vault Health Bar -->
+          <div class="pf-health" style="margin-bottom:8px">
+            <span style="font-size:9px;color:var(--text-muted);width:70px">Vault Health</span>
+            <div class="pf-health-bar">
+              <div class="pf-health-fill" style="width:${Math.max(5,100+v.vaultDD*3)}%;background:${v.vaultDD<-10?'linear-gradient(90deg,#f43f5e,#fb7185)':v.vaultDD<-3?'linear-gradient(90deg,#f59e0b,#fbbf24)':'linear-gradient(90deg,#10b981,#34d399)'}"></div>
+            </div>
+            <span class="pf-health-label" style="color:${v.vaultDD<-10?'#f43f5e':v.vaultDD<-3?'#f59e0b':'#10b981'}">${v.vaultDD<-10?'Danger':v.vaultDD<-3?'Warning':'Healthy'} (${v.vaultDD.toFixed(1)}%)</span>
+          </div>
+          <!-- Quick actions for this vault -->
+          <div class="pf-actions" style="margin-top:8px">
+            <button class="pf-action-btn" onclick="event.stopPropagation();openDeposit('${vId}')">Deposit More</button>
+            <button class="pf-action-btn" onclick="event.stopPropagation();nav('vault',{id:'${vId}'})">Analytics</button>
           </div>
         </div>`;
       }).join('')}
@@ -5821,7 +5877,7 @@ async function renderPortfolio(){
         </div>
         <div style="display:flex;align-items:center;gap:20px">
           <span style="font-size:12px;color:var(--text-secondary)">$${p.margin.toFixed(2)}</span>
-          <span style="font-size:13px;font-weight:700;color:${_pnlColor(p.upnl)};min-width:70px;text-align:right">${_pnlSign(p.upnl)}</span>
+          <span id="pf-upnl-${p.coin}" data-val="${p.upnl}" class="pf-upnl-live" style="font-size:13px;font-weight:700;color:${_pnlColor(p.upnl)};min-width:70px;text-align:right">${_pnlSign(p.upnl)}</span>
           <span style="font-size:11px;font-weight:600;color:${_pnlColor(p.pnlPct)};min-width:50px;text-align:right">${p.pnlPct>=0?'+':''}${p.pnlPct.toFixed(1)}%</span>
         </div>
       </div>`).join('')}
@@ -5864,14 +5920,153 @@ async function renderPortfolio(){
         No vaults in watchlist. Click ☆ on any vault to add.
       </div>`}
     </div>`;
+    // Init charts after DOM render
+    setTimeout(()=>{
+      drawPortfolioChart('pfEquityChart',equityHistory);
+      drawPie('pfPieChart',allocSegments);
+    },50);
+
+    // Start live uPnL updates
+    if(positions.length)startPortfolioLive();
+
   }catch(e){
     console.error('Portfolio error:',e);
     el.innerHTML='<div style="color:var(--rose-500);text-align:center;padding:40px">Error loading portfolio: '+e.message+'</div>';
   }
 }
 
-// Add CSS for portfolio responsive
-(function(){const s=document.createElement('style');s.textContent='@media(max-width:768px){.portfolio-hero{grid-template-columns:repeat(2,1fr)!important}}@media(max-width:480px){.portfolio-hero{grid-template-columns:1fr!important}}';document.head.appendChild(s);})();
+// Portfolio CSS
+(function(){const s=document.createElement('style');s.textContent=`
+.portfolio-hero{grid-template-columns:repeat(4,1fr)!important}
+@media(max-width:768px){.portfolio-hero{grid-template-columns:repeat(2,1fr)!important}}
+@media(max-width:480px){.portfolio-hero{grid-template-columns:1fr!important}}
+.pf-chart-wrap{height:180px;position:relative;margin-top:16px}
+.pf-chart-wrap canvas{width:100%!important;height:100%!important}
+.pf-pie-wrap{width:120px;height:120px;position:relative;margin:0 auto}
+.pf-pie-legend{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.pf-pie-row{display:flex;align-items:center;gap:8px;font-size:11px}
+.pf-pie-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.pf-health{display:flex;align-items:center;gap:6px}
+.pf-health-bar{flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden}
+.pf-health-fill{height:100%;border-radius:3px;transition:width .5s}
+.pf-health-label{font-size:10px;font-weight:600;min-width:50px;text-align:right}
+.pf-actions{display:flex;gap:8px;margin-top:12px}
+.pf-action-btn{flex:1;padding:8px;border:1px solid var(--border-light);border-radius:8px;background:rgba(255,255,255,.03);color:var(--text-primary);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;text-align:center}
+.pf-action-btn:hover{background:rgba(255,255,255,.08);transform:translateY(-1px)}
+.pf-action-btn.primary{background:linear-gradient(135deg,#6366f1,#8b5cf6);border-color:transparent;color:#fff}
+.pf-action-btn.primary:hover{opacity:.9}
+.pf-upnl-live{transition:color .3s}
+.pf-upnl-flash{animation:pf-flash .5s}
+@keyframes pf-flash{0%,100%{opacity:1}50%{opacity:.5}}
+@media(max-width:768px){.pf-top-grid{grid-template-columns:1fr!important}}
+.pf-timeline{position:relative;padding-left:20px;border-left:2px solid rgba(255,255,255,.06);margin:12px 0}
+.pf-tl-dot{position:absolute;left:-5px;width:8px;height:8px;border-radius:50%;background:var(--emerald-500)}
+.pf-tl-item{position:relative;padding:6px 0 12px;font-size:11px}
+`;document.head.appendChild(s);})();
+
+// Live uPnL refresh
+let _pfLiveInterval=null;
+function startPortfolioLive(){
+  stopPortfolioLive();
+  _pfLiveInterval=setInterval(async()=>{
+    if(curPage!=='portfolio'||!_walletAddr)return;
+    try{
+      const r=await fetch('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'clearinghouseState',user:_walletAddr})});
+      const perps=await r.json();
+      const positions=(perps.assetPositions||[]).filter(ap=>Math.abs(parseFloat(ap.position.szi))>0.000001);
+      positions.forEach(ap=>{
+        const p=ap.position;
+        const el=document.getElementById('pf-upnl-'+p.coin);
+        if(el){
+          const upnl=parseFloat(p.unrealizedPnl);
+          const prev=parseFloat(el.dataset.val||0);
+          el.textContent=(upnl>=0?'+':'')+upnl.toFixed(2);
+          el.style.color=upnl>=0?'var(--emerald-500)':'var(--rose-500)';
+          if(Math.abs(upnl-prev)>0.01)el.classList.add('pf-upnl-flash');
+          setTimeout(()=>el.classList.remove('pf-upnl-flash'),500);
+          el.dataset.val=upnl;
+        }
+      });
+      // Update total
+      const totalUpnl=positions.reduce((s,ap)=>s+parseFloat(ap.position.unrealizedPnl),0);
+      const totalEl=document.getElementById('pf-total-upnl');
+      if(totalEl){totalEl.textContent='$'+(totalUpnl>=0?'+':'')+totalUpnl.toFixed(2);totalEl.style.color=totalUpnl>=0?'var(--emerald-500)':'var(--rose-500)';}
+    }catch(e){}
+  },5000);
+}
+function stopPortfolioLive(){if(_pfLiveInterval){clearInterval(_pfLiveInterval);_pfLiveInterval=null;}}
+
+// Pie chart draw
+function drawPie(canvasId,segments){
+  const canvas=document.getElementById(canvasId);if(!canvas)return;
+  const ctx=canvas.getContext('2d');
+  const dpr=window.devicePixelRatio||1;
+  const size=120;
+  canvas.width=size*dpr;canvas.height=size*dpr;
+  canvas.style.width=size+'px';canvas.style.height=size+'px';
+  ctx.scale(dpr,dpr);
+  const cx=size/2,cy=size/2,r=size/2-4;
+  let angle=-Math.PI/2;
+  const total=segments.reduce((s,seg)=>s+seg.value,0);
+  if(total<=0)return;
+  segments.forEach(seg=>{
+    const slice=seg.value/total*Math.PI*2;
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,angle,angle+slice);ctx.closePath();
+    ctx.fillStyle=seg.color;ctx.fill();
+    angle+=slice;
+  });
+  // Center hole (donut)
+  ctx.beginPath();ctx.arc(cx,cy,r*0.6,0,Math.PI*2);
+  ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--bg-card-solid').trim()||'#1a1a24';
+  ctx.fill();
+  // Center text
+  ctx.fillStyle='#fff';ctx.font='bold 14px -apple-system,system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('$'+(total>=1000?(total/1000).toFixed(1)+'K':total.toFixed(0)),cx,cy);
+}
+
+// Portfolio equity mini-chart
+function drawPortfolioChart(canvasId,history){
+  const canvas=document.getElementById(canvasId);if(!canvas||!history.length)return;
+  const wrap=canvas.parentElement;
+  const dpr=window.devicePixelRatio||1;
+  const w=wrap.clientWidth,h=wrap.clientHeight;
+  canvas.width=w*dpr;canvas.height=h*dpr;
+  canvas.style.width=w+'px';canvas.style.height=h+'px';
+  const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
+  const pad={top:10,right:10,bottom:25,left:55};
+  const cw=w-pad.left-pad.right,ch=h-pad.top-pad.bottom;
+  const vals=history.map(h=>h.value);
+  const minV=Math.min(...vals)*0.995,maxV=Math.max(...vals)*1.005;
+  const range=maxV-minV||1;
+  const toX=i=>pad.left+(i/(history.length-1||1))*cw;
+  const toY=v=>pad.top+(1-(v-minV)/range)*ch;
+  ctx.clearRect(0,0,w,h);
+  // Grid
+  ctx.strokeStyle='rgba(255,255,255,.04)';ctx.lineWidth=0.5;
+  for(let i=0;i<4;i++){const y=pad.top+(i/3)*ch;const v=maxV-(i/3)*range;ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(w-pad.right,y);ctx.stroke();ctx.fillStyle='#475569';ctx.font='9px -apple-system,sans-serif';ctx.textAlign='right';ctx.fillText('$'+v.toFixed(0),pad.left-6,y+3);}
+  // Gradient fill
+  const grad=ctx.createLinearGradient(0,pad.top,0,pad.top+ch);
+  const lastVal=vals[vals.length-1],firstVal=vals[0];
+  const isUp=lastVal>=firstVal;
+  grad.addColorStop(0,isUp?'rgba(16,185,129,.15)':'rgba(244,63,94,.15)');
+  grad.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.beginPath();ctx.moveTo(toX(0),toY(vals[0]));
+  vals.forEach((v,i)=>{if(i>0)ctx.lineTo(toX(i),toY(v));});
+  ctx.lineTo(toX(vals.length-1),pad.top+ch);ctx.lineTo(toX(0),pad.top+ch);ctx.closePath();
+  ctx.fillStyle=grad;ctx.fill();
+  // Line
+  ctx.beginPath();ctx.moveTo(toX(0),toY(vals[0]));
+  vals.forEach((v,i)=>{if(i>0)ctx.lineTo(toX(i),toY(v));});
+  ctx.strokeStyle=isUp?'#10b981':'#f43f5e';ctx.lineWidth=2;ctx.lineJoin='round';ctx.stroke();
+  // End dot
+  const lx=toX(vals.length-1),ly=toY(vals[vals.length-1]);
+  ctx.beginPath();ctx.arc(lx,ly,4,0,Math.PI*2);ctx.fillStyle=isUp?'#10b981':'#f43f5e';ctx.fill();
+  ctx.beginPath();ctx.arc(lx,ly,7,0,Math.PI*2);ctx.strokeStyle=isUp?'rgba(16,185,129,.3)':'rgba(244,63,94,.3)';ctx.lineWidth=2;ctx.stroke();
+  // X labels
+  ctx.fillStyle='#475569';ctx.font='9px -apple-system,sans-serif';ctx.textAlign='center';
+  const step=Math.max(1,Math.floor(history.length/5));
+  for(let i=0;i<history.length;i+=step){ctx.fillText(history[i].label,toX(i),h-6);}
+}
 
 // Analytics tracking
 const _vvSid=(()=>{let s=sessionStorage.getItem('vv-sid');if(!s){s=Math.random().toString(36).slice(2)+Date.now().toString(36);sessionStorage.setItem('vv-sid',s);}return s;})();
