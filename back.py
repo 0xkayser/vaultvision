@@ -8209,6 +8209,12 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(e)}, 500)
             return
 
+        # GET /api/analytics/myip — show your IP for admin exclusion
+        if path == "/api/analytics/myip":
+            raw_ip = self.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (self.client_address[0] if self.client_address else "")
+            self.send_json({"ip": raw_ip, "hint": "Add this to VV_ADMIN_IPS env var on Railway (comma-separated)"})
+            return
+
         # GET /api/analytics/recent — last 50 page views
         if path == "/api/analytics/recent":
             try:
@@ -9264,13 +9270,20 @@ class APIHandler(BaseHTTPRequestHandler):
         if path == "/api/analytics/track":
             try:
                 import hashlib
+                # Get real IP (Railway proxies through load balancer)
+                raw_ip = self.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (self.client_address[0] if self.client_address else "")
+                # Skip admin IPs
+                admin_ips = set(os.environ.get("VV_ADMIN_IPS", "").split(","))
+                admin_wallets = {"0xff94bcf0171ad504c72790e5490bff40508ae4ab"}
+                wallet = data.get("wallet", "")
+                if raw_ip in admin_ips or (wallet and wallet.lower() in admin_wallets):
+                    self.send_json({"ok": True, "skipped": "admin"})
+                    return
                 ts = int(time.time())
                 page_path = data.get("path", "/")
                 session_id = data.get("sid", "")
-                wallet = data.get("wallet", "")
                 referer = data.get("ref", "")
                 ua = self.headers.get("User-Agent", "")[:200]
-                raw_ip = self.client_address[0] if self.client_address else ""
                 ip_hash = hashlib.sha256((raw_ip + "vv-salt-2026").encode()).hexdigest()[:16]
                 conn = get_db()
                 conn.execute(
