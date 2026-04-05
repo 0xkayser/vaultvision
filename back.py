@@ -49,7 +49,9 @@ except ImportError:
 # =============================================================================
 # CONFIG
 # =============================================================================
-DB_PATH = "vaultvision.db"
+# Use /data/ for Railway persistent volume, fallback to local
+_data_dir = "/data" if os.path.isdir("/data") else os.path.dirname(__file__)
+DB_PATH = os.path.join(_data_dir, "vaultvision.db")
 DEFAULT_PORT = 8787
 FETCH_INTERVAL_SEC = 15 * 60  # 15 minutes — ensures APR stays fresh
 

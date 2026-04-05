@@ -23,7 +23,9 @@ import os
 import sys
 import requests
 
-DB = "vaultvision.db"
+# Use /data/ for Railway persistent volume, fallback to local
+_data_dir = "/data" if os.path.isdir("/data") else os.path.dirname(os.path.abspath(__file__))
+DB = os.path.join(_data_dir, "vaultvision.db")
 LEADER_COMMISSION = 0.10
 INITIAL_CAPITAL = 10_000
 
@@ -112,10 +114,9 @@ ALL_STRATEGY_NAMES = list(STRATEGIES.keys())
 
 
 def state_file_for(strategy_name):
-    """Get state file path for a strategy."""
-    if strategy_name == "optimal":
-        return "paper_trading_state.json"  # backward compat
-    return f"paper_state_{strategy_name}.json"
+    """Get state file path for a strategy. Uses /data/ on Railway."""
+    fname = "paper_trading_state.json" if strategy_name == "optimal" else f"paper_state_{strategy_name}.json"
+    return os.path.join(_data_dir, fname)
 
 
 def now_ts():
