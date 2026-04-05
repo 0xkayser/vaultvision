@@ -187,15 +187,32 @@ Data-driven, not hype."""
     else:
         prompt = extra_context or "Generate a general VaultVision tweet about vault analytics on Hyperliquid."
 
-    # Call Claude
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        system=STYLE_PROMPT,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    # Call Claude with retry
+    response_text = None
+    for attempt in range(3):
+        try:
+            message = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1000,
+                system=STYLE_PROMPT,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            response_text = message.content[0].text.strip()
+            break
+        except Exception as e:
+            print(f"  Attempt {attempt+1}/3 failed: {e}")
+            if attempt < 2:
+                wait = (attempt + 1) * 5
+                print(f"  Retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                print("  All attempts failed. Saving prompt for manual use.")
+                with open("/tmp/vv_failed_prompt.txt", "w") as f:
+                    f.write(prompt)
+                return {"type": "error", "text": f"Generation failed: {e}", "prompt_saved": "/tmp/vv_failed_prompt.txt"}
 
-    response_text = message.content[0].text.strip()
+    if not response_text:
+        return {"type": "error", "text": "Empty response"}
 
     # Try parsing as JSON (for threads)
     try:

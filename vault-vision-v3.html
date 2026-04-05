@@ -2454,7 +2454,9 @@ async function loadVaults(){
     const vaults=d.vaults||[];
     PV=vaults.filter(v=>v.is_protocol);
     UV=vaults.filter(v=>!v.is_protocol);
+    const updatedAgo=Math.round((Date.now()/1000-d.updated_utc)/60);
     document.getElementById('lastUpd').textContent='Last updated: '+new Date(d.updated_utc*1000).toLocaleString();
+    if(updatedAgo>30){document.getElementById('lastUpd').style.color='#f59e0b';document.getElementById('lastUpd').textContent+=' ('+updatedAgo+'m ago)';}
     return true;
   }catch(e){
     console.warn('API unavailable, using fallback');
@@ -2558,31 +2560,25 @@ function escapeHtml(s){
   if(!s)return '';
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function protoCard(v){
-  const neg=v.apy<0;
-  const ageText=fmtAge(v)!=='N/A'?` · ${fmtAge(v)}`:'';
-  const dqBadge=dataQualityBadge(v.data_quality);
-  return `<div class="card protocol" onclick="nav('vault',{id:'${v.id}'})">
-    ${extLinkBtn(v)}
-    <div class="card-header"><div><div class="card-proto ${v.protocol}">${v.protocol}${dqBadge}</div><div class="card-name">${escapeHtml(v.vault_name)}</div><div class="card-sub">${v.vault_id||''}${ageText}</div></div>
-    <div class="card-apy"><div class="card-apy-label">APR</div><div class="card-apy-val ${neg?'neg':''}">${fmtPct(v.apy)}</div></div></div>
-    <div class="card-stats"><div class="card-stat"><div class="card-stat-label">TVL</div><div class="card-stat-val">${fmtTvl(v.tvl_usd)}</div></div>
-    <div class="card-stat"><div class="card-stat-label">30D</div><div class="card-stat-val ${(v.r30||0)>=0?'positive':'negative'}">${v.r30!=null?fmtPctS(v.r30):'N/A'}</div></div>
-    <div class="card-stat"><div class="card-stat-label">90D</div><div class="card-stat-val ${(v.r90||0)>=0?'positive':'negative'}">${v.r90!=null?fmtPctS(v.r90):'N/A'}</div></div></div></div>`;
-}
-function userCard(v){
-  const neg=v.apy<0,isL=v.protocol==='lighter';
+function vaultCard(v,opts={}){
+  const neg=v.apy<0,isProto=v.is_protocol||opts.proto;
   const riskColor=v.risk_score<=30?'positive':v.risk_score>=70?'negative':'';
   const ageText=fmtAge(v)!=='N/A'?` · ${fmtAge(v)}`:'';
   const dqBadge=dataQualityBadge(v.data_quality);
-  return `<div class="card" onclick="nav('vault',{id:'${v.id}'})">
+  const sub=isProto?(v.vault_id||''):`${v.protocol==='lighter'?'Operator':'Leader'}: ${v.leader||''}`;
+  const thirdStat=isProto
+    ?`<div class="card-stat"><div class="card-stat-label">90D</div><div class="card-stat-val ${(v.r90||0)>=0?'positive':'negative'}">${v.r90!=null?fmtPctS(v.r90):'N/A'}</div></div>`
+    :`<div class="card-stat"><div class="card-stat-label">Risk</div><div class="card-stat-val ${riskColor}">${v.risk_score!=null?v.risk_score+'/100':'N/A'}</div></div>`;
+  return `<div class="card${isProto?' protocol':''}" onclick="nav('vault',{id:'${v.id}'})">
     ${extLinkBtn(v)}
-    <div class="card-header"><div><div class="card-proto ${v.protocol}">${v.protocol}${dqBadge}</div><div class="card-name">${escapeHtml(v.vault_name)}</div><div class="card-sub">${isL?'Operator':'Leader'}: ${v.leader||''}${ageText}</div></div>
+    <div class="card-header"><div><div class="card-proto ${v.protocol}">${v.protocol}${dqBadge}</div><div class="card-name">${escapeHtml(v.vault_name)}</div><div class="card-sub">${sub}${ageText}</div></div>
     <div class="card-apy"><div class="card-apy-label">APR</div><div class="card-apy-val ${neg?'neg':''}">${fmtPct(v.apy)}</div></div></div>
     <div class="card-stats"><div class="card-stat"><div class="card-stat-label">TVL</div><div class="card-stat-val">${fmtTvl(v.tvl_usd)}</div></div>
-    <div class="card-stat"><div class="card-stat-label">Risk</div><div class="card-stat-val ${riskColor}">${v.risk_score!=null?v.risk_score+'/100':'N/A'}</div></div>
+    ${thirdStat}
     <div class="card-stat"><div class="card-stat-label">30D</div><div class="card-stat-val ${(v.r30||0)>=0?'positive':'negative'}">${v.r30!=null?fmtPctS(v.r30):'N/A'}</div></div></div></div>`;
 }
+function protoCard(v){return vaultCard(v,{proto:true});}
+function userCard(v){return vaultCard(v);}
 function renderDash(){
   // Render mini map widget
   setTimeout(renderMiniMap, 80);

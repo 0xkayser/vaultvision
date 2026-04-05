@@ -23,10 +23,12 @@ Self-check:
 
 import argparse
 import json
+import logging
 import math
 import os
 import sqlite3
 import struct
+import sys
 import threading
 import time
 import urllib.request
@@ -34,6 +36,22 @@ import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 from typing import Optional, List, Dict, Any
+
+# Structured JSON logger
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        log = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "level": record.levelname, "msg": record.getMessage()}
+        if record.exc_info and record.exc_info[0]:
+            log["error"] = str(record.exc_info[1])
+        if hasattr(record, "extra_data"):
+            log.update(record.extra_data)
+        return json.dumps(log)
+
+_log_handler = logging.StreamHandler(sys.stdout)
+_log_handler.setFormatter(JsonFormatter())
+logger = logging.getLogger("vv")
+logger.addHandler(_log_handler)
+logger.setLevel(logging.INFO)
 
 # Copy trading dependencies
 try:
@@ -8150,11 +8168,16 @@ class APIHandler(BaseHTTPRequestHandler):
             ).fetchall()
             result = []
             for s in subs:
-                # Get trade count
-                cnt = conn.execute(
-                    "SELECT COUNT(*) as cnt FROM copy_trade_log WHERE user_address=? AND vault_id=? AND order_status='success'",
+                # Get trade counts by status
+                stats = conn.execute(
+                    "SELECT order_status, COUNT(*) as cnt FROM copy_trade_log WHERE user_address=? AND vault_id=? GROUP BY order_status",
                     (user.lower(), s["vault_id"])
-                ).fetchone()["cnt"]
+                ).fetchall()
+                status_counts = {r["order_status"]: r["cnt"] for r in stats}
+                total = sum(status_counts.values())
+                success = status_counts.get("success", 0)
+                failed = status_counts.get("failed", 0)
+                success_rate = (success / total * 100) if total > 0 else None
                 last = conn.execute(
                     "SELECT ts FROM copy_trade_log WHERE user_address=? AND vault_id=? ORDER BY ts DESC LIMIT 1",
                     (user.lower(), s["vault_id"])
@@ -8165,7 +8188,10 @@ class APIHandler(BaseHTTPRequestHandler):
                     "margin_per_trade": s["margin_per_trade"],
                     "max_positions": s["max_positions"],
                     "is_active": bool(s["is_active"]),
-                    "trades_count": cnt,
+                    "trades_count": success,
+                    "trades_failed": failed,
+                    "trades_total": total,
+                    "success_rate": success_rate,
                     "last_trade_ts": last["ts"] if last else None,
                     "created_ts": s["created_ts"],
                 })
