@@ -71,6 +71,7 @@ COPY_ENCRYPTION_KEY = os.environ.get("VV_COPY_KEY", "")
 COPY_MONITOR_INTERVAL_SEC = 120  # Check every 2 minutes
 HL_EXCHANGE_URL = "https://api.hyperliquid.xyz/exchange"
 _hl_meta_cache = {"data": None, "ts": 0}  # cached meta (asset list)
+_hl_meta_lock = threading.Lock()  # thread-safe meta cache access
 
 # Excluded vaults (TASK E: Ban fake HL vaults)
 HL_EXCLUDED_NAMES = {
@@ -578,6 +579,7 @@ def init_db():
             leverage INTEGER DEFAULT 3,
             margin_per_trade REAL DEFAULT 50.0,
             max_positions INTEGER DEFAULT 5,
+            stop_loss_pct REAL DEFAULT -15.0,
             is_active INTEGER DEFAULT 1,
             created_ts INTEGER NOT NULL,
             updated_ts INTEGER NOT NULL,
@@ -4581,21 +4583,24 @@ def decrypt_agent_key(encrypted: str) -> str:
 
 
 def hl_get_meta_cached() -> dict:
-    """Get HL asset meta with 5-min cache."""
+    """Get HL asset meta with 5-min cache (thread-safe)."""
     global _hl_meta_cache
-    if _hl_meta_cache["data"] and time.time() - _hl_meta_cache["ts"] < 300:
-        return _hl_meta_cache["data"]
+    with _hl_meta_lock:
+        if _hl_meta_cache["data"] and time.time() - _hl_meta_cache["ts"] < 300:
+            return _hl_meta_cache["data"]
     try:
         req = urllib.request.Request(HL_API_URL, method="POST",
             data=json.dumps({"type": "meta"}).encode(),
             headers={"Content-Type": "application/json"})
         resp = urllib.request.urlopen(req, timeout=10)
         data = json.loads(resp.read())
-        _hl_meta_cache = {"data": data, "ts": time.time()}
+        with _hl_meta_lock:
+            _hl_meta_cache = {"data": data, "ts": time.time()}
         return data
     except Exception as e:
         print(f"[COPY] Meta fetch error: {e}")
-        return _hl_meta_cache.get("data") or {"universe": []}
+        with _hl_meta_lock:
+            return _hl_meta_cache.get("data") or {"universe": []}
 
 
 def hl_get_all_mids() -> dict:
@@ -4822,19 +4827,22 @@ def copy_trade_monitor_loop():
                     parsed = parse_hl_positions(state)
                     curr_positions = parsed.get("positions", [])
 
-                    # Load previous snapshot
-                    snap = conn.execute(
-                        "SELECT positions_json FROM copy_position_snapshots WHERE vault_id=?",
-                        (vault_id,)
-                    ).fetchone()
-                    prev_positions = json.loads(snap["positions_json"]) if snap else []
-
-                    # Save current snapshot
-                    conn.execute(
-                        "INSERT OR REPLACE INTO copy_position_snapshots (vault_id, positions_json, ts) VALUES (?,?,?)",
-                        (vault_id, json.dumps([{"coin": p["coin"], "direction": p["direction"], "size_usd": p.get("size_usd", 0)} for p in curr_positions]), int(time.time()))
-                    )
-                    conn.commit()
+                    # Atomic snapshot read+write (prevents duplicate orders from race conditions)
+                    conn.execute("BEGIN IMMEDIATE")
+                    try:
+                        snap = conn.execute(
+                            "SELECT positions_json FROM copy_position_snapshots WHERE vault_id=?",
+                            (vault_id,)
+                        ).fetchone()
+                        prev_positions = json.loads(snap["positions_json"]) if snap else []
+                        conn.execute(
+                            "INSERT OR REPLACE INTO copy_position_snapshots (vault_id, positions_json, ts) VALUES (?,?,?)",
+                            (vault_id, json.dumps([{"coin": p["coin"], "direction": p["direction"], "size_usd": p.get("size_usd", 0)} for p in curr_positions]), int(time.time()))
+                        )
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+                        raise
 
                     # Diff — detect opened AND closed positions
                     diff = diff_positions(prev_positions, curr_positions)
@@ -5010,6 +5018,33 @@ def copy_trade_monitor_loop():
                                         (int(time.time()), sub["user_address"], vault_id, coin, f"close_{direction}", 0, "failed", str(e))
                                     )
                                     conn.commit()
+
+                    # === STOP-LOSS check: close all copy positions if user PnL below threshold ===
+                    for sub in subscribers:
+                        stop_loss = sub.get("stop_loss_pct", -15.0) or -15.0
+                        try:
+                            user_addr = sub["user_address"]
+                            user_state = fetch_hl_clearinghouse_state(user_addr)
+                            if not user_state:
+                                continue
+                            ms = user_state.get("marginSummary") or user_state.get("crossMarginSummary") or {}
+                            account_val = float(ms.get("accountValue", 0))
+                            total_raw = float(ms.get("totalRawUsd", 0))
+                            if total_raw > 0 and account_val > 0:
+                                pnl_pct = (account_val - total_raw) / total_raw * 100
+                                if pnl_pct < stop_loss:
+                                    print(f"[COPY] STOP-LOSS triggered for {user_addr[:10]}...: PnL {pnl_pct:.1f}% < {stop_loss}%")
+                                    # Deactivate subscription
+                                    conn.execute("UPDATE copy_subscriptions SET is_active=0, updated_ts=? WHERE user_address=? AND vault_id=?",
+                                        (int(time.time()), user_addr, vault_id))
+                                    conn.commit()
+                                    conn.execute(
+                                        "INSERT INTO copy_trade_log (ts, user_address, vault_id, coin, direction, size_usd, order_status, error_msg) VALUES (?,?,?,?,?,?,?,?)",
+                                        (int(time.time()), user_addr, vault_id, "ALL", "stop_loss", 0, "triggered", f"PnL {pnl_pct:.1f}% < {stop_loss}%")
+                                    )
+                                    conn.commit()
+                        except Exception as e:
+                            print(f"[COPY] Stop-loss check error: {e}")
 
                     time.sleep(1)  # Between vaults
 

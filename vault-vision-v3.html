@@ -21,6 +21,8 @@
 <meta property="og:image:height" content="630">
 <meta property="og:url" content="https://vaultvision.tech/">
 <meta property="og:site_name" content="VaultVision">
+<link rel="canonical" href="https://vaultvision.tech/">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"VaultVision","url":"https://vaultvision.tech","description":"Vault analytics platform for Hyperliquid. Risk scores, whale tracking, position monitoring, and vault rankings.","applicationCategory":"FinanceApplication","operatingSystem":"Web","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"creator":{"@type":"Person","name":"kayser","url":"https://x.com/0xkayser"}}</script>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='grad' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%2300d4ff;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%2300ff88;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='20' fill='url(%23grad)'/%3E%3Ctext x='50' y='70' font-family='-apple-system,BlinkMacSystemFont,SF Pro Display,system-ui,sans-serif' font-size='60' font-weight='700' fill='white' text-anchor='middle'%3EVV%3C/text%3E%3C/svg%3E">
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@msgpack/msgpack@3.0.0-beta2/dist.es5+umd/msgpack.min.js"></script>
@@ -175,6 +177,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text"
 .stat-value{font-size:28px;font-weight:700;color:var(--text-primary)}
 .stat-value.highlight{background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .stat-sub{margin-top:8px;font-size:13px;color:var(--emerald-500)}
+.skeleton{background:linear-gradient(90deg,rgba(255,255,255,.03) 25%,rgba(255,255,255,.06) 50%,rgba(255,255,255,.03) 75%);background-size:200% 100%;animation:skeleton-shimmer 1.5s infinite;border-radius:6px;color:transparent!important;-webkit-text-fill-color:transparent!important}
+@keyframes skeleton-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.loading-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,10,15,.5);backdrop-filter:blur(4px);border-radius:inherit;z-index:5;font-size:12px;color:var(--text-muted)}
 /* Animations */
 @keyframes fadeInUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
@@ -1384,7 +1389,7 @@ tbody tr:last-child td{border-bottom:none}
 </div></header>
 <main class="main">
 <div class="page active" id="pg-dashboard">
-<section class="hero-stats"><div class="stat-card"><div class="stat-label">Total TVL</div><div class="stat-value highlight" id="sTvl">$0</div><div class="stat-sub">Hyperliquid vaults</div></div><div class="stat-card"><div class="stat-label">Best APR</div><div class="stat-value" id="sApr">0%</div><div class="stat-sub" id="sAprV">-</div></div><div class="stat-card"><div class="stat-label">Active Vaults</div><div class="stat-value" id="sCnt">0</div><div class="stat-sub" id="sCntS">-</div></div><div class="stat-card"><div class="stat-label">Protocol</div><div class="stat-value" style="background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">HL</div><div class="stat-sub">Hyperliquid Focused</div></div></section>
+<section class="hero-stats"><div class="stat-card"><div class="stat-label">Total TVL</div><div class="stat-value highlight skeleton" id="sTvl">$0.00M</div><div class="stat-sub">Hyperliquid vaults</div></div><div class="stat-card"><div class="stat-label">Best APR</div><div class="stat-value skeleton" id="sApr">000%</div><div class="stat-sub" id="sAprV">-</div></div><div class="stat-card"><div class="stat-label">Active Vaults</div><div class="stat-value skeleton" id="sCnt">00</div><div class="stat-sub" id="sCntS">-</div></div><div class="stat-card"><div class="stat-label">Protocol</div><div class="stat-value" style="background:var(--gradient-accent);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">HL</div><div class="stat-sub">Hyperliquid Focused</div></div></section>
 <!-- REFERRAL BANNER -->
 <div class="ref-banner" id="refBanner" style="display:none">
   <div class="ref-banner-inner">
@@ -2571,10 +2576,10 @@ function renderDash(){
   // Render mini map widget
   setTimeout(renderMiniMap, 80);
   const a=all(),tvl=a.reduce((s,v)=>s+(v.tvl_usd||0),0),best=a.reduce((b,v)=>(v.apy||0)>(b.apy||0)?v:b,a[0]);
-  document.getElementById('sTvl').textContent=fmtUsd(tvl);
-  document.getElementById('sApr').textContent=fmtPct(best?.apy);
+  document.getElementById('sTvl').textContent=fmtUsd(tvl);document.getElementById('sTvl').classList.remove('skeleton');
+  document.getElementById('sApr').textContent=fmtPct(best?.apy);document.getElementById('sApr').classList.remove('skeleton');
   document.getElementById('sAprV').textContent=best?.vault_name||'-';
-  document.getElementById('sCnt').textContent=a.length;
+  document.getElementById('sCnt').textContent=a.length;document.getElementById('sCnt').classList.remove('skeleton');
   document.getElementById('sCntS').textContent=PV.length+' Protocol · '+UV.length+' User';
   document.getElementById('protoGrid').innerHTML=PV.sort((a,b)=>b.tvl_usd-a.tvl_usd).map(protoCard).join('');
   // HLP Analytics showcase
