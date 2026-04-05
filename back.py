@@ -4565,10 +4565,8 @@ def _get_fernet():
         raise RuntimeError("Copy trading dependencies not installed")
     key = COPY_ENCRYPTION_KEY
     if not key:
-        key = Fernet.generate_key().decode()
-        COPY_ENCRYPTION_KEY = key
-        os.environ["VV_COPY_KEY"] = key
-        print(f"[COPY] Auto-generated encryption key (set VV_COPY_KEY env var in production)")
+        print("[COPY] WARNING: VV_COPY_KEY env var not set. Copy trading encryption disabled.")
+        raise RuntimeError("VV_COPY_KEY env var required for copy trading. Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'")
     if len(key) < 44:
         import hashlib, base64
         key = base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest()).decode()
@@ -7776,8 +7774,13 @@ class APIHandler(BaseHTTPRequestHandler):
                 return
 
         # Serve paper trading dashboard
-        # Serve admin dashboard
+        # Serve admin dashboard (IP-restricted)
         if path == "/admin" or path == "/admin.html":
+            raw_ip = self.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (self.client_address[0] if self.client_address else "")
+            admin_ips = set(filter(None, os.environ.get("VV_ADMIN_IPS", "").split(",")))
+            if not admin_ips or raw_ip not in admin_ips:
+                self.send_error(403, "Forbidden")
+                return
             try:
                 html_path = os.path.join(os.path.dirname(__file__), "admin.html")
                 with open(html_path, "r", encoding="utf-8") as f:
@@ -8154,7 +8157,14 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_json({"trades": [dict(t) for t in trades]})
             return
 
-        # GET /api/analytics/stats — dashboard data
+        # GET /api/analytics/stats — dashboard data (IP-restricted)
+        # GET /api/analytics/recent — also restricted
+        if path in ("/api/analytics/stats", "/api/analytics/recent"):
+            raw_ip = self.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (self.client_address[0] if self.client_address else "")
+            admin_ips = set(filter(None, os.environ.get("VV_ADMIN_IPS", "").split(",")))
+            if admin_ips and raw_ip not in admin_ips:
+                self.send_json({"error": "Forbidden"}, 403)
+                return
         if path == "/api/analytics/stats":
             try:
                 conn = get_db()
@@ -9250,14 +9260,22 @@ class APIHandler(BaseHTTPRequestHandler):
         """Handle POST requests."""
         parsed = urlparse(self.path)
         path = parsed.path
-        
+
+        # Rate limit POST endpoints (30 req/min per IP)
+        client_ip = self.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (self.client_address[0] if self.client_address else "unknown")
+        v1_cleanup_rate_limits()
+        if path != "/api/analytics/track" and not v1_check_rate_limit(client_ip):
+            self.send_json({"error": "Rate limit exceeded"}, 429)
+            return
+
         print(f"[HTTP POST] {path}")
-        
+
         # Read request body
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
-        
-        print(f"[HTTP POST] Body: {body[:200]}")
+
+        if path != "/api/analytics/track":
+            print(f"[HTTP POST] Body: {body[:200]}")
         
         try:
             data = json.loads(body)
@@ -9419,6 +9437,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 user_addr = data.get("user_address", "").lower()
                 vault_id = data.get("vault_id", "")
                 agent_key = data.get("agent_private_key", "")
+                signature = data.get("signature", "")
                 leverage = min(max(int(data.get("leverage", 3)), 1), 50)
                 margin = min(max(float(data.get("margin_per_trade", 50)), 10), 10000)
                 max_pos = min(max(int(data.get("max_positions", 5)), 1), 20)
@@ -9426,6 +9445,25 @@ class APIHandler(BaseHTTPRequestHandler):
                 if not user_addr or not vault_id or not agent_key:
                     self.send_json({"error": "Missing required fields"}, 400)
                     return
+
+                # Validate user address format
+                import re
+                if not re.match(r'^0x[0-9a-f]{40}$', user_addr):
+                    self.send_json({"error": "Invalid user address"}, 400)
+                    return
+
+                # Verify wallet ownership via signature
+                if signature:
+                    try:
+                        from eth_account.messages import encode_defunct
+                        msg = encode_defunct(text=f"VaultVision Copy Trading: {vault_id}")
+                        recovered = Account.recover_message(msg, signature=signature).lower()
+                        if recovered != user_addr:
+                            self.send_json({"error": "Signature does not match user address"}, 403)
+                            return
+                    except Exception as e:
+                        self.send_json({"error": f"Invalid signature: {e}"}, 400)
+                        return
 
                 # Verify agent key is valid
                 try:
@@ -9451,7 +9489,8 @@ class APIHandler(BaseHTTPRequestHandler):
 
             except Exception as e:
                 print(f"[COPY] Subscribe error: {e}")
-                self.send_json({"error": str(e)}, 500)
+                import traceback; traceback.print_exc()
+                self.send_json({"error": "Internal error"}, 500)
 
         elif path == "/api/copy/unsubscribe":
             try:

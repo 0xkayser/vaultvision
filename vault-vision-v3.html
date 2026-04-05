@@ -2548,7 +2548,7 @@ function protoCard(v){
   const dqBadge=dataQualityBadge(v.data_quality);
   return `<div class="card protocol" onclick="nav('vault',{id:'${v.id}'})">
     ${extLinkBtn(v)}
-    <div class="card-header"><div><div class="card-proto ${v.protocol}">${v.protocol}${dqBadge}</div><div class="card-name">${v.vault_name}</div><div class="card-sub">${v.vault_id||''}${ageText}</div></div>
+    <div class="card-header"><div><div class="card-proto ${v.protocol}">${v.protocol}${dqBadge}</div><div class="card-name">${escapeHtml(v.vault_name)}</div><div class="card-sub">${v.vault_id||''}${ageText}</div></div>
     <div class="card-apy"><div class="card-apy-label">APR</div><div class="card-apy-val ${neg?'neg':''}">${fmtPct(v.apy)}</div></div></div>
     <div class="card-stats"><div class="card-stat"><div class="card-stat-label">TVL</div><div class="card-stat-val">${fmtTvl(v.tvl_usd)}</div></div>
     <div class="card-stat"><div class="card-stat-label">30D</div><div class="card-stat-val ${(v.r30||0)>=0?'positive':'negative'}">${v.r30!=null?fmtPctS(v.r30):'N/A'}</div></div>
@@ -2561,7 +2561,7 @@ function userCard(v){
   const dqBadge=dataQualityBadge(v.data_quality);
   return `<div class="card" onclick="nav('vault',{id:'${v.id}'})">
     ${extLinkBtn(v)}
-    <div class="card-header"><div><div class="card-proto ${v.protocol}">${v.protocol}${dqBadge}</div><div class="card-name">${v.vault_name}</div><div class="card-sub">${isL?'Operator':'Leader'}: ${v.leader||''}${ageText}</div></div>
+    <div class="card-header"><div><div class="card-proto ${v.protocol}">${v.protocol}${dqBadge}</div><div class="card-name">${escapeHtml(v.vault_name)}</div><div class="card-sub">${isL?'Operator':'Leader'}: ${v.leader||''}${ageText}</div></div>
     <div class="card-apy"><div class="card-apy-label">APR</div><div class="card-apy-val ${neg?'neg':''}">${fmtPct(v.apy)}</div></div></div>
     <div class="card-stats"><div class="card-stat"><div class="card-stat-label">TVL</div><div class="card-stat-val">${fmtTvl(v.tvl_usd)}</div></div>
     <div class="card-stat"><div class="card-stat-label">Risk</div><div class="card-stat-val ${riskColor}">${v.risk_score!=null?v.risk_score+'/100':'N/A'}</div></div>
@@ -2627,7 +2627,7 @@ function renderBestRisk(){
     const ret=v.r30!=null?fmtPctS(v.r30):(v.apy!=null?fmtPct(v.apy):'N/A');
     return `<tr>
       <td><strong>${rank}</strong></td>
-      <td class="name-link" onclick="nav('vault',{id:'${v.id}'})">${v.vault_name}${badgeHtml}</td>
+      <td class="name-link" onclick="nav('vault',{id:'${v.id}'})">${escapeHtml(v.vault_name)}${badgeHtml}</td>
       <td>${score!=null?score.toFixed(3):'N/A'}
       <td class="${riskColor(v.risk_score)}">${v.risk_score!=null?v.risk_score+'/100':'N/A'}</td>
       <td class="${(v.r30||v.apy||0)>=0?'positive':'negative'}">${ret}</td>
@@ -2808,7 +2808,7 @@ function renderSimilarVaults(currentVault){
   const cards=scored.map(({v})=>{
     const riskColor=v.risk_score<=30?'positive':v.risk_score>=70?'negative':'';
     return `<div class="similar-card" onclick="nav('vault',{id:'${v.id}'})">
-      <div class="similar-card-name">${v.vault_name}</div>
+      <div class="similar-card-name">${escapeHtml(v.vault_name)}</div>
       <div class="similar-card-stats">
         <span>TVL: <span class="similar-card-stat-val">${fmtTvl(v.tvl_usd)}</span></span>
         <span>Risk: <span class="similar-card-stat-val ${riskColor}">${v.risk_score!=null?v.risk_score+'/100':'N/A'}</span></span>
@@ -2849,7 +2849,7 @@ function renderAna(){
     const rankBadge=vRank?`<span title="Verified #${vRank}" style="color:#10b981;font-size:10px;margin-left:2px">✓</span>`:'';
     return `<tr>
     <td>${i+1}${rankBadge}</td>
-    <td class="name-link" onclick="nav('vault',{id:'${v.id}'})">${v.vault_name}</td>
+    <td class="name-link" onclick="nav('vault',{id:'${v.id}'})">${escapeHtml(v.vault_name)}</td>
     <td>${dataQualityBadge(v.data_quality)}</td>
     <td>${fmtTvl(v.tvl_usd)}</td>
     <td class="${(v.apy||0)>=0?'positive':'negative'}">${fmtPct(v.apy)}</td>
@@ -2877,7 +2877,7 @@ function renderComp(){
   if(sel.length<2){document.getElementById('compGrid').innerHTML='<div style="text-align:center;padding:48px;color:var(--slate-400)">Select 2-4 vaults to compare</div>';return;}
   const riskColor=r=>r<=30?'positive':r>=70?'negative':'';
   document.getElementById('compGrid').innerHTML=sel.map(v=>`<div class="compare-card">
-    <h3><span class="card-proto ${v.protocol}">${v.protocol}</span> ${v.vault_name}</h3>
+    <h3><span class="card-proto ${v.protocol}">${v.protocol}</span> ${escapeHtml(v.vault_name)}</h3>
     <div class="compare-row"><span>TVL</span><span>${fmtUsd(v.tvl_usd)}</span></div>
     <div class="compare-row"><span>APR</span><span class="${(v.apy||0)>=0?'positive':'negative'}">${fmtPct(v.apy)}</span></div>
     <div class="compare-row"><span>30D Return</span><span class="${(v.r30||0)>=0?'positive':'negative'}">${v.r30!=null?fmtPctS(v.r30):'N/A'}</span></div>
@@ -3055,7 +3055,7 @@ function renderVault(id){
           ${dataQualityBadge(v.data_quality)}
           ${v.source_kind?`<span class="badge">${v.source_kind.replace(/_/g,' ').toUpperCase()}</span>`:''}
         </div>
-        <h1 class="vault-hero-title">${v.vault_name} <span onclick="event.stopPropagation();const added=toggleWatchVault('${id}');this.textContent=added?'★':'☆';this.title=added?'Remove from watchlist':'Add to watchlist'" style="cursor:pointer;font-size:20px;vertical-align:middle;color:${getWatchlist().includes(id)?'#fbbf24':'var(--text-muted)'}" title="${getWatchlist().includes(id)?'Remove from watchlist':'Add to watchlist'}">${getWatchlist().includes(id)?'★':'☆'}</span></h1>
+        <h1 class="vault-hero-title">${escapeHtml(v.vault_name)} <span onclick="event.stopPropagation();const added=toggleWatchVault('${id}');this.textContent=added?'★':'☆';this.title=added?'Remove from watchlist':'Add to watchlist'" style="cursor:pointer;font-size:20px;vertical-align:middle;color:${getWatchlist().includes(id)?'#fbbf24':'var(--text-muted)'}" title="${getWatchlist().includes(id)?'Remove from watchlist':'Add to watchlist'}">${getWatchlist().includes(id)?'★':'☆'}</span></h1>
         <div class="vault-hero-sub">
           <span>${isL?'Operator':v.leader?'Leader':'ID'}: ${v.leader||v.vault_id||'—'}</span>
           <span>·</span>
@@ -5908,7 +5908,7 @@ async function renderPortfolio(){
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.02);margin-bottom:4px;cursor:pointer" onclick="nav('vault',{id:'${v.id}'})">
         <div style="display:flex;align-items:center;gap:8px">
           <span onclick="event.stopPropagation();toggleWatchVault('${v.id}');renderPortfolio();" style="cursor:pointer;font-size:14px;color:#fbbf24">★</span>
-          <span style="font-size:13px;font-weight:600">${v.vault_name}</span>
+          <span style="font-size:13px;font-weight:600">${escapeHtml(v.vault_name)}</span>
         </div>
         <div style="display:flex;gap:16px;font-size:12px;color:var(--text-secondary)">
           <span>${fmtUsd(v.tvl_usd)}</span>
